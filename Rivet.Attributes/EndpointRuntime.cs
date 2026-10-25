@@ -68,7 +68,8 @@ internal sealed record ResponseContract(
     Type? PayloadType,
     int RepresentationCount,
     ResponseRepresentation? Body,
-    IReadOnlyList<ResponseRepresentation> Binary
+    IReadOnlyList<ResponseRepresentation> Binary,
+    IReadOnlyList<string> RequiredHeaders
 );
 
 internal sealed record ResponseSet(
@@ -218,7 +219,7 @@ internal static class RivetTerminal
         }
 
         EnsureBodyless(contract, response);
-        return new RivetBodyResult(contract, response.StatusCode!.Value, null, null, null, false);
+        return new RivetBodyResult(contract, response, null, null, null, false);
     }
 
     internal static RivetResult Success<T>(EndpointContract contract, T payload)
@@ -241,7 +242,7 @@ internal static class RivetTerminal
         }
 
         EnsureBodyless(contract, response);
-        return new RivetBodyResult(contract, statusCode, null, null, null, false);
+        return new RivetBodyResult(contract, response, null, null, null, false);
     }
 
     internal static RivetResult Error<T>(EndpointContract contract, int statusCode, T payload)
@@ -460,7 +461,8 @@ internal static class RivetTerminal
         }
 
         return new RivetFileResult(
-            response.StatusCode!.Value,
+            contract,
+            response,
             source,
             contentType ?? representation.MediaType,
             downloadName,
@@ -518,7 +520,7 @@ internal static class RivetTerminal
 
         return new RivetBodyResult(
             contract,
-            response.StatusCode!.Value,
+            response,
             payload,
             response.PayloadType,
             representation.MediaType,
@@ -645,8 +647,9 @@ internal static class RivetTerminal
 
     /// <summary>
     /// A subtype instance where a type is declared would serialize undeclared members, unless
-    /// the serializer treats the declared type polymorphically (attributes or a resolver),
-    /// so this runs where the adapter has the host's serializer options.
+    /// the serializer treats the declared type polymorphically. The adapter has already refused
+    /// options whose resolver could add that outside the attributes, so the host's type info
+    /// here reflects <c>[JsonPolymorphic]</c>/<c>[JsonDerivedType]</c>, the same as the spec.
     /// </summary>
     internal static void EnsureDeclaredRuntimeType(
         RivetBodyResult result,

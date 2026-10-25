@@ -12,13 +12,18 @@ internal static class OpenApiProvenanceReader
 {
     private static readonly HashSet<string> _preservedVendorExtensions =
     [
+        "x-discord-union",
         "x-ds-api-status",
         "x-ds-examples",
         "x-ds-in-sdk",
         "x-enum-elements",
+        "x-expandableFields",
+        "x-github",
         "x-is-beta",
+        "x-multi-segment",
         "x-release-status",
         "x-sq-version",
+        "x-stripeBypassValidation",
         "x-twilio",
         "x-visibility",
     ];
@@ -46,6 +51,9 @@ internal static class OpenApiProvenanceReader
         var componentResponses = ReadComponents(root, "responses")
             .Select(component => new OpenApiRawComponentProvenance(component.Name, component.Json))
             .ToList();
+        var componentHeaders = ReadComponents(root, "headers")
+            .Select(component => new OpenApiRawComponentProvenance(component.Name, component.Json))
+            .ToList();
         var schemaComponents = ReadComponents(root, "schemas");
         var componentSchemas = schemaComponents
             .Where(component => NeedsSchemaProvenance(component.Value))
@@ -63,10 +71,11 @@ internal static class OpenApiProvenanceReader
             rootServers,
             componentExamples,
             ComponentRequestBodies: componentRequestBodies,
-            VendorExtensions: vendorExtensions,
+            PreservedFields: vendorExtensions,
             ComponentParameters: componentParameters,
             ComponentResponses: componentResponses,
-            ComponentSchemas: componentSchemas
+            ComponentSchemas: componentSchemas,
+            ComponentHeaders: componentHeaders
         );
         var operations = new Dictionary<(string Path, string Method), OpenApiOperationProvenance>();
 
@@ -130,7 +139,8 @@ internal static class OpenApiProvenanceReader
                     ReadRequestBodyComponentId(operation),
                     ReadParameterComponentReferences(root, path.Value, operation),
                     ReadResponseComponentReferences(operation),
-                    ReadOperationSchemas(path.Value, operation)
+                    ReadOperationSchemas(path.Value, operation),
+                    ReadResponseHeaderComponentReferences(operation)
                 );
             }
         }
@@ -488,6 +498,44 @@ internal static class OpenApiProvenanceReader
             .ToList();
     }
 
+    /// <summary>Header <c>$ref</c>s on the operation's own (inline) responses.</summary>
+    private static IReadOnlyList<OpenApiResponseHeaderComponentReference> ReadResponseHeaderComponentReferences(
+        JsonElement operation
+    )
+    {
+        if (!operation.TryGetProperty("responses", out var responses))
+        {
+            return [];
+        }
+        var result = new List<OpenApiResponseHeaderComponentReference>();
+        foreach (var response in responses.EnumerateObject())
+        {
+            if (
+                response.Value.ValueKind != JsonValueKind.Object
+                || response.Value.TryGetProperty("$ref", out _)
+                || !response.Value.TryGetProperty("headers", out var headers)
+                || headers.ValueKind != JsonValueKind.Object
+            )
+            {
+                continue;
+            }
+            foreach (var header in headers.EnumerateObject())
+            {
+                if (TryReadComponentReference(header.Value, "headers", out var componentId))
+                {
+                    result.Add(
+                        new OpenApiResponseHeaderComponentReference(
+                            response.Name,
+                            header.Name,
+                            componentId!
+                        )
+                    );
+                }
+            }
+        }
+        return result;
+    }
+
     private static bool TryReadComponentReference(
         JsonElement value,
         string kind,
@@ -501,13 +549,13 @@ internal static class OpenApiProvenanceReader
             && JsonPointer.TryGetComponentName(reference, kind, out componentId);
     }
 
-    private static IReadOnlyList<OpenApiVendorExtensionProvenance> ReadVendorExtensions(
+    private static IReadOnlyList<OpenApiPreservedFieldProvenance> ReadVendorExtensions(
         JsonElement root,
         bool swagger2,
         IReadOnlySet<string> opaqueSchemaPointers
     )
     {
-        var result = new List<OpenApiVendorExtensionProvenance>();
+        var result = new List<OpenApiPreservedFieldProvenance>();
         ReadVendorExtensions(
             root,
             "#",
@@ -525,7 +573,7 @@ internal static class OpenApiProvenanceReader
         bool swagger2,
         IReadOnlySet<string> opaqueSchemaPointers,
         bool exampleObject,
-        List<OpenApiVendorExtensionProvenance> result
+        List<OpenApiPreservedFieldProvenance> result
     )
     {
         if (IsOpaqueProvenanceRoot(pointer, opaqueSchemaPointers))
@@ -558,7 +606,7 @@ internal static class OpenApiProvenanceReader
             if (_preservedVendorExtensions.Contains(property.Name))
             {
                 result.Add(
-                    new OpenApiVendorExtensionProvenance(
+                    new OpenApiPreservedFieldProvenance(
                         NormalizeOwnerPointer(pointer, swagger2),
                         property.Name,
                         property.Value.GetRawText()

@@ -17,12 +17,8 @@ public sealed class RivetActionResult : IActionResult, IStatusCodeActionResult
     internal RivetActionResult(RivetResult result)
     {
         _result = result;
-        (StatusCode, Value) = result switch
-        {
-            RivetBodyResult body => (body.StatusCode, body.Value),
-            RivetFileResult file => (file.StatusCode, null),
-            _ => throw new ArgumentOutOfRangeException(nameof(result)),
-        };
+        StatusCode = result.StatusCode;
+        Value = result is RivetBodyResult body ? body.Value : null;
     }
 
     /// <summary>
@@ -44,7 +40,17 @@ public sealed class RivetActionResult : IActionResult, IStatusCodeActionResult
     public Task ExecuteResultAsync(ActionContext context)
     {
         var httpContext = context.HttpContext;
-        if (!RivetResultExtensions.BeginResponse(httpContext.Response, _result))
+        var options = httpContext
+            .RequestServices.GetRequiredService<IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>>()
+            .Value.JsonSerializerOptions;
+        if (
+            !RivetResultExtensions.BeginResponse(
+                httpContext,
+                _result,
+                options,
+                RivetHostJsonOptions.Mvc
+            )
+        )
         {
             return Task.CompletedTask;
         }
@@ -55,11 +61,7 @@ public sealed class RivetActionResult : IActionResult, IStatusCodeActionResult
             RivetBodyResult { IsJson: true } body => RivetResultExtensions.WriteJsonAsync(
                 httpContext,
                 body,
-                httpContext
-                    .RequestServices.GetRequiredService<
-                        IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>
-                    >()
-                    .Value.JsonSerializerOptions
+                options
             ),
             RivetBodyResult body => new ContentResult
             {
@@ -67,7 +69,7 @@ public sealed class RivetActionResult : IActionResult, IStatusCodeActionResult
                 Content = (string?)body.Value,
             }.ExecuteResultAsync(context),
             RivetFileResult file => RivetResultExtensions
-                .ToFileResult(RivetResultExtensions.WriteFileHeaders(httpContext.Response, file))
+                .ToFileResult(file)
                 .ExecuteAsync(httpContext),
             _ => throw new ArgumentOutOfRangeException(nameof(context)),
         };

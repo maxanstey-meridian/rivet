@@ -47,6 +47,25 @@ public static class RouteParser
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Erases parameter names so templates OpenAPI treats as one path compare equal:
+    /// "/items/{id}" and "/items/{itemId:int}" both become "/items/{}".
+    /// </summary>
+    public static string EraseParameterNames(string route)
+    {
+        var builder = new StringBuilder(route.Length);
+        var position = 0;
+
+        foreach (var token in ScanRouteParams(route))
+        {
+            builder.Append(route, position, token.Start - position).Append("{}");
+            position = token.Start + token.Length;
+        }
+
+        builder.Append(route, position, route.Length - position);
+        return builder.ToString();
+    }
+
     private readonly record struct RouteParamToken(string Name, int Start, int Length);
 
     /// <summary>

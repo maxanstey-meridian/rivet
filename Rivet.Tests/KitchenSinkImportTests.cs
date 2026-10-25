@@ -322,15 +322,12 @@ public sealed class KitchenSinkImportTests
 
         // Admin purge has security: [{"admin": []}].
         Assert.Contains(
-            ".SecurityRequirement(0, \"admin\")",
+            ".Secure(\"admin\")",
             CompilationHelper.FindFile(result, "AdminContract.cs")
         );
 
         // Users inherit document-level global security without endpoint duplication.
-        Assert.DoesNotContain(
-            ".SecurityRequirement(",
-            CompilationHelper.FindFile(result, "UsersContract.cs")
-        );
+        Assert.DoesNotContain(".Secure(", CompilationHelper.FindFile(result, "UsersContract.cs"));
     }
 
     // ========== Tags / contracts ==========

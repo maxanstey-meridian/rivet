@@ -40,6 +40,12 @@ public sealed record OAuth2Flow(
     IReadOnlyDictionary<string, string> Scopes
 );
 
+/// <summary>
+/// An OpenAPI security requirement list: the caller satisfies any one alternative, and an
+/// alternative only by satisfying every scheme in it (with each scheme's scopes). No
+/// alternatives is the explicit <c>security: []</c>; an alternative with no schemes (<c>{}</c>)
+/// makes credentials optional.
+/// </summary>
 public sealed record SecurityRequirements(IReadOnlyList<SecurityRequirement> Alternatives);
 
 public sealed record SecurityRequirement(IReadOnlyList<SecurityRequirementScheme> Schemes);

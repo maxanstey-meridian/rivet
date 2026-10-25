@@ -31,6 +31,12 @@ internal readonly record struct ResponseStatusKey(string Key, int? Exact, int? R
 internal sealed record RouteErrorResponse(ResponseStatusKey Status, Type? ResponseType);
 
 /// <summary>
+/// A response header declared <c>required: true</c>. A null status key targets the success
+/// response, resolved when the contract is published so a later <c>.Status()</c> still counts.
+/// </summary>
+internal sealed record RouteRequiredHeader(string? StatusKey, string Name);
+
+/// <summary>
 /// Everything a route definition's builder methods record. Immutable, so a converted
 /// definition (<c>.Accepts&lt;T&gt;()</c>) takes the whole state in one assignment.
 /// </summary>
@@ -44,6 +50,7 @@ internal sealed record RouteState(int SuccessStatus)
     public string? ResponseContentType { get; init; }
     public ImmutableList<RouteErrorResponse> ErrorResponses { get; init; } = [];
     public ImmutableList<RouteResponseContent> ResponseContents { get; init; } = [];
+    public ImmutableList<RouteRequiredHeader> RequiredHeaders { get; init; } = [];
     public string? SuccessStatusKey { get; init; }
     public bool SuppressImplicitResponse { get; init; }
 }
@@ -212,6 +219,18 @@ public abstract partial class RouteDefinitionBase<TSelf>
             Add(ResponseRepresentation.Json);
         }
 
+        // A header on a status the contract doesn't declare is ignored, as the spec ignores it
+        // (RIV1017).
+        var requiredHeaders = state
+            .RequiredHeaders.Where(header =>
+                (
+                    header.StatusKey ?? state.SuccessStatusKey ?? state.SuccessStatus.ToString()
+                ).Equals(statusKey, StringComparison.OrdinalIgnoreCase)
+            )
+            .Select(header => header.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         var contentPayloadTypes = matchingContents
             .Where(content => content.PayloadType is not null)
             .Select(content => content.PayloadType!)
@@ -248,7 +267,8 @@ public abstract partial class RouteDefinitionBase<TSelf>
             payloadType,
             representations.Count,
             SelectBodyRepresentation(),
-            representations.Values.Where(representation => representation.IsBinary).ToArray()
+            representations.Values.Where(representation => representation.IsBinary).ToArray(),
+            requiredHeaders
         );
 
         void Add(ResponseRepresentation representation) =>
@@ -431,6 +451,18 @@ public abstract partial class RouteDefinitionBase<TSelf>
 
     public TSelf ResponseBinaryContent(string statusKey, string mediaType) =>
         AddResponseContent(statusKey, mediaType, null, isBinary: true);
+
+    private TSelf AddRequiredHeader(string? statusKey, string name, bool required) =>
+        Mutate(state =>
+            required
+                ? state with
+                {
+                    RequiredHeaders = state.RequiredHeaders.Add(
+                        new RouteRequiredHeader(statusKey, name)
+                    ),
+                }
+                : state
+        );
 
     private TSelf AddResponseContent(
         string statusKey,

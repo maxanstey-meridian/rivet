@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -32,32 +33,148 @@ internal sealed class RivetLowerAllNamingPolicy : JsonNamingPolicy
 /// policy casing that collides two members into one wire value (RIV1106), and
 /// never silently falls back to numeric when a policy is declared.
 ///
-/// The read side refuses integers: a bare <c>0</c> always throws
-/// <see cref="JsonException"/>, and so does a numeric
-/// string such as <c>"0"</c> from .NET 9 on (.NET 8's System.Text.Json still
-/// reads it as the value). It is not an exact match on the advertised names:
-/// System.Text.Json also reads the C# member name in any casing, whatever the
-/// policy. The built-in <see cref="JsonStringEnumConverter{TEnum}"/> keeps
-/// STJ's default and accepts integers as well.
+/// Writing is System.Text.Json's own <see cref="JsonStringEnumConverter{TEnum}"/>
+/// with the policy. Reading accepts exactly the names it writes, case-sensitively,
+/// on every target framework: an integer, a numeric string such as <c>"0"</c>, the C#
+/// member name in another casing, or a combination of flags is a
+/// <see cref="JsonException"/>. Dictionary keys follow the same rule. The built-in
+/// <see cref="JsonStringEnumConverter{TEnum}"/> keeps STJ's leniency.
 ///
 /// None of this applies to route, query, header or form values. ASP.NET binds
 /// those itself and never consults a JSON converter.
 /// </remarks>
+public abstract class RivetStringEnumConverter<T> : JsonConverterFactory
+    where T : struct, Enum
+{
+    private readonly JsonNamingPolicy _policy;
+
+    private protected RivetStringEnumConverter(JsonNamingPolicy policy) => _policy = policy;
+
+    public sealed override bool CanConvert(Type typeToConvert) => typeToConvert == typeof(T);
+
+    public sealed override JsonConverter CreateConverter(
+        Type typeToConvert,
+        JsonSerializerOptions options
+    ) =>
+        new RivetExactEnumConverter<T>(
+            (JsonConverter<T>)
+                new JsonStringEnumConverter<T>(_policy, allowIntegerValues: false).CreateConverter(
+                    typeToConvert,
+                    options
+                )!,
+            options
+        );
+}
+
+/// <summary>
+/// Writes through System.Text.Json's enum converter and reads back only what that writes.
+/// The accepted names are taken from the writer itself, so policies, member pins and
+/// dictionary keys can't drift from the read side.
+/// </summary>
+internal sealed class RivetExactEnumConverter<T> : JsonConverter<T>
+    where T : struct, Enum
+{
+    private readonly JsonConverter<T> _writer;
+    private readonly Dictionary<string, T> _values = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, T> _keys = new(StringComparer.Ordinal);
+
+    internal RivetExactEnumConverter(JsonConverter<T> writer, JsonSerializerOptions options)
+    {
+        _writer = writer;
+        foreach (var value in Enum.GetValues<T>())
+        {
+            _values.TryAdd(WrittenValue(value, options), value);
+            _keys.TryAdd(WrittenKey(value, options), value);
+        }
+    }
+
+    public override T Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    ) =>
+        reader.TokenType == JsonTokenType.String
+        && _values.TryGetValue(reader.GetString()!, out var value)
+            ? value
+            : throw Refuse(ref reader, _values.Keys);
+
+    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
+        _writer.Write(writer, value, options);
+
+    public override T ReadAsPropertyName(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options
+    ) =>
+        _keys.TryGetValue(reader.GetString()!, out var value)
+            ? value
+            : throw Refuse(ref reader, _keys.Keys);
+
+    public override void WriteAsPropertyName(
+        Utf8JsonWriter writer,
+        T value,
+        JsonSerializerOptions options
+    ) => _writer.WriteAsPropertyName(writer, value, options);
+
+    private static JsonException Refuse(ref Utf8JsonReader reader, IEnumerable<string> accepted)
+    {
+        var sent = reader.TokenType is JsonTokenType.String or JsonTokenType.PropertyName
+            ? $"\"{reader.GetString()}\""
+            : $"A JSON {reader.TokenType.ToString().ToLowerInvariant()}";
+        return new JsonException(
+            $"{sent} is not a {typeof(T).Name} value. Send one of "
+                + string.Join(", ", accepted.Select(name => $"\"{name}\""))
+                + ", exactly as written."
+        );
+    }
+
+    private string WrittenValue(T value, JsonSerializerOptions options)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var json = new Utf8JsonWriter(buffer))
+        {
+            _writer.Write(json, value, options);
+        }
+
+        var reader = new Utf8JsonReader(buffer.WrittenSpan);
+        reader.Read();
+        return reader.GetString()!;
+    }
+
+    private string WrittenKey(T value, JsonSerializerOptions options)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var json = new Utf8JsonWriter(buffer))
+        {
+            json.WriteStartObject();
+            _writer.WriteAsPropertyName(json, value, options);
+            json.WriteNullValue();
+            json.WriteEndObject();
+        }
+
+        var reader = new Utf8JsonReader(buffer.WrittenSpan);
+        reader.Read();
+        reader.Read();
+        return reader.GetString()!;
+    }
+}
+
+/// <summary>lowercase enum wire values — "DarkGreen" → "darkgreen".</summary>
 public sealed class RivetLowerCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(new RivetLowerAllNamingPolicy(), allowIntegerValues: false)
+    : RivetStringEnumConverter<T>(new RivetLowerAllNamingPolicy())
     where T : struct, Enum;
 
 /// <summary>camelCase enum wire values — "DarkGreen" → "darkGreen".</summary>
 public sealed class RivetCamelCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(JsonNamingPolicy.CamelCase, allowIntegerValues: false)
+    : RivetStringEnumConverter<T>(JsonNamingPolicy.CamelCase)
     where T : struct, Enum;
 
 /// <summary>snake_case enum wire values — "RestrictedByway2A" → "restricted_byway2_a".</summary>
 public sealed class RivetSnakeCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(JsonNamingPolicy.SnakeCaseLower, allowIntegerValues: false)
+    : RivetStringEnumConverter<T>(JsonNamingPolicy.SnakeCaseLower)
     where T : struct, Enum;
 
 /// <summary>kebab-case enum wire values — "RestrictedByway2A" → "restricted-byway2-a".</summary>
 public sealed class RivetKebabCaseEnumConverter<T>()
-    : JsonStringEnumConverter<T>(JsonNamingPolicy.KebabCaseLower, allowIntegerValues: false)
+    : RivetStringEnumConverter<T>(JsonNamingPolicy.KebabCaseLower)
     where T : struct, Enum;

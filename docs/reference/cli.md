@@ -48,7 +48,11 @@ dotnet rivet --project path/to/Api.csproj --output ./generated \
   `--security admin=bearer` or `--security internal=apikey:header:X-API-Key`.
   Explicit component names retain their casing.
   Repeat `--security` to define multiple schemes; the first is the document-wide
-  default and the remaining schemes are available to endpoint-level `.Secure()` calls.
+  default and the remaining schemes are available to endpoint-level `.Secure()` and
+  `.AndSecure()` calls, which carry their own scopes and alternatives. The flag only
+  defines schemes and that one default; a document-level requirement with
+  alternatives or scopes comes from imported `[assembly: RivetGlobalSecurity...]`
+  attributes, and an explicit `--security` replaces those wholesale.
 
 With `--from-openapi`, `--security` retains its importer override behavior and
 accepts one existing OpenAPI component name, such as `--security admin`. Emit-time
@@ -104,7 +108,7 @@ with, or the comparison will (correctly) flag the metadata difference.
 ## Diagnostics
 
 Every warning the tool writes to stderr carries a stable `RIV`-prefixed ID in
-the canonical format `warning RIV1001: <message>` — grep or baseline by ID,
+the canonical format `warning RIV1019: <message>` — grep or baseline by ID,
 never by message text. See the [Diagnostics Reference](/reference/diagnostics)
 for the full table of IDs, triggers, and remediations.
 

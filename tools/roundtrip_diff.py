@@ -94,14 +94,18 @@ SCHEMA_ANNOTATION_FIELDS = (
     "discriminator",
 )
 VENDOR_EXTENSION_DISPOSITIONS = {
+    "x-discord-union": "preserve",
     "x-ds-api-status": "preserve",
     "x-ds-examples": "preserve",
     "x-ds-in-sdk": "preserve",
     "x-docs-overrides": "preserve",
     "x-enum-elements": "preserve",
     "x-errors": "preserve",
+    "x-expandableFields": "preserve",
+    "x-github": "preserve",
     "x-is-beta": "preserve",
     "x-is-deprecated": "map",
+    "x-multi-segment": "preserve",
     "x-ms-summary": "map",
     "x-oauthpermissions": "map",
     "x-patternProperties": "preserve",
@@ -109,6 +113,7 @@ VENDOR_EXTENSION_DISPOSITIONS = {
     "x-read-only": "map",
     "x-release-status": "preserve",
     "x-sq-version": "preserve",
+    "x-stripeBypassValidation": "preserve",
     "x-twilio": "preserve",
     "x-visibility": "preserve",
     "x-Description": "map",
@@ -146,6 +151,14 @@ def tags_projection(value):
         else tag
         for tag in value
     ]
+
+
+def example_object_projection(value):
+    """An Example Object's standard fields; its extensions are judged by their reviewed
+    disposition (compare_reviewed_extensions), like every other owner's."""
+    if not isinstance(value, dict):
+        return canonical(value)
+    return canonical({key: item for key, item in value.items() if not key.startswith("x-")})
 
 
 def json_value(value):
@@ -475,8 +488,124 @@ def component_ref_identity(reference, namespace):
     return tuple(parts)
 
 
+PATH_TEMPLATE_PARAMETER = re.compile(r"\{([^{}/]*)\}")
+
+
+def merge_equivalent_path_templates(document):
+    """Mirror the import's RIV3029 merge of paths that differ only in parameter names.
+
+    OpenAPI forbids two such paths. A later twin whose operations don't clash with the
+    earlier path's, with no path-level fields and no referenced path parameter being
+    renamed, moves its operations to the earlier path and renames its inline path
+    parameters. Returns the merged copy and one source defect per merged twin.
+    """
+    paths = document.get("paths")
+    if not isinstance(paths, dict):
+        return document, []
+    document = json.loads(json.dumps(document))
+    paths = document["paths"]
+    earliest = {}
+    defects = []
+    for path in list(paths):
+        template = PATH_TEMPLATE_PARAMETER.sub("{}", path)
+        target = earliest.setdefault(template, path)
+        if target == path:
+            continue
+        renames = {
+            source: earlier
+            for source, earlier in zip(
+                PATH_TEMPLATE_PARAMETER.findall(path), PATH_TEMPLATE_PARAMETER.findall(target)
+            )
+            if source != earlier
+        }
+        twin, merged_into = paths.get(path), paths.get(target)
+        if (
+            not isinstance(twin, dict)
+            or not isinstance(merged_into, dict)
+            or any(key not in METHODS or key in merged_into for key in twin)
+            or any(
+                isinstance(parameter, dict)
+                and "$ref" in parameter
+                and isinstance(resolve_local_reference(document, parameter["$ref"]), dict)
+                and resolve_local_reference(document, parameter["$ref"]).get("in") == "path"
+                and resolve_local_reference(document, parameter["$ref"]).get("name") in renames
+                for operation in twin.values()
+                if isinstance(operation, dict)
+                for parameter in operation.get("parameters", [])
+            )
+        ):
+            continue
+        for operation in twin.values():
+            if not isinstance(operation, dict):
+                continue
+            for parameter in operation.get("parameters", []):
+                if (
+                    isinstance(parameter, dict)
+                    and parameter.get("in") == "path"
+                    and parameter.get("name") in renames
+                ):
+                    parameter["name"] = renames[parameter["name"]]
+        merged_into.update(twin)
+        del paths[path]
+        defects.append(
+            {
+                "path": f"#/paths/{pointer_token(path)}",
+                "reason": "path repeats an earlier path's template under other parameter names, which OpenAPI forbids; the import merges its operations into the earlier path and renames its path parameters",
+            }
+        )
+    return document, defects
+
+
+SCHEMA_COMPONENT_NAME = re.compile(r"^[A-Za-z0-9.\-_]+$")
+OPAQUE_VALUE_KEYS = ("const", "default", "enum", "example", "examples")
+
+
+def drop_external_discriminator_mappings(document):
+    """Mirror the import's drop of discriminator mapping entries that point outside the
+    document (neither a local reference nor a schema name). Returns the stripped copy and
+    one source defect per dropped entry, in document order."""
+    document = json.loads(json.dumps(document))
+    defects = []
+
+    def visit(value, pointer):
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, f"{pointer}/{index}")
+            return
+        if not isinstance(value, dict):
+            return
+        discriminator = value.get("discriminator")
+        if isinstance(discriminator, dict) and isinstance(discriminator.get("mapping"), dict):
+            mapping = discriminator["mapping"]
+            for tag, target in list(mapping.items()):
+                if (
+                    isinstance(target, str)
+                    and not target.startswith("#")
+                    and not SCHEMA_COMPONENT_NAME.match(target)
+                ):
+                    del mapping[tag]
+                    defects.append(
+                        {
+                            "path": f"{pointer}/discriminator/mapping/{pointer_token(tag)}",
+                            "reason": "discriminator mapping references a document outside the source; the import drops the entry",
+                        }
+                    )
+            if not mapping:
+                del discriminator["mapping"]
+        for key, child in value.items():
+            if key in OPAQUE_VALUE_KEYS or key.lower().startswith("x-"):
+                continue
+            visit(child, f"{pointer}/{pointer_token(key)}")
+
+    visit(document, "#")
+    return document, defects
+
+
 class Comparator:
     def __init__(self, original, reemitted, generated_sources):
+        original, template_defects = merge_equivalent_path_templates(original)
+        original, mapping_defects = drop_external_discriminator_mappings(original)
+        template_defects = template_defects + mapping_defects
         self.original = original
         self.reemitted = reemitted
         self.generated_sources = generated_sources
@@ -505,7 +634,7 @@ class Comparator:
         self.reemitted_components = self.component_identities(reemitted)
         self.missing_components = sorted(self.original_components - self.reemitted_components)
         self.invented_components = sorted(self.reemitted_components - self.original_components)
-        self.source_defects = []
+        self.source_defects = template_defects
         self.collect_source_defects(self.original, "#")
 
     @staticmethod
@@ -923,8 +1052,8 @@ class Comparator:
             "document",
             "tags",
             "#/tags",
-            self.original.get("tags"),
-            self.reemitted.get("tags"),
+            self.original.get("tags", []),
+            self.reemitted.get("tags", []),
             tags_projection,
         )
         self.compare_value(
@@ -1480,9 +1609,10 @@ class Comparator:
 
     @staticmethod
     def enum_projection(value):
+        # An enum is a set: neither member order nor a repeated member changes it.
         if not isinstance(value, list):
             return value
-        return tuple(sorted(canonical(item) for item in value))
+        return tuple(sorted({canonical(item) for item in value}))
 
     @staticmethod
     def annotation_projection(schema):
@@ -1778,7 +1908,7 @@ class Comparator:
                         path,
                         original,
                         reemitted,
-                        canonical,
+                        example_object_projection if namespace == "examples" else canonical,
                     )
 
     def compare_reviewed_extensions(self):

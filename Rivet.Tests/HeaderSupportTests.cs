@@ -255,7 +255,7 @@ public sealed class HeaderSupportTests
     }
 
     [Fact]
-    public void WithResponseHeader_OnUndeclaredStatus_IsIgnoredWithRIV1017()
+    public void WithResponseHeader_OnUndeclaredStatus_IsRefusedWithRIV1017()
     {
         var source = """
             using Rivet;
@@ -274,16 +274,13 @@ public sealed class HeaderSupportTests
             }
             """;
 
-        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            (endpoints, _) = CompilationHelper.WalkContract(source);
-        });
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
 
-        var ep = Assert.Single(endpoints);
-        Assert.DoesNotContain(ep.Responses, r => r.Headers is not null);
-        Assert.Contains("warning RIV1017:", stderr);
-        Assert.Contains("X-Lost-And-Found", stderr);
+        Assert.StartsWith("error RIV1017:", exception.Message);
+        Assert.Contains("'X-Lost-And-Found' for status 404", exception.Message);
+        Assert.Contains(".Returns(...)", exception.Message);
     }
 
     // ---------------------------------------------------------------

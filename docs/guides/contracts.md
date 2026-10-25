@@ -57,7 +57,11 @@ body is invalid HTTP). `Define.File` creates binary/stream endpoints — see
 
 The full builder surface (`.Status()`, `.Returns()`, `.Secure()`, `.Anonymous()`,
 `.QueryAuth()`, `.FormEncoded()`, `.AcceptsFile()`, ...) is documented in the
-[Route Definition API](/reference/endpoint-builder).
+[Route Definition API](/reference/endpoint-builder). `.Secure("admin")` is the short
+form of a richer idea: pass scopes after the scheme name, chain `.Secure()` again
+for another way in, `.AndSecure()` for a scheme the same caller also needs, and
+`.OrAnonymous()` when credentials are optional. The
+[Security section](/reference/endpoint-builder#security) walks through each.
 
 ## Implementing a contract
 

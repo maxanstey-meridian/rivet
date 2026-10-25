@@ -68,14 +68,55 @@ public sealed class ContractEndpointTests
             """;
 
         var error = Assert.Throws<RivetUserException>(() => Generate(source));
+        Assert.Contains("RIV1113", error.Message);
         Assert.Contains("GetTask", error.Message);
         Assert.Contains("not a Rivet builder method", error.Message);
     }
 
-    [Fact]
-    public void Chain_Not_Rooted_At_Define_Is_Not_Read()
+    [Theory]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Routes.Get<TaskDto>(\"/api/fake\");",
+        "isn't initialised with a Define.* builder chain"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(Routes.Prefix + \"/tasks\");",
+        "isn't a compile-time constant"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask; static TasksContract() { GetTask = Define.Get<TaskDto>(\"/api/tasks\"); }",
+        "has no initializer"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Secure(Routes.Prefix);",
+        "passes .Secure() a 'scheme' that isn't a compile-time constant"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Summary(Routes.Prefix);",
+        "passes .Summary() a 'summary' that isn't a compile-time constant"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Status(Routes.Code);",
+        "passes .Status() a 'statusCode' that isn't a compile-time constant"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").QueryAuth(Routes.Prefix);",
+        "passes .QueryAuth() a 'parameterName' that isn't a compile-time constant"
+    )]
+    [InlineData(
+        "public static readonly FileRouteDefinition GetTask = Define.File(\"/api/tasks\").ProducesFile(Routes.Prefix);",
+        "passes .ProducesFile() a 'contentType' that isn't a compile-time constant"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Secure(\"oauth\").AndSecure(\"key\", \"read\", Routes.Prefix);",
+        "passes .AndSecure() scopes that aren't compile-time constant strings"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Secure(\"oauth\", Routes.Scopes);",
+        "passes .Secure() scopes that aren't compile-time constant strings"
+    )]
+    public void Unreadable_Endpoint_Field_Is_Refused(string field, string reason)
     {
-        var source = """
+        var source = $$"""
             using Rivet;
 
             namespace Test;
@@ -85,17 +126,55 @@ public sealed class ContractEndpointTests
 
             public static class Routes
             {
+                public static string Prefix = "/api";
+                public static int Code = 201;
+                public static string[] Scopes = ["read"];
                 public static RouteDefinition<TaskDto> Get<T>(string route) => Define.Get<TaskDto>("/api/real");
             }
 
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly RouteDefinition<TaskDto> GetTask = Routes.Get<TaskDto>("/api/fake");
+                {{field}}
             }
             """;
 
-        Assert.Empty(Generate(source));
+        var error = Assert.Throws<RivetUserException>(() => Generate(source));
+        Assert.Contains("error RIV1113", error.Message);
+        Assert.Contains("TasksContract.GetTask", error.Message);
+        Assert.Contains(reason, error.Message);
+    }
+
+    [Theory]
+    [InlineData(".Anonymous().Secure(\"oauth\")", ".Anonymous() declares")]
+    [InlineData(".OrAnonymous().Anonymous()", ".Anonymous() declares")]
+    [InlineData(".AndSecure(\"oauth\")", ".AndSecure() must follow .Secure()")]
+    [InlineData(
+        ".Secure(\"oauth\").OrAnonymous().AndSecure(\"key\")",
+        ".AndSecure() must follow .Secure()"
+    )]
+    public void Contradictory_Security_Calls_Are_Refused(string calls, string reason)
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks"){{calls}};
+            }
+            """;
+
+        var error = Assert.Throws<RivetUserException>(() => Generate(source));
+        Assert.Contains("error RIV1114", error.Message);
+        Assert.Contains("TasksContract.GetTask", error.Message);
+        Assert.Contains(reason, error.Message);
     }
 
     [Fact]
@@ -444,7 +523,7 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
-    public void ResponseExampleJson_Without_Declared_Response_Is_Ignored()
+    public void ResponseExampleJson_Without_Declared_Response_Is_Refused()
     {
         var source = """
             using Rivet;
@@ -463,20 +542,45 @@ public sealed class ContractEndpointTests
             }
             """;
 
-        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() => endpoints = Generate(source));
+        var exception = Assert.Throws<RivetUserException>(() => Generate(source));
 
-        var ep = Assert.Single(endpoints);
-        Assert.Single(ep.Responses);
-        Assert.Equal(200, ep.Responses[0].StatusCode);
-        Assert.Null(ep.Responses[0].Examples);
-        Assert.DoesNotContain(ep.Responses, response => response.StatusCode == 422);
-
-        // The silent drop must be loud: a warning naming the status and the endpoint.
-        Assert.Contains(
-            "warning RIV1002: ignoring response example for undeclared status 422 on contract endpoint 'getTask'",
-            stderr
+        Assert.StartsWith(
+            "error RIV1002: contract endpoint 'getTask' has a response example for status 422",
+            exception.Message
         );
+        Assert.Contains(".Returns(...)", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("public static class", "public static RouteDefinition<TaskDto>")]
+    [InlineData("public sealed class", "public readonly RouteDefinition<TaskDto>")]
+    public void Endpoint_Field_That_Is_Not_Static_Readonly_Is_Refused(
+        string classDeclaration,
+        string fieldDeclaration
+    )
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            {{classDeclaration}} TasksContract
+            {
+                {{fieldDeclaration}} GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() => Generate(source));
+
+        Assert.StartsWith(
+            "error RIV1001: contract endpoint 'TasksContract.GetTask' is not 'static readonly'",
+            exception.Message
+        );
+        Assert.Contains("Declare it 'public static readonly'", exception.Message);
     }
 
     [Fact]
@@ -1771,8 +1875,10 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
-    public void Controller_Duplicate_Success_Status_Keeps_Response_And_ReturnType_Aligned()
+    public void Controller_Duplicate_Success_Status_Fails_With_RIV2010()
     {
+        // Two [ProducesResponseType] on one status used to keep the first (no body)
+        // under a warning, silently dropping the TaskDto the second one declared.
         var source = """
             using Microsoft.AspNetCore.Mvc;
             using Rivet;
@@ -1796,11 +1902,14 @@ public sealed class ContractEndpointTests
 
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var endpoint = Assert.Single(endpoints);
 
-        Assert.Null(endpoint.ReturnType);
-        Assert.Null(Assert.Single(endpoint.Responses).DataType);
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkEndpoints(compilation, discovered, walker)
+        );
+
+        Assert.StartsWith("error RIV2010:", exception.Message);
+        Assert.Contains("'get'", exception.Message);
+        Assert.Contains("status 200", exception.Message);
     }
 
     [Fact]
@@ -3106,161 +3215,108 @@ public sealed class ContractEndpointTests
 
     // ========== Type name collisions ==========
 
-    [Fact]
-    public void SameLastSegment_DifferentNamespaces_BothEmitted_WithLoudDiagnostic()
-    {
-        var sources = new[]
+    // Schema names are global and built from the simple name only. Two distinct types
+    // sharing one used to emit the later as "Item2" in discovery order; now generation
+    // stops and names both types so one can be renamed.
+    public static TheoryData<string[], string, string, string> CollidingTypeSources =>
+        new()
         {
-            """
-                using Rivet;
-                namespace Foo.Models
-                {
-                    [RivetType]
-                    public sealed record Item(string Name);
+            {
+                [
+                    """
+                        using Rivet;
+                        namespace Foo.Models
+                        {
+                            public sealed record Item(string Name);
 
-                    [RivetType]
-                    public sealed record FooWrapper(Item Item);
-                }
-                """,
-            """
-                using Rivet;
-                namespace Bar.Models
-                {
-                    [RivetType]
-                    public sealed record Item(int Count);
+                            [RivetType]
+                            public sealed record FooWrapper(Item Item);
+                        }
+                        """,
+                    """
+                        using Rivet;
+                        namespace Bar.Models
+                        {
+                            public sealed record Item(int Count);
 
-                    [RivetType]
-                    public sealed record BarWrapper(Item Item);
-                }
-                """,
+                            [RivetType]
+                            public sealed record BarWrapper(Item Item);
+                        }
+                        """,
+                ],
+                "Item",
+                "Foo.Models.Item",
+                "Bar.Models.Item"
+            },
+            {
+                [
+                    """
+                        using Rivet;
+                        using System.Text.Json.Serialization;
+                        namespace Foo.Models
+                        {
+                            [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
+                            public enum Status { Active, Closed }
+
+                            [RivetType]
+                            public sealed record FooDto(Status Status);
+                        }
+                        """,
+                    """
+                        using Rivet;
+                        namespace Bar.Models
+                        {
+                            public enum Status { Draft, Published, Archived }
+
+                            [RivetType]
+                            public sealed record BarDto(Status Status);
+                        }
+                        """,
+                ],
+                "Status",
+                "Foo.Models.Status",
+                "Bar.Models.Status"
+            },
+            {
+                [
+                    """
+                        using Rivet;
+                        namespace Test;
+
+                        [RivetType]
+                        public sealed record Result(bool Ok);
+
+                        [RivetType]
+                        public sealed record Result<T>(bool Ok, T Value);
+                        """,
+                ],
+                "Result",
+                "Test.Result",
+                "Test.Result<T>"
+            },
         };
 
-        var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
-        Rivet.Tool.Analysis.TypeWalker walker = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            walker = Rivet.Tool.Analysis.TypeWalker.Create(
-                compilation,
-                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
-                discovered.RivetTypes
-            );
-        });
-
-        // Loud diagnostic — never a silent merge
-        Assert.Contains("collision", stderr);
-        Assert.Contains("Item", stderr);
-
-        // Both shapes emitted under deterministic distinct names; first-walked keeps the short name
-        Assert.Single(walker.Definitions["Item"].Properties, p => p.Name == "name");
-        Assert.Single(walker.Definitions["Item2"].Properties, p => p.Name == "count");
-
-        // References point at the right disambiguated schema
-        var fooRef = Assert.IsType<TsType.TypeRef>(
-            Assert.Single(walker.Definitions["FooWrapper"].Properties).Type
-        );
-        Assert.Equal("Item", fooRef.Name);
-
-        var barRef = Assert.IsType<TsType.TypeRef>(
-            Assert.Single(walker.Definitions["BarWrapper"].Properties).Type
-        );
-        Assert.Equal("Item2", barRef.Name);
-    }
-
-    [Fact]
-    public void EnumCollision_BothEmitted_WithLoudDiagnostic()
+    [Theory]
+    [MemberData(nameof(CollidingTypeSources))]
+    public void TypeNameCollision_Fails_Naming_Both_Types(
+        string[] sources,
+        string schemaName,
+        string first,
+        string second
+    )
     {
-        var sources = new[]
-        {
-            """
-                using Rivet;
-                using System.Text.Json.Serialization;
-                namespace Foo.Models
-                {
-                    [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
-                    public enum Status { Active, Closed }
-
-                    [RivetType]
-                    public sealed record FooDto(Status Status);
-                }
-                """,
-            """
-                using Rivet;
-                using System.Text.Json.Serialization;
-                namespace Bar.Models
-                {
-                    [JsonConverter(typeof(JsonStringEnumConverter<Status>))]
-                    public enum Status { Draft, Published, Archived }
-
-                    [RivetType]
-                    public sealed record BarDto(Status Status);
-                }
-                """,
-        };
-
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
-        Rivet.Tool.Analysis.TypeWalker walker = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            walker = Rivet.Tool.Analysis.TypeWalker.Create(
-                compilation,
-                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
-                discovered.RivetTypes
-            );
-        });
+        var discovered = SymbolDiscovery.Discover(compilation);
 
-        Assert.Contains("collision", stderr);
-
-        // Enums used to be keyed by simple name with TryAdd — second silently dropped
-        var first = Assert.IsType<TsType.StringUnion>(walker.Enums["Status"]);
-        Assert.Equal(2, first.Members.Count);
-        var second = Assert.IsType<TsType.StringUnion>(walker.Enums["Status2"]);
-        Assert.Equal(3, second.Members.Count);
-
-        // Each DTO references its own enum
-        var fooRef = Assert.IsType<TsType.TypeRef>(
-            Assert.Single(walker.Definitions["FooDto"].Properties).Type
+        var ex = Assert.Throws<RivetUserException>(() =>
+            TypeWalker.Create(compilation, new WellKnownTypes(compilation), discovered.RivetTypes)
         );
-        Assert.Equal("Status", fooRef.Name);
-        var barRef = Assert.IsType<TsType.TypeRef>(
-            Assert.Single(walker.Definitions["BarDto"].Properties).Type
-        );
-        Assert.Equal("Status2", barRef.Name);
-    }
 
-    [Fact]
-    public void GenericArity_DistinctTypes_BothEmitted()
-    {
-        // Result and Result<T> are distinct types — the old keying shared "Result"
-        var source = """
-            using Rivet;
-
-            namespace Test;
-
-            [RivetType]
-            public sealed record Result(bool Ok);
-
-            [RivetType]
-            public sealed record Result<T>(bool Ok, T Value);
-            """;
-
-        var compilation = CompilationHelper.CreateCompilation(source);
-        Rivet.Tool.Analysis.TypeWalker walker = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            walker = Rivet.Tool.Analysis.TypeWalker.Create(
-                compilation,
-                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
-                discovered.RivetTypes
-            );
-        });
-
-        Assert.Contains("collision", stderr);
-        Assert.Single(walker.Definitions["Result"].Properties);
-        Assert.Equal(2, walker.Definitions["Result2"].Properties.Count);
-        Assert.Equal(["T"], walker.Definitions["Result2"].TypeParameters);
+        Assert.StartsWith($"error {Diagnostics.TypeNameCollision}:", ex.Message);
+        Assert.Contains($"'{first}'", ex.Message);
+        Assert.Contains($"'{second}'", ex.Message);
+        Assert.Contains($"schema name '{schemaName}'", ex.Message);
+        Assert.Contains("Rename one", ex.Message);
     }
 
     // ========== Route-bound property naming ==========

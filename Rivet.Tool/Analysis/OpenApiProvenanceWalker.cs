@@ -6,6 +6,18 @@ namespace Rivet.Tool.Analysis;
 
 internal static class OpenApiProvenanceWalker
 {
+    // Documentation fields the importer carries verbatim because the typed contract model
+    // has no slot for them; anything else must be a vendor extension.
+    private static readonly HashSet<string> _preservableDocumentationFields =
+    [
+        "summary",
+        "description",
+        "externalDocs",
+        "links",
+        "encoding",
+        "jsonSchemaDialect",
+    ];
+
     public static OpenApiDocumentProvenance? Walk(Compilation compilation, TypeWalker typeWalker)
     {
         var attributes = compilation.Assembly.GetAttributes();
@@ -179,7 +191,7 @@ internal static class OpenApiProvenanceWalker
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
-                if (args.Length != 8)
+                if (args.Length != 10)
                 {
                     throw new RivetUserException(
                         "Invalid Rivet document request-body example metadata."
@@ -199,7 +211,9 @@ internal static class OpenApiProvenanceWalker
                             ? null
                             : JsonSerializer.Deserialize<Dictionary<string, string>>(
                                 referencedComponentsJson
-                            )
+                            ),
+                        StringValue(args[8]),
+                        StringValue(args[9])
                     )
                 );
             })
@@ -254,6 +268,12 @@ internal static class OpenApiProvenanceWalker
             "Rivet.RivetDocumentSchemaAttribute",
             "schema"
         );
+        var componentHeaders = ReadJsonComponents(
+            compilation,
+            attributes,
+            "Rivet.RivetDocumentHeaderAttribute",
+            "header"
+        );
         var importedSourceFiles = attributes
             .OfAttribute(compilation, "Rivet.RivetImportedSourceFileAttribute")
             .Select(attribute =>
@@ -273,24 +293,27 @@ internal static class OpenApiProvenanceWalker
             .ToList();
         ValidateImportedSourceFiles(compilation, importedSourceFiles);
         var vendorExtensions = attributes
-            .OfAttribute(compilation, "Rivet.RivetVendorExtensionAttribute")
+            .OfAttribute(compilation, "Rivet.RivetPreservedFieldAttribute")
             .Select(attribute =>
             {
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 3)
                 {
-                    throw new RivetUserException("Invalid Rivet vendor-extension metadata.");
+                    throw new RivetUserException("Invalid Rivet preserved-field metadata.");
                 }
 
-                var extension = new OpenApiVendorExtensionProvenance(
-                    RequiredString(args[0], "vendor-extension owner pointer"),
-                    RequiredString(args[1], "vendor-extension name"),
-                    RequiredString(args[2], "vendor-extension JSON value")
+                var extension = new OpenApiPreservedFieldProvenance(
+                    RequiredString(args[0], "preserved-field owner pointer"),
+                    RequiredString(args[1], "preserved-field name"),
+                    RequiredString(args[2], "preserved-field JSON value")
                 );
-                if (!extension.Name.StartsWith("x-", StringComparison.OrdinalIgnoreCase))
+                if (
+                    !extension.Name.StartsWith("x-", StringComparison.OrdinalIgnoreCase)
+                    && !_preservableDocumentationFields.Contains(extension.Name)
+                )
                 {
                     throw new RivetUserException(
-                        $"Invalid Rivet vendor-extension name '{extension.Name}'."
+                        $"Invalid Rivet preserved-field name '{extension.Name}'."
                     );
                 }
                 try
@@ -300,7 +323,7 @@ internal static class OpenApiProvenanceWalker
                 catch (JsonException exception)
                 {
                     throw new RivetUserException(
-                        $"Invalid Rivet vendor-extension JSON for '{extension.Name}': {exception.Message}"
+                        $"Invalid Rivet preserved-field JSON for '{extension.Name}': {exception.Message}"
                     );
                 }
                 return extension;
@@ -318,7 +341,8 @@ internal static class OpenApiProvenanceWalker
             componentParameters,
             componentResponses,
             componentSchemas,
-            importedSourceFiles
+            importedSourceFiles,
+            componentHeaders
         );
     }
 
@@ -442,7 +466,24 @@ internal static class OpenApiProvenanceWalker
                     schemasJson,
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
                 )
-                : null
+                : null,
+            attributes
+                .OfAttribute(compilation, "Rivet.RivetOperationResponseHeaderComponentAttribute")
+                .Select(attribute =>
+                {
+                    var values = attribute.ConstructorArguments;
+                    return (
+                        Order: RequiredInt(values[0], "operation response header component order"),
+                        Reference: new OpenApiResponseHeaderComponentReference(
+                            RequiredString(values[1], "operation response header component status"),
+                            RequiredString(values[2], "operation response header component name"),
+                            RequiredString(values[3], "operation response header component ID")
+                        )
+                    );
+                })
+                .OrderBy(value => value.Order)
+                .Select(value => value.Reference)
+                .ToList()
         );
     }
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using Microsoft.OpenApi.Reader;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
@@ -9,7 +10,7 @@ namespace Rivet.Tool.Import;
 /// <summary>
 /// Entry point for importing an OpenAPI 3.1 JSON spec into C# contract + DTO source files.
 /// </summary>
-public static class OpenApiImporter
+public static partial class OpenApiImporter
 {
     private const string ComponentExamplesPrefix = "#/components/examples/";
     private const string ComponentHeadersPrefix = "#/components/headers/";
@@ -19,6 +20,12 @@ public static class OpenApiImporter
         "x-rivet-imported-parameter-reference";
     internal const string ImportedRequestBodyReferenceExtension =
         "x-rivet-imported-request-body-reference";
+
+    /// <summary>
+    /// Marks a schema whose authored enum lists null: the OpenAPI reader drops null enum
+    /// members, and listing null is not the same fact as the schema being nullable.
+    /// </summary>
+    internal const string ImportedEnumNullMemberExtension = "x-rivet-imported-enum-null-member";
 
     /// <summary>The OpenAPI path-item keys that hold operations.</summary>
     internal static readonly string[] OperationMethods =
@@ -37,18 +44,35 @@ public static class OpenApiImporter
     {
         var warnings = new List<string>();
         var root = ParseJson(json);
+        MergeEquivalentPathTemplates(root, warnings);
+        DropExternalDiscriminatorMappings(root, "#", warnings);
+        var preservedFields = new List<OpenApiPreservedFieldProvenance>();
+        UnrepresentedFieldReporter.Report(root, warnings, preservedFields);
 
         // Cyclic component-alias chains ("A": {$ref: B}, "B": {$ref: A}) overflow the
         // stack inside the OpenApi library's reference proxies on ANY member access, so
         // they must be broken before the library sees the document.
         BreakAliasCycles(root, warnings);
+        CollapseRepeatedEnumMembers(root);
         NormalizeMappedVendorExtensions(root, root["swagger"] is not null, exampleObject: false);
         var provenance = OpenApiProvenanceReader.Read(
             JsonSerializer.SerializeToElement(root),
             warnings
         );
+        provenance = provenance with
+        {
+            Document = provenance.Document with
+            {
+                PreservedFields =
+                [
+                    .. provenance.Document.PreservedFields ?? [],
+                    .. preservedFields,
+                ],
+            },
+        };
         NormalizeLocalPathReferences(root);
         NormalizeSchemaReferenceMetadataSiblings(root);
+        MarkEnumNullMembers(root);
         var swaggerSchemaLessResponses = ReadSwaggerSchemaLessResponses(root);
         OpenApiJsonNodeSerializer.EscapeLiteralSentinels(root);
 
@@ -200,6 +224,7 @@ public static class OpenApiImporter
         document.ComponentSchemas is { Count: > 0 }
         || document.ComponentParameters is { Count: > 0 }
         || document.ComponentResponses is { Count: > 0 }
+        || document.ComponentHeaders is { Count: > 0 }
         || document.ComponentRequestBodies?.Any(requestBody =>
             requestBody.Contents.Any(content => content.SchemaJson is not null)
         ) == true
@@ -241,6 +266,7 @@ public static class OpenApiImporter
             var json in (provenance.ComponentParameters ?? [])
                 .Select(component => component.Json)
                 .Concat((provenance.ComponentResponses ?? []).Select(component => component.Json))
+                .Concat((provenance.ComponentHeaders ?? []).Select(component => component.Json))
         )
         {
             using var document = JsonDocument.Parse(json);
@@ -400,6 +426,263 @@ public static class OpenApiImporter
             )
             {
                 NormalizeMappedVendorExtensions(child.Value, swagger2, exampleObject: false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// OpenAPI forbids two paths that differ only in their parameter names
+    /// (<c>/deployments/{idOrUrl}</c> and <c>/deployments/{id}</c>): they are one template.
+    /// A later twin whose operations don't clash with the earlier path's moves them there,
+    /// renaming its inline path parameters to the earlier names. Path parameter names never
+    /// reach the wire, so requests and responses are unchanged. A twin that can't merge
+    /// cleanly (a shared method, path-level fields, a referenced path parameter) is left
+    /// for emission to refuse with RIV2013.
+    /// </summary>
+    private static void MergeEquivalentPathTemplates(JsonObject root, List<string> warnings)
+    {
+        if (root["paths"] is not JsonObject paths)
+        {
+            return;
+        }
+
+        var earliest = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var path in paths.Select(entry => entry.Key).ToList())
+        {
+            var template = RouteParser.EraseParameterNames(path);
+            if (!earliest.TryGetValue(template, out var target))
+            {
+                earliest[template] = path;
+                continue;
+            }
+
+            var renames = PathTemplateParameter()
+                .Matches(path)
+                .Zip(PathTemplateParameter().Matches(target))
+                .Select(pair => (From: pair.First.Groups[1].Value, To: pair.Second.Groups[1].Value))
+                .Where(pair => pair.From != pair.To)
+                .ToDictionary(pair => pair.From, pair => pair.To, StringComparer.Ordinal);
+            if (
+                paths[path] is not JsonObject twin
+                || paths[target] is not JsonObject earlier
+                || twin.Any(entry =>
+                    !OperationMethods.Contains(entry.Key) || earlier.ContainsKey(entry.Key)
+                )
+                || twin.Select(entry => entry.Value)
+                    .OfType<JsonObject>()
+                    .SelectMany(operation => operation["parameters"] as JsonArray ?? [])
+                    .Any(parameter =>
+                        parameter is JsonObject { } referenced
+                        && referenced["$ref"] is not null
+                        && referenced["$ref"]!.GetValue<string>() is var reference
+                        && renames.Keys.Any(name => ResolvesToPathParameter(root, reference, name))
+                    )
+            )
+            {
+                continue;
+            }
+
+            foreach (var operation in twin.Select(entry => entry.Value).OfType<JsonObject>())
+            {
+                foreach (
+                    var parameter in (
+                        operation["parameters"] as JsonArray ?? []
+                    ).OfType<JsonObject>()
+                )
+                {
+                    if (
+                        parameter["in"]?.GetValue<string>() == "path"
+                        && parameter["name"]?.GetValue<string>() is { } name
+                        && renames.TryGetValue(name, out var renamed)
+                    )
+                    {
+                        parameter["name"] = renamed;
+                    }
+                }
+            }
+
+            foreach (var (method, operation) in twin.ToList())
+            {
+                twin.Remove(method);
+                earlier[method] = operation;
+            }
+            paths.Remove(path);
+            var renamedText = string.Join(
+                ", ",
+                renames.Select(rename => $"'{rename.Key}' to '{rename.Value}'")
+            );
+            warnings.Add(
+                Diagnostics.Prefix(
+                    Diagnostics.ImportEquivalentPathTemplateMerged,
+                    $"Path merged: '{path}' repeats the template of '{target}' under other parameter names, which OpenAPI forbids; its operations move to '{target}', renaming path parameter {renamedText} (path parameter names never reach the wire)."
+                )
+            );
+        }
+    }
+
+    /// <summary>
+    /// A discriminator mapping value is a schema name or a reference. One that points into
+    /// another file (digitalocean's <c>models/droplet_actions.yml#/droplet_action</c>) cannot
+    /// resolve in the single document Rivet imports, and re-emitted it crashes the reader of
+    /// the next import, so the entry is dropped, loudly, before anything else reads it.
+    /// </summary>
+    private static void DropExternalDiscriminatorMappings(
+        JsonNode node,
+        string pointer,
+        List<string> warnings
+    )
+    {
+        if (node is JsonArray array)
+        {
+            for (var index = 0; index < array.Count; index++)
+            {
+                if (array[index] is { } item)
+                {
+                    DropExternalDiscriminatorMappings(item, $"{pointer}/{index}", warnings);
+                }
+            }
+            return;
+        }
+
+        if (node is not JsonObject obj)
+        {
+            return;
+        }
+
+        if (
+            obj["discriminator"] is JsonObject { } discriminator
+            && discriminator["mapping"] is JsonObject mapping
+        )
+        {
+            foreach (var (tag, value) in mapping.ToList())
+            {
+                if (
+                    value is JsonValue target
+                    && target.TryGetValue<string>(out var reference)
+                    && !reference.StartsWith('#')
+                    && !SchemaComponentName().IsMatch(reference)
+                )
+                {
+                    mapping.Remove(tag);
+                    warnings.Add(
+                        Diagnostics.Prefix(
+                            Diagnostics.ImportDiscriminatorDropped,
+                            $"Discriminator mapping entry dropped: '{tag}' at {pointer}/discriminator/mapping references '{reference}', outside this document; Rivet imports one document, so the tag keeps no mapping."
+                        )
+                    );
+                }
+            }
+            if (mapping.Count == 0)
+            {
+                discriminator.Remove("mapping");
+            }
+        }
+
+        foreach (var (key, child) in obj.ToList())
+        {
+            if (child is not null && !IsOpaqueOpenApiValue(key))
+            {
+                DropExternalDiscriminatorMappings(
+                    child,
+                    $"{pointer}/{JsonPointer.Escape(key)}",
+                    warnings
+                );
+            }
+        }
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[A-Za-z0-9.\-_]+$")]
+    private static partial System.Text.RegularExpressions.Regex SchemaComponentName();
+
+    private static bool ResolvesToPathParameter(JsonObject root, string reference, string name) =>
+        reference.StartsWith("#/", StringComparison.Ordinal)
+        && reference[2..]
+            .Split('/')
+            .Aggregate(
+                (JsonNode?)root,
+                (node, token) => node?[token.Replace("~1", "/").Replace("~0", "~")]
+            )
+            is JsonObject parameter
+        && parameter["in"]?.GetValue<string>() == "path"
+        && parameter["name"]?.GetValue<string>() == name;
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\{([^{}/]*)\}")]
+    private static partial System.Text.RegularExpressions.Regex PathTemplateParameter();
+
+    /// <summary>
+    /// An enum is a set of allowed values, so a repeated member adds nothing; it would only
+    /// give the C# enum two members with one wire value (vercel repeats 'preview').
+    /// The first occurrence keeps its position.
+    /// </summary>
+    private static void CollapseRepeatedEnumMembers(JsonNode node)
+    {
+        if (node is JsonArray array)
+        {
+            foreach (var child in array)
+            {
+                if (child is not null)
+                {
+                    CollapseRepeatedEnumMembers(child);
+                }
+            }
+            return;
+        }
+
+        if (node is not JsonObject obj)
+        {
+            return;
+        }
+
+        if (obj["enum"] is JsonArray members)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (var index = 0; index < members.Count; index++)
+            {
+                if (!seen.Add(members[index]?.ToJsonString() ?? "null"))
+                {
+                    members.RemoveAt(index--);
+                }
+            }
+        }
+
+        foreach (var child in obj)
+        {
+            if (child.Value is not null && !IsOpaqueOpenApiValue(child.Key))
+            {
+                CollapseRepeatedEnumMembers(child.Value);
+            }
+        }
+    }
+
+    private static void MarkEnumNullMembers(JsonNode node)
+    {
+        if (node is JsonArray array)
+        {
+            foreach (var child in array)
+            {
+                if (child is not null)
+                {
+                    MarkEnumNullMembers(child);
+                }
+            }
+            return;
+        }
+
+        if (node is not JsonObject obj)
+        {
+            return;
+        }
+
+        if (obj["enum"] is JsonArray members && members.Any(member => member is null))
+        {
+            obj[ImportedEnumNullMemberExtension] = true;
+        }
+
+        foreach (var child in obj.ToList())
+        {
+            if (child.Value is not null && !IsOpaqueOpenApiValue(child.Key))
+            {
+                MarkEnumNullMembers(child.Value);
             }
         }
     }

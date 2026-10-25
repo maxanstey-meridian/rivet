@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using Rivet.Tool;
 using Rivet.Tool.Emit;
@@ -9,7 +10,10 @@ namespace Rivet.Tests;
 public sealed class OpenApiEmitterTests
 {
     /// <summary>The emitted schema for <paramref name="type"/> as a 200 response body.</summary>
-    internal static JsonElement ResponseSchemaOf(TsType type)
+    internal static JsonElement ResponseSchemaOf(
+        TsType type,
+        IReadOnlyDictionary<string, TsTypeDefinition>? definitions = null
+    )
     {
         var json = OpenApiEmitter.Emit(
             [
@@ -23,8 +27,13 @@ public sealed class OpenApiEmitterTests
                     [new TsResponseType(200, type)]
                 ),
             ],
-            new Dictionary<string, TsTypeDefinition>(),
-            new Dictionary<string, TsType.Brand>(),
+            definitions ?? new Dictionary<string, TsTypeDefinition>(),
+            // Brands are $ref'd by name, so the probe registers the ones it carries,
+            // as every real frontend does.
+            type.SelfAndDescendants()
+                .OfType<TsType.Brand>()
+                .DistinctBy(brand => brand.Name)
+                .ToDictionary(brand => brand.Name),
             new Dictionary<string, TsType>(),
             null
         );
@@ -78,6 +87,17 @@ public sealed class OpenApiEmitterTests
         );
         return JsonDocument.Parse(json);
     }
+
+    /// <summary>One-property object definitions, so a hand-built model's refs resolve.</summary>
+    private static Dictionary<string, TsTypeDefinition> Stubs(params string[] names) =>
+        names.ToDictionary(
+            name => name,
+            name => new TsTypeDefinition(
+                name,
+                [],
+                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)]
+            )
+        );
 
     [Fact]
     public void Authored_Component_Examples_Merge_With_Endpoint_Examples_Without_Clobbering()
@@ -726,7 +746,7 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void Direct_Emission_Normalizes_Duplicate_Response_Statuses_First_Wins()
+    public void Direct_Emission_Refuses_Duplicate_Response_Statuses_With_RIV2010()
     {
         var endpoint = new TsEndpointDefinition(
             "getTask",
@@ -753,9 +773,9 @@ public sealed class OpenApiEmitterTests
             ]
         );
 
-        string? json = null;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            json = OpenApiEmitter.Emit(
+        // Keeping the first used to drop the second's shape and examples without a word.
+        var exception = Assert.Throws<RivetUserException>(() =>
+            OpenApiEmitter.Emit(
                 [endpoint],
                 new Dictionary<string, TsTypeDefinition>(),
                 new Dictionary<string, TsType.Brand>(),
@@ -764,26 +784,9 @@ public sealed class OpenApiEmitterTests
             )
         );
 
-        using var document = JsonDocument.Parse(json!);
-        var response = document
-            .RootElement.GetProperty("paths")
-            .GetProperty("/api/tasks/{id}")
-            .GetProperty("get")
-            .GetProperty("responses")
-            .GetProperty("200");
-
-        Assert.Equal("first", response.GetProperty("description").GetString());
-        Assert.Equal(
-            "string",
-            response
-                .GetProperty("content")
-                .GetProperty("application/json")
-                .GetProperty("schema")
-                .GetProperty("type")
-                .GetString()
-        );
-        Assert.Contains("warning RIV2010:", stderr);
-        Assert.DoesNotContain("discarded", json);
+        Assert.StartsWith("error RIV2010:", exception.Message);
+        Assert.Contains("'getTask'", exception.Message);
+        Assert.Contains("status 200", exception.Message);
     }
 
     [Fact]
@@ -2306,6 +2309,58 @@ public sealed class OpenApiEmitterTests
         Assert.True(opSecurity[0].TryGetProperty("admin", out _));
     }
 
+    [Theory]
+    [InlineData(".Secure(\"admin\")", """[{ "admin": [] }]""")]
+    [InlineData(
+        ".Secure(\"oauth\", \"tasks:read\", \"tasks:write\")",
+        """[{ "oauth": ["tasks:read", "tasks:write"] }]"""
+    )]
+    [InlineData(
+        ".Secure(\"admin\").Secure(\"oauth\", \"tasks:write\").AndSecure(\"key\")",
+        """[{ "admin": [] }, { "oauth": ["tasks:write"], "key": [] }]"""
+    )]
+    [InlineData(
+        ".Secure(\"oauth\", \"a\").AndSecure(\"oauth\", \"b\")",
+        """[{ "oauth": ["a", "b"] }]"""
+    )]
+    [InlineData(".OrAnonymous().Secure(\"admin\")", """[{}, { "admin": [] }]""")]
+    [InlineData(".OrAnonymous()", "[{}]")]
+    [InlineData(".Anonymous()", "[]")]
+    public void Security_Builder_Calls_Emit_Requirements_In_Order(string calls, string expected)
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition DeleteAll =
+                    Define.Delete("/api/tasks")
+                        .Status(204){{calls}};
+            }
+            """;
+
+        var security = SecurityParser.ParseMany([
+            "admin=bearer",
+            "oauth=bearer:jwt",
+            "key=apikey:header:X-Key",
+        ]);
+
+        using var doc = CompilationHelper.EmitOpenApi(source, security);
+        var emitted = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/tasks")
+            .GetProperty("delete")
+            .GetProperty("security")
+            .GetRawText();
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse(expected), JsonNode.Parse(emitted)),
+            emitted
+        );
+    }
+
     [Fact]
     public void Security_PerEndpoint_Undefined_Scheme_Fails_Generation()
     {
@@ -2335,6 +2390,38 @@ public sealed class OpenApiEmitterTests
 
         Assert.Contains("RIV2002", exception.Message);
         Assert.Contains("security scheme 'admin'", exception.Message);
+    }
+
+    [Fact]
+    public void Routes_Differing_Only_In_Parameter_Names_Fail_Generation()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> Get =
+                    Define.Get<TaskDto>("/api/tasks/{id}");
+
+                public static readonly RouteDefinition Delete =
+                    Define.Delete("/api/tasks/{taskId}").Status(204);
+            }
+            """;
+
+        // OpenAPI reads both as /api/tasks/{}, so writing the two keys is an invalid document.
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source)
+        );
+
+        Assert.Contains("error RIV2013:", exception.Message);
+        Assert.Contains("'/api/tasks/{id}'", exception.Message);
+        Assert.Contains("'/api/tasks/{taskId}'", exception.Message);
     }
 
     [Fact]
@@ -3151,9 +3238,18 @@ public sealed class OpenApiEmitterTests
     [Fact]
     public void GetTypeNameSuffix_Distinct_Instantiations_Get_Distinct_Names()
     {
+        var wrapper = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Wrapper"] = new(
+                "Wrapper",
+                ["T"],
+                [new TsPropertyDefinition("value", new TsType.TypeParam("T"), false)]
+            ),
+        };
+
         // StringUnion inside a generic should produce a readable suffix
         var genericWithUnion = new TsType.Generic("Wrapper", [new TsType.StringUnion(["A", "B"])]);
-        var parsed = ResponseSchemaOf(genericWithUnion);
+        var parsed = ResponseSchemaOf(genericWithUnion, wrapper);
         Assert.Equal("#/components/schemas/Wrapper_AB", parsed.GetProperty("$ref").GetString());
 
         // E2 root: inline-object suffixes must incorporate field TYPES, not just names —
@@ -3169,8 +3265,8 @@ public sealed class OpenApiEmitterTests
             [new TsType.InlineObject([("value", new TsType.Primitive("number"))])]
         );
 
-        var refString = ResponseSchemaOf(wrapperOfString).GetProperty("$ref").GetString();
-        var refNumber = ResponseSchemaOf(wrapperOfNumber).GetProperty("$ref").GetString();
+        var refString = ResponseSchemaOf(wrapperOfString, wrapper).GetProperty("$ref").GetString();
+        var refNumber = ResponseSchemaOf(wrapperOfNumber, wrapper).GetProperty("$ref").GetString();
 
         Assert.Equal("#/components/schemas/Wrapper_Value_String", refString);
         Assert.Equal("#/components/schemas/Wrapper_Value_Number", refNumber);
@@ -3181,7 +3277,8 @@ public sealed class OpenApiEmitterTests
                 new TsType.Generic(
                     "Wrapper",
                     [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
-                )
+                ),
+                wrapper
             )
             .GetProperty("$ref")
             .GetString();
@@ -3192,7 +3289,7 @@ public sealed class OpenApiEmitterTests
             "Wrapper",
             [new TsType.Dictionary(new TsType.Primitive("string"))]
         );
-        var parsed3 = ResponseSchemaOf(genericWithDict);
+        var parsed3 = ResponseSchemaOf(genericWithDict, wrapper);
         Assert.Equal(
             "#/components/schemas/Wrapper_RecordString",
             parsed3.GetProperty("$ref").GetString()
@@ -3590,7 +3687,7 @@ public sealed class OpenApiEmitterTests
 
         using var doc = EmitOpenApiFromModel(
             endpoints,
-            new Dictionary<string, TsTypeDefinition>(),
+            Stubs("FromParams", "FromRequestType"),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>()
         );
@@ -3628,7 +3725,7 @@ public sealed class OpenApiEmitterTests
 
         using var doc = EmitOpenApiFromModel(
             endpoints,
-            new Dictionary<string, TsTypeDefinition>(),
+            Stubs("CreateBuyerRequest"),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>()
         );
@@ -3760,7 +3857,10 @@ public sealed class OpenApiEmitterTests
         using var doc = EmitOpenApiFromModel(
             endpoints,
             definitions,
-            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType.Brand>
+            {
+                ["Tagged"] = (TsType.Brand)endpoints[0].ReturnType!,
+            },
             new Dictionary<string, TsType>()
         );
 
@@ -3790,7 +3890,7 @@ public sealed class OpenApiEmitterTests
 
         using var doc = EmitOpenApiFromModel(
             endpoints,
-            new Dictionary<string, TsTypeDefinition>(),
+            Stubs("CreateBuyerRequest"),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>()
         );
@@ -4003,7 +4103,7 @@ public sealed class OpenApiEmitterTests
 
         using var doc = EmitOpenApiFromModel(
             endpoints,
-            new Dictionary<string, TsTypeDefinition>(),
+            Stubs("CreateBuyerRequest"),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>()
         );
@@ -4166,7 +4266,7 @@ public sealed class OpenApiEmitterTests
 
         using var doc = EmitOpenApiFromModel(
             endpoints,
-            new Dictionary<string, TsTypeDefinition>(),
+            Stubs("UserDto"),
             new Dictionary<string, TsType.Brand>(),
             new Dictionary<string, TsType>()
         );
@@ -4472,6 +4572,10 @@ public sealed class OpenApiEmitterTests
                 )
             ),
         };
+        foreach (var (name, stub) in Stubs("Summary", "WorkspaceKey"))
+        {
+            definitions[name] = stub;
+        }
 
         using var doc = EmitOpenApiFromModel(
             [],
@@ -4520,6 +4624,186 @@ public sealed class OpenApiEmitterTests
         );
     }
 
+    private static TsType.TaggedUnionVariant Variant(
+        string tag,
+        string field,
+        TsTypeMetadata? metadata = null
+    ) =>
+        new(
+            tag,
+            new TsType.InlineObject([
+                ("kind", new TsType.StringUnion([tag])),
+                (field, new TsType.Primitive("string")),
+            ]),
+            metadata
+        );
+
+    [Fact]
+    public void TaggedUnion_Variant_Names_Never_Land_On_A_Taken_Name()
+    {
+        // RIV2001 used to warn and let the existing schema win, so the variant $ref'd
+        // somebody else's shape. A real type already owning DisplayState_Hidden, and two
+        // tags that PascalCase alike, must each still get a $ref to their own schema.
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new(
+                "DisplayState",
+                [],
+                new TsType.TaggedUnion(
+                    "kind",
+                    [
+                        Variant("hidden", "reason"),
+                        Variant("open", "first"),
+                        Variant("Open", "second"),
+                    ]
+                )
+            ),
+            ["DisplayState_Hidden"] = new(
+                "DisplayState_Hidden",
+                [],
+                [new TsPropertyDefinition("unrelated", new TsType.Primitive("number"), false)]
+            ),
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        var mapping = schemas
+            .GetProperty("DisplayState")
+            .GetProperty("discriminator")
+            .GetProperty("mapping");
+        string PropertyOf(string tag, int index) =>
+            schemas
+                .GetProperty(
+                    mapping.GetProperty(tag).GetString()!["#/components/schemas/".Length..]
+                )
+                .GetProperty("properties")
+                .EnumerateObject()
+                .ElementAt(index)
+                .Name;
+
+        Assert.Equal(
+            "#/components/schemas/DisplayState_Hidden2",
+            mapping.GetProperty("hidden").GetString()
+        );
+        Assert.Equal("reason", PropertyOf("hidden", 1));
+        Assert.Equal(
+            "unrelated",
+            schemas
+                .GetProperty("DisplayState_Hidden")
+                .GetProperty("properties")
+                .EnumerateObject()
+                .Single()
+                .Name
+        );
+        Assert.Equal(
+            "#/components/schemas/DisplayState_Open",
+            mapping.GetProperty("open").GetString()
+        );
+        Assert.Equal(
+            "#/components/schemas/DisplayState_Open2",
+            mapping.GetProperty("Open").GetString()
+        );
+        Assert.Equal("first", PropertyOf("open", 1));
+        Assert.Equal("second", PropertyOf("Open", 1));
+    }
+
+    [Fact]
+    public void TaggedUnion_Pinned_Variant_Id_On_A_Different_Schema_Fails_With_RIV2001()
+    {
+        // A producer-pinned componentId is kept verbatim, so it is the one collision the
+        // emitter cannot rename its way out of.
+        var pinned = new TsTypeMetadata("Taken", TsTypeProvenance.Component);
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new(
+                "DisplayState",
+                [],
+                new TsType.TaggedUnion("kind", [Variant("hidden", "reason", pinned)])
+            ),
+            ["Taken"] = new(
+                "Taken",
+                [],
+                [new TsPropertyDefinition("unrelated", new TsType.Primitive("number"), false)]
+            ),
+        };
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitOpenApiFromModel(
+                    [],
+                    definitions,
+                    new Dictionary<string, TsType.Brand>(),
+                    new Dictionary<string, TsType>()
+                )
+                .Dispose()
+        );
+
+        Assert.StartsWith("error RIV2001:", exception.Message);
+        Assert.Contains("variant 'hidden'", exception.Message);
+        Assert.Contains("'Taken'", exception.Message);
+    }
+
+    [Fact]
+    public void TaggedUnion_Pinned_Variant_Refs_The_Component_It_Preserved_Verbatim()
+    {
+        // An imported discriminator variant that also needed raw component provenance
+        // (jira's ForgeMultiGroupField, cloudflare's workers_binding_kind_ai) used to
+        // trip RIV2001: the shape re-derived from the C# type has no member descriptions
+        // and a synthesized tag enum, so it never equals the preserved source copy.
+        var pinned = new TsTypeMetadata("Hidden", TsTypeProvenance.Component);
+        var preservedJson = """
+            {"type":"object","properties":{"kind":{"type":"string"},"reason":{"type":"string","description":"Why."}}}
+            """;
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new(
+                "DisplayState",
+                [],
+                new TsType.TaggedUnion("kind", [Variant("hidden", "reason", pinned)])
+            ),
+        };
+        var documentInfo = new OpenApiDocumentInfo(
+            Provenance: new OpenApiDocumentProvenance(
+                new OpenApiInfoProvenance("API", "1.0.0"),
+                [],
+                null,
+                [],
+                [],
+                ComponentSchemas: [new OpenApiRawComponentProvenance("Hidden", preservedJson)]
+            )
+        );
+
+        using var doc = EmitOpenApiFromModel(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            documentInfo: documentInfo
+        );
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(
+            "#/components/schemas/Hidden",
+            schemas
+                .GetProperty("DisplayState")
+                .GetProperty("discriminator")
+                .GetProperty("mapping")
+                .GetProperty("hidden")
+                .GetString()
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse(preservedJson),
+                JsonNode.Parse(schemas.GetProperty("Hidden").GetRawText())
+            )
+        );
+    }
+
     [Fact]
     public void Global_Tags_Array_Declares_All_Operation_Tags()
     {
@@ -4557,12 +4841,12 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void Generic_Instance_With_Missing_Template_Emits_Fallback_Component_And_Diagnostic()
+    public void Generic_Instance_With_Missing_Template_Fails_With_RIV2007()
     {
-        // GAP-1 / E6 family: a generic instantiation whose template is absent from the
-        // contract's type definitions (the rivet-php golden shape) used to emit
-        // $ref: #/components/schemas/Collection_ProductDto with no matching component
-        // and no diagnostic — a dangling reference every consumer rejects.
+        // A generic instantiation whose template is absent from the contract's type
+        // definitions has no properties to monomorphise. It used to emit a free-form
+        // object stand-in under a warning; a spec that says "any object" for a fixed
+        // wire shape is wrong, so the contract is refused, naming the omission.
         const string contractJson = """
             {
                 "types": [
@@ -4602,39 +4886,14 @@ public sealed class OpenApiEmitterTests
             }
             """;
 
-        var spec = string.Empty;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            spec = CompilationHelper.EmitOpenApiFromJson(contractJson)
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApiFromJson(contractJson)
         );
 
-        // 1. Loud, named diagnostic — never a silent drop.
-        Assert.Contains("generic template 'Collection'", stderr);
-        Assert.Contains("Collection_ProductDto", stderr);
-        Assert.Contains("is not present in the contract's type definitions", stderr);
-
-        using var doc = JsonDocument.Parse(spec);
-
-        // 2. The operation still references the instantiation by name...
-        var responseSchema = doc
-            .RootElement.GetProperty("paths")
-            .GetProperty("/products/paginated")
-            .GetProperty("get")
-            .GetProperty("responses")
-            .GetProperty("200")
-            .GetProperty("content")
-            .GetProperty("application/json")
-            .GetProperty("schema");
-        Assert.Equal(
-            "#/components/schemas/Collection_ProductDto",
-            responseSchema.GetProperty("$ref").GetString()
-        );
-
-        // 3. ...and the $ref target exists as a valid (free-form object) fallback component.
-        var fallback = doc
-            .RootElement.GetProperty("components")
-            .GetProperty("schemas")
-            .GetProperty("Collection_ProductDto");
-        Assert.Equal("object", fallback.GetProperty("type").GetString());
+        Assert.StartsWith("error RIV2007:", exception.Message);
+        Assert.Contains("generic 'Collection'", exception.Message);
+        Assert.Contains("Collection_ProductDto", exception.Message);
+        Assert.Contains("typeParameters", exception.Message);
     }
 
     [Fact]

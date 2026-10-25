@@ -15,9 +15,10 @@ These hold whenever you regenerate the spec (`dotnet rivet --project … --outpu
   `[RegularExpression]`, `[RivetConstraints]`, ...) are emitted as JSON Schema
   constraints (`minimum`, `maxLength`, `pattern`, `multipleOf`, ...).
 - `--check` verifies that every contract field has an implementation, that the
-  implementation's route and HTTP method match the declaration, and that an enum it
-  binds from the route, query, header or form can take every value the spec lists
-  (`RIV4005`). Generation refuses the same for an annotated action (`RIV1110`).
+  implementation's route and HTTP method match the declaration, that it binds each
+  input where the contract declares it (`RIV4006`), and that an enum it binds from the
+  route, query, header or form can take every value the spec lists (`RIV4005`).
+  Generation refuses an unbindable enum for an annotated action too (`RIV1110`).
 
 ## Runtime guarantees (contract responses)
 
@@ -62,6 +63,44 @@ normally, and constructs a contract-owned response:
   For a file that status is the declared one: a range or conditional request can still
   turn it into a 206, 304, 412 or 416 on the way out, so read
   `HttpContext.Response.StatusCode` in `OnResultExecuted` when you need what was sent.
+- **Required response headers turn up.** A header declared with
+  `.WithResponseHeader(..., required: true)` has to be on the response when the
+  adapter writes it, or the adapter throws, naming the header and the status. Set it
+  on `HttpContext.Response.Headers` before returning; a file's own arguments
+  (`entityTag:`, `lastModified:`, `downloadName:`, `inline:`, `enableRangeProcessing:`)
+  count for the headers they produce. A range status (`4XX`) holds every status in it.
+  The [endpoint builder](/reference/endpoint-builder#runtime-responses) has the details.
+- **The host's JSON options are the ones the spec describes.** The spec assumes
+  System.Text.Json's web defaults: camelCase names, every member written, numbers as
+  numbers, no global converters. So the first time an adapter runs against a given
+  set of options, it compares them with those defaults and throws if anything would
+  change the wire, naming every difference. `.ToResult()` checks the minimal-API
+  options (`ConfigureHttpJsonOptions`, `Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>`),
+  `.ToActionResult()` checks MVC's (`AddJsonOptions`, `Configure<Microsoft.AspNetCore.Mvc.JsonOptions>`).
+  Every result is checked, bodyless and file ones too, because the request bodies on
+  those endpoints are read with the same options.
+
+  Refused: a naming policy other than camelCase (none at all included), a
+  `DictionaryKeyPolicy`, anything in `Converters` (Rivet's own enum converters too:
+  the spec only sees a converter declared on the type), `NumberHandling` that writes
+  numbers as strings or named literals, a `DefaultIgnoreCondition` other than
+  `Never`, `IgnoreNullValues`, `IgnoreReadOnlyProperties`, `IgnoreReadOnlyFields`,
+  `IncludeFields`, a `ReferenceHandler`, `UnmappedMemberHandling.Disallow` and
+  `RespectRequiredConstructorParameters` (both refuse requests the spec allows), and
+  a `TypeInfoResolver` that isn't the default one or a source-generated
+  `JsonSerializerContext`. That last one means resolver modifiers: they can rename,
+  drop or add members, including polymorphism the spec never shows.
+
+  Left alone, because no exchange that follows the spec comes out different:
+  indenting, the encoder, `MaxDepth`, case-insensitive or case-sensitive property
+  matching, trailing commas, comments, reading numbers from strings,
+  `RespectNullableAnnotations`, `PreferredObjectCreationHandling` and
+  `UnknownTypeHandling`. ASP.NET's own defaults pass on .NET 8, 9 and 10, including
+  the source-generated context `AddProblemDetails()` adds.
+
+  Want snake_case, or enums as strings everywhere? Say it on the types:
+  `[JsonPropertyName]`, `[JsonIgnore]`, `[JsonConverter(typeof(RivetCamelCaseEnumConverter<T>))]`
+  and `[JsonPolymorphic]` all go into the spec, so the wire and the spec move together.
 
 ### The failure envelope
 
@@ -87,10 +126,10 @@ A violation then returns
 Do not rely on Rivet for any of the following — none of it happens:
 
 - **Serialized JSON shape.** The runtime checks are type-identity checks on the CLR
-  value, never inspection of serialized output. A derived instance is rejected (see
-  above), but members your *serializer configuration* adds, renames, or drops on the
-  declared type itself (custom converters, `[JsonExtensionData]`, contract
-  customization) go to the wire unchecked, and `null` in a required member is not
+  value and a comparison of the host's options, never inspection of serialized
+  output. A derived instance is rejected and so are wire-changing host options (see
+  above), but what a custom converter or `[JsonExtensionData]` declared on the type
+  itself writes goes to the wire unchecked, and `null` in a required member is not
   caught.
 - **Validation constraints.** Rivet's response terminals perform no constraint
   validation on requests or responses. Enforcement is the host framework's job —
@@ -100,14 +139,22 @@ Do not rely on Rivet for any of the following — none of it happens:
   to return `.Success(...)`, `.Error(...)`, or `.File(...)`; contract↔route binding
   is `--check`'s job, not the runtime's. Stream *contents* are never inspected.
 - **Request parsing and binding.** Done by ASP.NET (or whatever host you bridge to),
-  not by Rivet.
+  not by Rivet. What Rivet does check is the shape of it, statically: `--check` lines
+  the contract's inputs up against the handler's parameters and fails with `RIV4006`
+  when the handler binds an input the contract doesn't declare, ignores one it does,
+  or reads it from the wrong place (a header where the spec says query, `?Text=` where
+  it says `?q=`). It reads binding the way the host does, inference included, so it
+  catches the `[ApiController]` GET that quietly takes its query record from the body.
+  It can't see a value the handler fishes out of `HttpRequest` by hand, and it doesn't
+  look at Azure Functions, whose handlers do exactly that. See
+  [Contract Coverage](./contract-coverage#inputs-the-handler-doesn-t-bind-where-the-contract-says).
 - **Examples.** `.RequestExampleJson(...)` / `.ResponseExampleJson(...)` are runtime
   no-ops; Roslyn reads them at generation time only.
-- **Headers.** Declared request headers (`[RivetHeader]` / `[FromHeader]`) and
-  response headers (`.WithResponseHeader(...)`) are *spec-only* — Rivet never binds,
-  sets, or validates them. Reading a request header is host-framework binding;
-  emitting `Location`/`ETag`/`Retry-After` is handler code. Declaring a response
-  header `required: true` is a documentation promise your handler must keep.
+- **Request headers, and the values of response headers.** Declared request headers
+  (`[RivetHeader]` / `[FromHeader]`) are bound by the host framework, not Rivet.
+  Rivet never sets a response header either: emitting `Location`/`ETag`/`Retry-After`
+  is handler code. It checks that a `required: true` header is there (see above), not
+  what's in it.
 
 ## Enforcing constraints at runtime
 
@@ -136,21 +183,21 @@ host — so the wire behaviour matches what the spec promises:
 
 ### The positional-record gotcha
 
-Where the attribute *sits* on a record decides who can see it:
+Rivet reads a constraint wherever you put it on a positional record: on the
+property (`[property: Range(1, 100)]`) or on the constructor parameter (a plain
+`[Range(1, 100)]`, which is where C# puts an attribute with no target). The spec
+comes out the same either way. The hosts are fussier:
 
-- On a positional record parameter **without** `[property:]`, the attribute lands
-  on the constructor parameter: MVC model validation enforces it, but the Rivet
-  spec cannot see it — the wire is stricter than the spec. Drift in one direction.
-- **With** `[property:]`, the spec sees it and `Validator.TryValidateObject`
-  enforces it (the minimal-API pattern works) — but MVC model validation
-  **throws `InvalidOperationException` at request time** ("validation metadata
-  must be associated with the constructor parameter"), surfacing as a 500. Drift
-  in the other direction.
+- On the **parameter**, MVC model validation enforces it, but
+  `Validator.TryValidateObject` only looks at properties, so the minimal-API
+  pattern waves the value through.
+- On the **property**, `Validator.TryValidateObject` enforces it, but MVC model
+  validation **throws `InvalidOperationException` at request time** ("validation
+  metadata must be associated with the constructor parameter"), surfacing as a 500.
 
-For request DTOs validated by controller hosts, avoid the positional form
-entirely: declare the record with explicit `init` properties and put the
-constraint attributes on the properties. That single placement is visible to the
-spec, to MVC, and to `Validator.TryValidateObject` — see
+So for request DTOs, skip the positional form: declare the record with explicit
+`init` properties and put the constraint attributes on them. That one placement
+works for the spec, for MVC, and for `Validator.TryValidateObject` — see
 `InviteMemberRequest` in `samples/ContractApi/Models/MemberModels.cs`.
 
 The `--from-openapi` scaffold follows the same rule: any record whose properties

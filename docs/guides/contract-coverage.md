@@ -23,7 +23,7 @@ way: the contract owns the full path, so a group prefix it doesn't declare is a
 `MapGroup` prefix that isn't a constant) is reported as an unresolved
 `RouteMismatch`, because `--check` won't guess a route.
 
-`--check` reports five kinds of finding on stderr. The first four are warnings; `UnbindableEnumParameter` is an error (`RIV4005`):
+`--check` reports six kinds of finding on stderr. The first four are warnings; `UnbindableEnumParameter` (`RIV4005`) and `InputBindingMismatch` (`RIV4006`) are errors:
 
 | Finding | Meaning |
 |---|---|
@@ -31,7 +31,8 @@ way: the contract owns the full path, so a group prefix it doesn't declare is a
 | `OrphanedBinding` | The contract was bound in a route handler, but the handler neither returns a terminal built from that binding nor passes the binding to a helper whose answer it returns. |
 | `HttpMethodMismatch` | The implementing endpoint uses a different HTTP method than the contract declares. |
 | `RouteMismatch` | The implementing endpoint's route does not match the contract's route template. |
-| `UnbindableEnumParameter` | The handler binds an enum from the route, query, header or form (directly, or as a member of an `[AsParameters]` or explicitly `[FromQuery]`-style complex parameter), and its host would refuse one of the enum's advertised wire values. See [below](#enum-parameters-the-host-can-t-bind). |
+| `UnbindableEnumParameter` | The handler binds an enum from the route, query, header or form (directly, or as a member of a complex parameter the host binds member by member), and its host would refuse one of the enum's advertised wire values. See [below](#enum-parameters-the-host-can-t-bind). |
+| `InputBindingMismatch` | The handler binds an input the contract doesn't declare, never binds one it does, or binds it from somewhere else. See [below](#inputs-the-handler-doesn-t-bind-where-the-contract-says). |
 
 A summary line is always printed:
 
@@ -60,9 +61,55 @@ The same handler as an MVC action passes, since `restrictedByway` matches ignori
 case. Snake and kebab converters, and a `[JsonStringEnumMemberName]` that changes
 more than the casing, fail on both. A plain enum, the built-in
 `JsonStringEnumConverter<T>` with no renames, or a handler that binds a `string` and
-parses it itself are fine everywhere. Azure Functions handlers aren't checked. The
-full story, including what the hosts accept beyond the spec, is in
+parses it itself are fine on both. Azure Functions is stricter still: the worker reads
+a route value as JSON, so no name binds at all, and only a plain enum or a `string`
+will do. The full story, including what the hosts accept beyond the spec, is in
 [Limitations](/misc/limitations#enum-parameters-are-bound-by-asp-net).
+
+## Inputs the handler doesn't bind where the contract says
+
+The spec tells every client where to put each input: `{id}` in the path, `?q=` in the
+query, `X-Tenant` in a header, the rest in the body. ASP.NET doesn't read the spec. It
+binds what the handler's parameters ask for, by their names and attributes. When the two
+drift apart the request still compiles, still routes, and quietly loses a value.
+`--check` lines them up and fails with `RIV4006` when they disagree:
+
+```csharp
+[RivetType]
+public sealed record NoteSearch([property: JsonPropertyName("q")] string? Text);
+
+// The spec says ?q=. [AsParameters] binds the member by its C# name: ?Text=.
+app.MapGet(NotesContract.Search.Route, ([AsParameters] NoteSearch input) => …);
+```
+
+That one reports twice: the handler binds a query parameter `Text` the contract never
+declares, and never binds the `q` it does. `[FromQuery(Name = "q")] string? text` fixes
+it. Three things are reported:
+
+- **An input the contract doesn't declare.** No client generated from the spec sends
+  it, so it's always missing, and a required one fails every request.
+- **An input the contract declares that the handler never binds.** Clients send it and
+  the handler ignores it. A route value counts too: `{id}` in the contract wants an `id`
+  in the handler.
+- **The right name from the wrong place**, such as `[FromHeader] string search` for a
+  query parameter `search`.
+
+The body counts as one input. An MVC action without `[ApiController]` binds an
+unattributed complex parameter from the route, query and form, never the body, so a
+contract body there needs `[FromBody]`; under `[ApiController]` the same parameter *is*
+the body, so a GET whose query record lacks `[FromQuery]` reads an empty body instead
+of the query. Names compare ignoring case, as ASP.NET's do, and the check follows the
+same binding rules as `RIV4005`: explicit `[From*]` attributes and their `Name =`,
+`[AsParameters]`, and each host's inference.
+
+A handler that can read the request itself is trusted to pick inputs out by hand: an
+`HttpContext` or `HttpRequest` parameter, a `BindAsync` type, a custom model binder, or an
+MVC action that touches `Request` or `HttpContext`. It's never told an input is unbound,
+though what it does bind is still checked. An unattributed complex parameter that could be
+a service counts as the body when the contract has one and as a service when it doesn't.
+The `Authorization` header and a `.QueryAuth()` token belong to the contract's security,
+not its inputs. Azure Functions handlers aren't compared: they read the query, headers and
+body from `HttpRequest` by hand, so only their route values are bound at all.
 
 ## Helpers are fine
 
@@ -146,18 +193,19 @@ return outcome.Match(
 ```
 
 A lambda counts when it's passed straight to the call the handler returns, such as `Match`
-or `MatchAsync`, awaited or not, including a `Match` that one of those arms returns. A lambda
-buried in an argument doesn't. In
+or `MatchAsync`, awaited or not, including a `Match` that one of those arms returns. Naming
+the arm first changes nothing: a lambda in a local (`var found = (TaskDto t) => ...;`) or a
+local function passed as `outcome.Match(found, ...)` is still the handler's own code. A lambda
+buried in an argument doesn't count. In
 `return Results.Ok(items.Select(t => endpoint.Success(t).ToResult()));` the response is
 the `Ok`, not the terminal inside `Select`. Nor does a `Match` whose answer is thrown away.
-A lambda held in a local isn't followed either, even if you later pass it to `Match`. In a
-minimal API the handler is the lambda you hand to `MapGet` and friends, not the `Match` arm
-inside it, so that's whose route and parameters get checked.
+In a minimal API the handler is the lambda you hand to `MapGet` and friends, not the `Match`
+arm inside it, so that's whose route and parameters get checked.
 
 Helpers still don't count towards coverage. A terminal handed to a helper to adapt, as in
 `Done(endpoint.Success(task))`, or built inside one, as in `NotFound(endpoint)`, belongs to
-the helper, not the handler. The first one is also an `OrphanedBinding` unless the handler
-uses `endpoint` some other way: it hands the helper a terminal, not the bound endpoint.
+the helper, not the handler. Both use the binding, though, so neither is an
+`OrphanedBinding`.
 
 ## Exit code
 

@@ -151,8 +151,12 @@ spec.
 `admin=bearer` defines the bearer scheme that `.Secure("admin")` names. The first
 `--security` is also the document-wide default, so every endpoint without
 `.Anonymous()` requires it, `GET /api/tasks/{id}` included. Drop the flag and the
-`.Secure("admin")` call for an unauthenticated API, or see the
-[CLI reference](https://maxanstey-meridian.github.io/rivet/reference/cli) for
+`.Secure("admin")` call for an unauthenticated API. Scopes, alternatives and
+optional credentials are a few more builder calls away (`.Secure("oauth", "tasks:write")`,
+`.AndSecure(...)`, `.OrAnonymous()`); the
+[Route Definition API](https://maxanstey-meridian.github.io/rivet/reference/endpoint-builder#security)
+shows them, and the
+[CLI reference](https://maxanstey-meridian.github.io/rivet/reference/cli) covers
 multiple schemes.
 
 ## Consume

@@ -331,7 +331,8 @@
         "schemaType": { "type": "string", "enum": ["string", "integer", "number", "boolean"] },
         "format": { "type": "string" },
         "isFormatSpecified": { "type": "boolean" },
-        "allowEmptyValue": { "type": "boolean" }
+        "allowEmptyValue": { "type": "boolean" },
+        "allowReserved": { "type": "boolean" }
       },
       "required": ["name", "type", "source"],
       "additionalProperties": false
@@ -347,7 +348,9 @@
         "referencedComponents": {
           "type": "object",
           "additionalProperties": { "type": "string" }
-        }
+        },
+        "summary": { "type": "string" },
+        "description": { "type": "string" }
       },
       "required": ["mediaType"],
       "additionalProperties": false,
@@ -364,6 +367,16 @@
         {
           "required": ["componentExampleId"],
           "not": { "required": ["json"] }
+        },
+        {
+          "anyOf": [{ "required": ["summary"] }, { "required": ["description"] }],
+          "not": {
+            "anyOf": [
+              { "required": ["json"] },
+              { "required": ["componentExampleId"] },
+              { "required": ["resolvedJson"] }
+            ]
+          }
         }
       ]
     },
@@ -404,16 +417,8 @@
       "required": ["name", "type"],
       "additionalProperties": false
     },
-    "endpointSecurity": {
-      "type": "object",
-      "properties": {
-        "isAnonymous": { "type": "boolean" },
-        "scheme": { "type": "string" }
-      },
-      "required": ["isAnonymous"],
-      "additionalProperties": false
-    },
     "securityRequirements": {
+      "description": "OpenAPI security requirements: any one alternative satisfies them; an alternative needs every scheme in it. Absent inherits the document's security; no alternatives is security: []; an alternative with no schemes makes credentials optional.",
       "type": "object",
       "properties": {
         "alternatives": {
@@ -523,7 +528,7 @@
         "responses": { "type": "array", "items": { "$ref": "#/$defs/responseType" } },
         "summary": { "type": "string" },
         "description": { "type": "string" },
-        "security": { "$ref": "#/$defs/endpointSecurity" },
+        "security": { "$ref": "#/$defs/securityRequirements" },
         "fileContentType": { "type": "string" },
         "inputTypeName": { "type": "string" },
         "isFormEncoded": { "type": "boolean" },
@@ -534,7 +539,6 @@
         "binaryRequestContentType": { "type": "string" },
         "requestContentTypeOverride": { "type": "string" },
         "responseContentTypeOverride": { "type": "string" },
-        "securityRequirements": { "$ref": "#/$defs/securityRequirements" },
         "requestContents": { "type": "array", "items": { "$ref": "#/$defs/mediaTypeContent" } },
         "requestBodyRequired": { "type": "boolean" },
         "requestBodyPresent": { "type": "boolean" },

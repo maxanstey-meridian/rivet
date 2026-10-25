@@ -328,6 +328,121 @@ public sealed class ExplicitContractTests
         );
     }
 
+    // A converter or number handling Rivet doesn't model decides the wire on its own, so
+    // the spec would describe the CLR shape instead. Each one is refused, wherever it sits:
+    // on the type, on a property or field, on a polymorphic variant, or inherited from the
+    // walked type's own [JsonNumberHandling].
+    private const string SerializerFixtures = """
+        using System.Collections.Generic;
+        using System.Text.Json;
+        using System.Text.Json.Serialization;
+        using Rivet;
+
+        public sealed class Upper : JsonConverter<string>
+        {
+            public override string Read(ref Utf8JsonReader r, System.Type t, JsonSerializerOptions o) => r.GetString()!;
+            public override void Write(Utf8JsonWriter w, string v, JsonSerializerOptions o) => w.WriteStringValue(v.ToUpperInvariant());
+        }
+        public sealed class MoneyConverter : JsonConverter<Money>
+        {
+            public override Money Read(ref Utf8JsonReader r, System.Type t, JsonSerializerOptions o) => new(r.GetDecimal());
+            public override void Write(Utf8JsonWriter w, Money v, JsonSerializerOptions o) => w.WriteNumberValue(v.Amount);
+        }
+        public sealed record Money(decimal Amount);
+        public enum Code { First }
+        """;
+
+    [Theory]
+    [InlineData(
+        "[JsonConverter(typeof(MoneyConverter))] public sealed record Priced(decimal Amount); [RivetType] public sealed record Holder(Priced Value);",
+        "RIV1111",
+        "type 'Priced'"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonConverter(typeof(Upper))] string Value);",
+        "RIV1111",
+        "'Holder.Value'"
+    )]
+    [InlineData(
+        "[RivetType] public sealed class Holder { [JsonInclude, JsonConverter(typeof(Upper))] public string Value = \"\"; }",
+        "RIV1111",
+        "'Holder.Value'"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonConverter(typeof(JsonStringEnumConverter<Code>))] Code Value);",
+        "RIV1111",
+        "JsonStringEnumConverter<Code>"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonConverter(typeof(MoneyConverter)), RivetSchemaType(\"number\")] Money Value);",
+        "RIV1111",
+        "'Holder.Value'"
+    )]
+    [InlineData(
+        "[RivetType, JsonPolymorphic, JsonDerivedType(typeof(Circle), \"circle\")] public abstract record Shape; public sealed record Circle([property: JsonConverter(typeof(Upper))] string Name) : Shape;",
+        "RIV1111",
+        "'Shape.circle.Name'"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] int Value);",
+        "RIV1112",
+        "WriteAsString"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonNumberHandling(JsonNumberHandling.AllowNamedFloatingPointLiterals)] IReadOnlyList<double> Value);",
+        "RIV1112",
+        "AllowNamedFloatingPointLiterals"
+    )]
+    [InlineData(
+        "[RivetType, JsonNumberHandling(JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.WriteAsString)] public sealed record Holder(string Name, long? Value);",
+        "RIV1112",
+        "type 'Holder'"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] List<int> Value);",
+        "RIV1112",
+        "'Holder.Value'"
+    )]
+    public void Unmodelled_Serializer_Settings_Refuse(string declarations, string id, string named)
+    {
+        var compilation = CompilationHelper.CreateCompilation(SerializerFixtures + declarations);
+        var message = Assert
+            .Throws<RivetUserException>(() => CompilationHelper.DiscoverAndWalk(compilation))
+            .Message;
+        Assert.StartsWith($"error {id}:", message);
+        Assert.Contains(named, message);
+    }
+
+    // The settings Rivet does model, or that leave every advertised value on the wire.
+    [Theory]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)] int Value);"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonConverter(typeof(Upper)), RivetSchemaType(\"string\")] string Value);"
+    )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonNumberHandling(JsonNumberHandling.WriteAsString), RivetSchemaType(\"string\")] int Value);"
+    )]
+    [InlineData(
+        "[RivetType, JsonNumberHandling(JsonNumberHandling.WriteAsString)] public sealed record Holder(string Name, [property: JsonNumberHandling(JsonNumberHandling.Strict)] int Value);"
+    )]
+    [InlineData(
+        "[RivetScalar, JsonNumberHandling(JsonNumberHandling.WriteAsString)] public sealed record Cents(int Value); [RivetType] public sealed record Holder(Cents Value);"
+    )]
+    [InlineData(
+        "[JsonConverter(typeof(JsonStringEnumConverter<Shade>))] public enum Shade { Dark } [RivetType] public sealed record Holder(Shade Value);"
+    )]
+    [InlineData(
+        "[RivetUnion] public sealed record Either(string? Text, int? Number); [RivetType] public sealed record Holder(Either Value);"
+    )]
+    public void Modelled_Serializer_Settings_Are_Accepted(string declarations)
+    {
+        var compilation = CompilationHelper.CreateCompilation(SerializerFixtures + declarations);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        Assert.True(walker.Definitions.ContainsKey("Holder"));
+    }
+
     [Theory]
     [InlineData(
         "public sealed class Bad { public string Value { get; } public Bad(ref string value) => Value = value; }"

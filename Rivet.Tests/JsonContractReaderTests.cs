@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -1004,7 +1005,7 @@ public sealed class JsonContractReaderTests
     }
 
     [Fact]
-    public void Duplicate_Response_Status_In_Contract_Json_Keeps_First_Metadata_And_Sorts()
+    public void Duplicate_Response_Status_In_Contract_Json_Fails_With_RIV2010()
     {
         var json = """
             {
@@ -1017,41 +1018,95 @@ public sealed class JsonContractReaderTests
                 "params": [],
                 "controllerName": "UsersController",
                 "responses": [
-                  { "statusCode": 500, "description": "server error" },
-                  {
-                    "statusCode": 404,
-                    "dataType": { "kind": "primitive", "type": "string" },
-                    "description": "first",
-                    "examples": [{ "mediaType": "application/json", "name": "first", "json": "{}" }],
-                    "headers": [{ "name": "X-First", "type": { "kind": "primitive", "type": "string" }, "description": "first header", "required": true }]
-                  },
-                  { "statusCode": 404, "dataType": { "kind": "primitive", "type": "number" }, "description": "second" },
-                  { "statusCode": 200, "description": "success" }
+                  { "statusCode": 404, "dataType": { "kind": "primitive", "type": "string" }, "description": "first" },
+                  { "statusCode": 404, "dataType": { "kind": "primitive", "type": "number" }, "description": "second" }
                 ]
               }]
             }
             """;
 
-        IReadOnlyList<TsEndpointDefinition>? endpoints = null;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            var result = JsonContractReader.Read(json);
-            endpoints = result.Endpoints;
-            ContractEmitter.Emit(
-                result.Types.ToDictionary(type => type.Name),
-                result.Enums,
-                result.Endpoints
-            );
-        });
+        // Keeping the first declaration used to drop the second's shape and metadata
+        // under a warning; the producer's contradiction is now refused.
+        var exception = Assert.Throws<RivetUserException>(() => JsonContractReader.Read(json));
 
-        var responses = Assert.Single(endpoints!).Responses;
-        Assert.Equal([200, 404, 500], responses.Select(response => response.StatusCode));
-        var response404 = responses[1];
-        Assert.Equal(new TsType.Primitive("string"), response404.DataType);
-        Assert.Equal("first", response404.Description);
-        Assert.Equal("first", Assert.Single(response404.Examples!).Name);
-        Assert.Equal("X-First", Assert.Single(response404.Headers!).Name);
-        Assert.Equal(1, stderr.Split("warning RIV2010:").Length - 1);
+        Assert.StartsWith("error RIV2010:", exception.Message);
+        Assert.Contains("'getUser'", exception.Message);
+        Assert.Contains("status 404", exception.Message);
+    }
+
+    [Fact]
+    public void Brand_Declared_Two_Ways_Fails_With_RIV2008()
+    {
+        var json = """
+            {
+              "types": [{
+                "name": "UserDto",
+                "typeParameters": [],
+                "properties": [
+                  { "name": "id", "type": { "kind": "brand", "name": "UserId", "underlying": { "kind": "primitive", "type": "string" } }, "optional": false },
+                  { "name": "legacyId", "type": { "kind": "brand", "name": "UserId", "underlying": { "kind": "primitive", "type": "number" } }, "optional": false }
+                ]
+              }],
+              "enums": [],
+              "endpoints": []
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() => JsonContractReader.Read(json));
+
+        Assert.StartsWith("error RIV2008:", exception.Message);
+        Assert.Contains("'UserId'", exception.Message);
+        Assert.Contains("\"string\"", exception.Message);
+        Assert.Contains("\"number\"", exception.Message);
+    }
+
+    [Fact]
+    public void Brand_Declared_Identically_Twice_Is_One_Brand()
+    {
+        var json = """
+            {
+              "types": [{
+                "name": "UserDto",
+                "typeParameters": [],
+                "properties": [
+                  { "name": "id", "type": { "kind": "brand", "name": "Tag", "underlying": { "kind": "stringUnion", "values": ["a", "b"] } }, "optional": false },
+                  { "name": "other", "type": { "kind": "brand", "name": "Tag", "underlying": { "kind": "stringUnion", "values": ["a", "b"] } }, "optional": false }
+                ]
+              }],
+              "enums": [],
+              "endpoints": []
+            }
+            """;
+
+        var (_, _, _, brands) = JsonContractReader.Read(json);
+
+        Assert.Equal("Tag", Assert.Single(brands).Key);
+    }
+
+    [Theory]
+    [InlineData(
+        """[{ "name": "Dto", "typeParameters": [], "properties": [] }, { "name": "Dto", "typeParameters": [], "properties": [] }]""",
+        "[]",
+        "'Dto' is declared more than once"
+    )]
+    [InlineData(
+        """[{ "name": "Status", "typeParameters": [], "properties": [] }]""",
+        """[{ "name": "Status", "values": ["a"] }]""",
+        "'Status' is declared more than once"
+    )]
+    [InlineData("[]", """[{ "name": "Status" }]""", "enum 'Status' must carry exactly one of")]
+    [InlineData(
+        "[]",
+        """[{ "name": "Status", "values": ["a"], "intValues": [1] }]""",
+        "enum 'Status' must carry exactly one of"
+    )]
+    public void Malformed_Declarations_Are_Refused(string types, string enums, string expected)
+    {
+        var json = $$"""{ "types": {{types}}, "enums": {{enums}}, "endpoints": [] }""";
+
+        var exception = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+
+        Assert.Contains(expected, exception.Message);
     }
 
     [Theory]
@@ -1253,7 +1308,7 @@ public sealed class JsonContractReaderTests
                     ]
                 ),
             ],
-            SecurityRequirements: new SecurityRequirements([
+            Security: new SecurityRequirements([
                 new SecurityRequirement([new SecurityRequirementScheme("oauth", ["items:write"])]),
             ]),
             Provenance: new OpenApiOperationProvenance(
@@ -1271,11 +1326,8 @@ public sealed class JsonContractReaderTests
         var roundTripped = Assert.Single(JsonContractReader.Read(json).Endpoints);
         var response = Assert.Single(roundTripped.Responses);
 
-        Assert.Equal("oauth", roundTripped.SecurityRequirements!.Alternatives[0].Schemes[0].Name);
-        Assert.Equal(
-            ["items:write"],
-            roundTripped.SecurityRequirements.Alternatives[0].Schemes[0].Scopes
-        );
+        Assert.Equal("oauth", roundTripped.Security!.Alternatives[0].Schemes[0].Name);
+        Assert.Equal(["items:write"], roundTripped.Security.Alternatives[0].Schemes[0].Scopes);
         Assert.Equal("items.create", roundTripped.Provenance!.OperationId);
         Assert.Equal("Exact request body", roundTripped.Provenance.RequestBodyDescription);
         Assert.Equal("Created exactly", response.Description);
@@ -1284,5 +1336,100 @@ public sealed class JsonContractReaderTests
         Assert.Equal("application/custom+json", content.MediaType);
         Assert.Equal("item-id", content.Format);
         Assert.True(content.IsFormatSpecified);
+    }
+
+    private const string BrandConflictTypes = """
+        [{ "name": "UserDto", "typeParameters": [], "properties": [
+          { "name": "id", "type": { "kind": "brand", "name": "UserId", "underlying": { "kind": "primitive", "type": "string" } }, "optional": false },
+          { "name": "legacyId", "type": { "kind": "brand", "name": "UserId", "underlying": { "kind": "primitive", "type": "number" } }, "optional": false }
+        ] }]
+        """;
+
+    private const string GetEndpoint = """
+        "name": "get", "httpMethod": "GET", "routeTemplate": "/api/things", "params": [], "controllerName": "things"
+        """;
+
+    /// <summary>
+    /// Malformed contract JSON is refused by the real CLI: exit 1, the diagnostic on
+    /// stderr, and no spec written. Each case used to warn and write a degraded spec.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "RIV2005",
+        "[]",
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "ref", "name": "Missing" } }] }]"""
+    )]
+    [InlineData(
+        "RIV2005",
+        "[]",
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "primitive", "type": "unknown", "csharpType": "TimeSpan" } }] }]"""
+    )]
+    [InlineData(
+        "RIV2006",
+        "[]",
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "typeParam", "name": "T" } }] }]"""
+    )]
+    [InlineData(
+        "RIV2007",
+        "[]",
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "generic", "name": "Page", "typeArgs": [{ "kind": "primitive", "type": "string" }] } }] }]"""
+    )]
+    [InlineData("RIV2008", BrandConflictTypes, "[]")]
+    [InlineData(
+        "RIV2010",
+        "[]",
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }, { "statusCode": 200 }] }]"""
+    )]
+    public void Cli_Refuses_Malformed_Contract_Json(string id, string types, string endpoints)
+    {
+        using var workDirectory = new TempDir();
+        var contractPath = Path.Combine(workDirectory.FullName, "contract.json");
+        File.WriteAllText(
+            contractPath,
+            $$"""{ "types": {{types}}, "enums": [], "endpoints": {{endpoints}} }"""
+        );
+        var outputDirectory = Path.Combine(workDirectory.FullName, "out");
+
+        var (exitCode, _, stderr) = CliRunner.RunCli(
+            workDirectory.FullName,
+            ["--from", contractPath, "--output", outputDirectory]
+        );
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains($"error {id}:", stderr);
+        Assert.DoesNotContain("warning RIV20", stderr);
+        Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
+    }
+
+    [Fact]
+    public void Typescript_Unknown_Maps_To_The_Empty_Schema_Silently()
+    {
+        // rivet-ts lowers TypeScript's `unknown` to a primitive with no csharpType: "any
+        // JSON value", whose honest schema is {} — the same as object/JsonElement.
+        var json = $$"""
+            {
+              "types": [],
+              "enums": [],
+              "endpoints": [{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "primitive", "type": "unknown" } }] }]
+            }
+            """;
+
+        string spec = null!;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            spec = CompilationHelper.EmitOpenApiFromJson(json)
+        );
+
+        using var doc = JsonDocument.Parse(spec);
+        var schema = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/things")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema");
+        Assert.Empty(schema.EnumerateObject());
+        Assert.DoesNotContain("/api/things", stderr);
     }
 }

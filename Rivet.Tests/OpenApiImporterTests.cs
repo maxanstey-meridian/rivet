@@ -517,7 +517,7 @@ public sealed class OpenApiImporterTests
         var imported = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(imported, "HealthContract.cs");
         Assert.Contains(".Anonymous()", contract);
-        Assert.DoesNotContain(".SecurityRequirements()", contract);
+        Assert.DoesNotContain(".Secure(", contract);
 
         var compilation = CompilationHelper.CompileImportResult(imported);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
@@ -558,7 +558,7 @@ public sealed class OpenApiImporterTests
         );
 
         Assert.Contains(
-            ".SecurityRequirement(0, \"admin\")",
+            ".Secure(\"admin\")",
             CompilationHelper.FindFile(CompilationHelper.Import(spec), "AdminContract.cs")
         );
     }
@@ -885,7 +885,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void GitHub_UpdateImport_Exampleless_RequestEntry_Is_Explicit_Not_Silent()
+    public void GitHub_UpdateImport_Summary_Only_RequestEntry_Survives()
     {
         var spec = FixtureSlices.GitHubUpdateImport();
         var result = CompilationHelper.Import(spec, "GitHub.Contracts");
@@ -898,17 +898,21 @@ public sealed class OpenApiImporterTests
             e.HttpMethod == "PATCH" && e.RouteTemplate == "/repos/{owner}/{repo}/import"
         );
 
+        // example-3 is {"summary": "Restarting an import"}: OpenAPI makes the value
+        // optional, so the summary alone is a complete Example Object, not a gap.
         Assert.NotNull(endpoint.RequestExamples);
         Assert.Collection(
             endpoint.RequestExamples!,
             first => Assert.Equal("example-1", first.Name),
-            second => Assert.Equal("example-2", second.Name)
+            second => Assert.Equal("example-2", second.Name),
+            third =>
+            {
+                Assert.Equal("example-3", third.Name);
+                Assert.Equal("Restarting an import", third.Summary);
+                Assert.Null(third.Json);
+            }
         );
-
-        Assert.Contains(
-            "[rivet:unsupported request-example media-type=application/json name=example-3 reason=missing-value]",
-            content
-        );
+        Assert.DoesNotContain("reason=missing-value", content);
     }
 
     [Fact]
@@ -1062,9 +1066,11 @@ public sealed class OpenApiImporterTests
                               "validProblem": {
                                 "value": { "message": "Validation failed" }
                               },
-                              "missingValue": {
-                                "summary": "No payload"
+                              "documentedOnly": {
+                                "summary": "No payload",
+                                "description": "The problem has no body worth showing."
                               },
+                              "missingValue": {},
                               "missingRef": {
                                 "$ref": "#/components/examples/missing-problem"
                               }
@@ -1084,7 +1090,13 @@ public sealed class OpenApiImporterTests
         var endpoint = Assert.Single(endpoints);
 
         var response = endpoint.Responses.Single(item => item.StatusCode == 422);
-        var example = Assert.Single(response.Examples!);
+        Assert.Equal(2, response.Examples!.Count);
+        var documented = response.Examples[1];
+        Assert.Equal("documentedOnly", documented.Name);
+        Assert.Equal("No payload", documented.Summary);
+        Assert.Equal("The problem has no body worth showing.", documented.Description);
+        Assert.Null(documented.Json);
+        var example = response.Examples[0];
         Assert.Equal("validProblem", example.Name);
         Assert.Equal("application/json", example.MediaType);
         Assert.Equal("""{"message":"Validation failed"}""", example.Json);
@@ -1104,6 +1116,21 @@ public sealed class OpenApiImporterTests
         Assert.Contains(
             "[rivet:unsupported response-example status=422 media-type=application/json name=missingRef component-example-id=missing-problem reason=unresolved-ref]",
             contract
+        );
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse(
+                    """{"summary":"No payload","description":"The problem has no body worth showing."}"""
+                ),
+                emitted["paths"]!["/api/orders/{id}"]!["get"]!["responses"]!["422"]!["content"]![
+                    "application/json"
+                ]!["examples"]!["documentedOnly"]
+            )
         );
     }
 
@@ -1553,15 +1580,12 @@ public sealed class OpenApiImporterTests
 
         // Members invite has security: [{"admin": []}].
         Assert.Contains(
-            ".SecurityRequirement(0, \"admin\")",
+            ".Secure(\"admin\")",
             CompilationHelper.FindFile(result, "MembersContract.cs")
         );
 
         // Global security remains document-level provenance, not endpoint DSL.
-        Assert.DoesNotContain(
-            ".SecurityRequirement(",
-            CompilationHelper.FindFile(result, "TasksContract.cs")
-        );
+        Assert.DoesNotContain(".Secure(", CompilationHelper.FindFile(result, "TasksContract.cs"));
 
         // Summary present
         Assert.Contains(
@@ -3923,13 +3947,19 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void IntEnum_Duplicate_Values_Are_Deduplicated()
+    public void Repeated_Enum_Members_Collapse_To_One()
     {
+        // An enum is a set, so a repeat adds nothing. Two members with one wire value
+        // used to be generated, which the forward walk refuses (vercel's 'preview').
         var spec = CompilationHelper.BuildSpec(
             schemas: """
             "Status": {
                 "type": "integer",
                 "enum": [1, 1, 2]
+            },
+            "Target": {
+                "type": "string",
+                "enum": ["production", "preview", "development", "preview"]
             }
             """,
             title: "API"
@@ -3937,10 +3967,12 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
         var content = CompilationHelper.FindFile(result, "Status.cs");
+        var target = CompilationHelper.FindFile(result, "Target.cs");
 
         Assert.Contains("Value1 = 1,", content);
-        Assert.Contains("Value1_2 = 1,", content);
+        Assert.DoesNotContain("Value1_2", content);
         Assert.Contains("Value2 = 2", content);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(target, "\"preview\""));
 
         // Must compile — duplicate member names would cause CS errors
         var compilation = CompilationHelper.CompileImportResult(result);
@@ -4722,35 +4754,6 @@ public sealed class OpenApiImporterTests
         Assert.Contains("A_2 = 1,", content);
         Assert.Contains("A_3 = 2", content);
 
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var errors = compilation
-            .GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
-        Assert.Empty(errors);
-    }
-
-    [Fact]
-    public void IntEnum_Triple_Duplicate_Values_Produce_Unique_Names()
-    {
-        var spec = CompilationHelper.BuildSpec(
-            schemas: """
-            "Status": {
-                "type": "integer",
-                "enum": [1, 1, 1]
-            }
-            """,
-            title: "API"
-        );
-
-        var result = CompilationHelper.Import(spec);
-        var content = CompilationHelper.FindFile(result, "Status.cs");
-
-        Assert.Contains("Value1 = 1,", content);
-        Assert.Contains("Value1_2 = 1,", content);
-        Assert.Contains("Value1_3 = 1", content);
-
-        // Must compile — duplicate member names would cause CS0102
         var compilation = CompilationHelper.CompileImportResult(result);
         var errors = compilation
             .GetDiagnostics()
@@ -5899,7 +5902,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void MultiScheme_Operation_Security_Is_Preserved_As_Or_Requirements()
+    public void MultiScheme_Operation_Security_Is_Preserved_As_Or_Of_And_Requirements()
     {
         var spec = """
             {
@@ -5916,7 +5919,11 @@ public sealed class OpenApiImporterTests
                         "get": {
                             "operationId": "items_list",
                             "tags": ["Items"],
-                            "security": [ { "alpha": [] }, { "beta": [] } ],
+                            "security": [
+                                { "alpha": [] },
+                                { "beta": ["items:read", "items:write"], "alpha": ["admin"] },
+                                {}
+                            ],
                             "responses": { "204": { "description": "No Content" } }
                         }
                     }
@@ -5927,8 +5934,14 @@ public sealed class OpenApiImporterTests
         var result = CompilationHelper.Import(spec);
         var contract = CompilationHelper.FindFile(result, "ItemsContract.cs");
 
-        Assert.Contains(".SecurityRequirement(0, \"alpha\")", contract);
-        Assert.Contains(".SecurityRequirement(1, \"beta\")", contract);
+        Assert.Contains(
+            ".Secure(\"alpha\")\n"
+                + "            .Secure(\"beta\", \"items:read\", \"items:write\")\n"
+                + "            .AndSecure(\"alpha\", \"admin\")\n"
+                + "            .OrAnonymous()",
+            contract.ReplaceLineEndings("\n")
+        );
+        Assert.Empty(result.Warnings);
         Assert.DoesNotContain("[rivet:unsupported security", contract);
     }
 
@@ -6007,6 +6020,267 @@ public sealed class OpenApiImporterTests
         Assert.Contains("[property: RivetHeader(\"X-Fine\")]", inputRecord);
         Assert.DoesNotContain("Authorization", inputRecord);
         Assert.DoesNotContain("Accept", inputRecord);
+    }
+
+    [Fact]
+    public void Schemaless_Parameters_Are_Diagnosed_And_AllowReserved_Survives()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Parameters", "version": "1.0.0" },
+              "components": {
+                "parameters": {
+                  "Search": { "name": "search", "in": "query", "allowReserved": true, "schema": { "type": "string" } },
+                  "Filter": { "name": "filter", "in": "query", "content": { "application/json": { "schema": { "type": "object" } } } }
+                }
+              },
+              "paths": {
+                "/pets": {
+                  "parameters": [
+                    { "name": "X-Shape", "in": "header", "content": { "text/plain": { "schema": { "type": "string" } } } }
+                  ],
+                  "get": {
+                    "operationId": "listPets",
+                    "parameters": [
+                      { "name": "q", "in": "query", "allowReserved": true, "schema": { "type": "string" } },
+                      { "name": "id", "in": "header", "allowReserved": true, "schema": { "type": "string" } },
+                      { "$ref": "#/components/parameters/Search" },
+                      { "$ref": "#/components/parameters/Filter" },
+                      { "name": "bare", "in": "query" }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Equal(
+            [
+                "RIV3025: Parameter dropped: GET /pets declares 'X-Shape' (in=header) with content (text/plain) instead of a schema; Rivet parameters carry a schema. Give it a schema (a JSON-serialised value is a string parameter) or move the value into the request body.",
+                "RIV3025: Parameter dropped: GET /pets declares 'filter' (in=query) with content (application/json) instead of a schema; Rivet parameters carry a schema. Give it a schema (a JSON-serialised value is a string parameter) or move the value into the request body.",
+                "RIV3025: Parameter dropped: GET /pets declares 'bare' (in=query) with neither a schema nor content, which OpenAPI requires. Give it a schema.",
+            ],
+            result.Warnings
+        );
+
+        // allowReserved survives on the inline query parameter, on the referenced
+        // component, and nowhere OpenAPI doesn't allow it (a header).
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        Assert.Contains(
+            emitted["paths"]!["/pets"]!["get"]!["parameters"]!.AsArray(),
+            parameter => (string?)parameter!["$ref"] == "#/components/parameters/Search"
+        );
+        Assert.True(
+            emitted["components"]!["parameters"]!["Search"]!["allowReserved"]!.GetValue<bool>()
+        );
+        var inline = emitted["paths"]!["/pets"]!["get"]!["parameters"]!
+            .AsArray()
+            .ToDictionary(parameter => (string?)parameter!["name"] ?? "$ref");
+        Assert.True(inline["q"]!["allowReserved"]!.GetValue<bool>());
+        Assert.Null(inline["id"]!["allowReserved"]);
+    }
+
+    [Fact]
+    public void Empty_And_Case_Duplicate_Response_Headers_Are_Marked()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/items": {
+                "get": {
+                    "operationId": "items_list",
+                    "tags": ["Items"],
+                    "responses": {
+                        "200": {
+                            "description": "ok",
+                            "headers": {
+                                "X-Rate": { "schema": { "type": "string" } },
+                                "x-rate": { "schema": { "type": "string" } },
+                                "": { "schema": { "type": "string" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var contract = CompilationHelper.FindFile(
+            CompilationHelper.Import(spec),
+            "ItemsContract.cs"
+        );
+
+        Assert.Contains(".WithResponseHeader", contract);
+        Assert.Contains(
+            "// [rivet:unsupported header name=x-rate status=200 reason=duplicate-name]",
+            contract
+        );
+        Assert.Contains(
+            "// [rivet:unsupported header name= status=200 reason=empty-name]",
+            contract
+        );
+    }
+
+    [Fact]
+    public void Requests_Outside_The_Contracts_Are_Diagnosed_By_Pointer()
+    {
+        // The documentation fields in this spec are carried as preserved fields (see
+        // PreservedFieldProvenanceTests); only what describes other requests is reported.
+        var result = CompilationHelper.Import(
+            PreservedFieldProvenanceTests.DocumentationFieldsSpec
+        );
+
+        Assert.Equal(
+            [
+                "RIV3028: Webhook dropped: #/webhooks/petCreated; webhooks are requests the API sends, not ones it receives. Document the outgoing call in the description, or give the receiving service its own contract.",
+                "RIV3027: Callback dropped: #/paths/~1pets/post/callbacks/onDone; Rivet contracts describe the requests an API receives, not the ones it sends. Document the outgoing call in the operation description, or give the receiving service its own contract.",
+                "RIV3028: Path item component dropped: #/components/pathItems/Spare; only path items under 'paths' become contract endpoints, and a path that references it is imported inline. Reference it from 'paths' if its operations belong to this API.",
+                "RIV3027: Callback dropped: #/components/callbacks/OnEvent; Rivet contracts describe the requests an API receives, not the ones it sends. Document the outgoing call in the operation description, or give the receiving service its own contract.",
+                "RIV3003: Operation dropped: TRACE /pets — HTTP method has no contract representation.",
+            ],
+            result.Warnings
+        );
+    }
+
+    [Fact]
+    public void Paths_That_Differ_Only_In_Parameter_Names_Merge_Into_The_First()
+    {
+        // Vercel, GitHub and Jira each author a GET and a DELETE on one template under two
+        // parameter names, which OpenAPI forbids.
+        var spec = """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Deployments", "version": "1.0.0" },
+              "paths": {
+                "/deployments/{idOrUrl}": {
+                  "get": {
+                    "operationId": "getDeployment",
+                    "parameters": [{ "name": "idOrUrl", "in": "path", "required": true, "schema": { "type": "string" } }],
+                    "responses": { "204": { "description": "Found" } }
+                  }
+                },
+                "/deployments/{id}": {
+                  "delete": {
+                    "operationId": "deleteDeployment",
+                    "parameters": [{ "name": "id", "in": "path", "required": true, "description": "The deployment.", "schema": { "type": "string" } }],
+                    "responses": { "204": { "description": "Deleted" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Equal(
+            [
+                "RIV3029: Path merged: '/deployments/{id}' repeats the template of '/deployments/{idOrUrl}' under other parameter names, which OpenAPI forbids; its operations move to '/deployments/{idOrUrl}', renaming path parameter 'id' to 'idOrUrl' (path parameter names never reach the wire).",
+            ],
+            result.Warnings
+        );
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        var paths = emitted["paths"]!.AsObject();
+        Assert.False(paths.ContainsKey("/deployments/{id}"));
+        var delete = paths["/deployments/{idOrUrl}"]!["delete"]!;
+        Assert.Equal("deleteDeployment", (string?)delete["operationId"]);
+        Assert.Equal("idOrUrl", (string?)delete["parameters"]![0]!["name"]);
+        Assert.Equal("The deployment.", (string?)delete["parameters"]![0]!["description"]);
+    }
+
+    [Fact]
+    public void Paths_That_Differ_Only_In_Parameter_Names_And_Share_A_Method_Fail_Emission()
+    {
+        // Two GETs on one template is a real clash, not a naming slip: nothing merges, and
+        // emitting both keys would write the invalid document, so generation refuses.
+        var spec = """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Clash", "version": "1.0.0" },
+              "paths": {
+                "/clash/{a}": { "get": { "operationId": "clashA", "parameters": [{ "name": "a", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "A" } } } },
+                "/clash/{b}": { "get": { "operationId": "clashB", "parameters": [{ "name": "b", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "B" } } } }
+              }
+            }
+            """;
+
+        Assert.Empty(CompilationHelper.Import(spec).Warnings);
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var exception = Assert.ThrowsAny<Exception>(() =>
+            RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first")
+        );
+        Assert.Contains("error RIV2013:", exception.Message);
+    }
+
+    [Fact]
+    public void Discriminator_Mapping_Into_Another_File_Is_Dropped_Loudly()
+    {
+        // DigitalOcean maps action types into unbundled models/*.yml files. Carried through,
+        // the re-emitted 3.1 document crashed the next import inside the OpenAPI reader.
+        var spec = """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Actions", "version": "1.0.0" },
+              "components": {
+                "schemas": {
+                  "Reboot": { "type": "object", "properties": { "type": { "type": "string" } } },
+                  "Resize": { "type": "object", "properties": { "type": { "type": "string" } } }
+                }
+              },
+              "paths": {
+                "/actions": {
+                  "post": {
+                    "operationId": "postAction",
+                    "requestBody": {
+                      "content": {
+                        "application/json": {
+                          "schema": {
+                            "oneOf": [{ "$ref": "#/components/schemas/Reboot" }, { "$ref": "#/components/schemas/Resize" }],
+                            "discriminator": {
+                              "propertyName": "type",
+                              "mapping": { "reboot": "#/components/schemas/Reboot", "resize": "models/resize.yml" }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "responses": { "204": { "description": "Done" } }
+                  }
+                }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Contains(
+            "RIV3005: Discriminator mapping entry dropped: 'resize' at #/paths/~1actions/post/requestBody/content/application~1json/schema/discriminator/mapping references 'models/resize.yml', outside this document; Rivet imports one document, so the tag keeps no mapping.",
+            result.Warnings
+        );
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var first = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        var mapping = first["paths"]!["/actions"]!["post"]!["requestBody"]!["content"]![
+            "application/json"
+        ]!["schema"]!["discriminator"]!["mapping"]!.AsObject();
+        Assert.Equal(["reboot"], mapping.Select(entry => entry.Key));
+
+        var firstPath = Path.Combine(workDirectory.FullName, "first.json");
+        File.WriteAllText(firstPath, first.ToJsonString());
+        RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, firstPath, "second");
     }
 
     [Fact]

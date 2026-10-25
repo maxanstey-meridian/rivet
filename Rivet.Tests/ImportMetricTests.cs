@@ -64,13 +64,26 @@ public sealed class ImportMetricTests
             Diagnostics.ImportUnresolvableAliasReference => "alias-unresolvable",
             // Added with Phase 4 / I12: multi-scheme document security collapses to the first
             // scheme — previously silent, now a named warning.
-            Diagnostics.ImportSecuritySchemesDropped => "security-schemes-dropped",
             // TRACE has no contract representation; each dropped operation emits RIV3003.
             Diagnostics.ImportOperationMethodDropped => "operation-method-dropped",
             // Added with P2 wave 3 (dictionary key types): a propertyNames key schema the
             // importer cannot represent as a C# dictionary key degrades to string keys
             // WITH a named warning.
             Diagnostics.ImportDictionaryKeyDropped => "dictionary-key-dropped",
+            Diagnostics.ImportNamedScalarAlgebraUnsupported => "named-scalar-algebra-unsupported",
+            Diagnostics.ImportEmptyParameterNameDropped => "empty-parameter-name-dropped",
+            Diagnostics.ImportReservedContentTypeHeaderDropped =>
+                "reserved-content-type-header-dropped",
+            Diagnostics.ImportReservedAuthorizationHeaderDropped =>
+                "reserved-authorization-header-dropped",
+            Diagnostics.ImportReservedAcceptHeaderDropped => "reserved-accept-header-dropped",
+            Diagnostics.ImportBodyForbiddenStatusContentDropped =>
+                "body-forbidden-status-content-dropped",
+            // Spec elements Rivet has no contract slot for, which used to vanish without a word.
+            Diagnostics.ImportSchemalessParameterDropped => "schemaless-parameter-dropped",
+            Diagnostics.ImportCallbackDropped => "callback-dropped",
+            Diagnostics.ImportPathItemOutsidePathsDropped => "path-item-outside-paths-dropped",
+            Diagnostics.ImportEquivalentPathTemplateMerged => "equivalent-path-template-merged",
             _ => $"UNCATEGORIZED: {warning}",
         };
 
@@ -206,13 +219,16 @@ public sealed class ImportMetricTests
         // "security-schemes-dropped" added deliberately with Phase 4 / I12: Stripe declares
         // two global schemes (basic + bearer); only the first is imported — previously
         // silent, now a named warning.
+        // "unrepresented-field-dropped" added deliberately: Stripe's form bodies declare
+        // per-part `encoding`, which no generated contract carries — previously silent.
         AssertWarningCategoriesSubsetOf(
             r,
             "unresolved-schema",
             "unsupported-schema-type",
             "array-missing-items",
             "enum-constraint-dropped",
-            "security-schemes-dropped"
+            "security-schemes-dropped",
+            "unrepresented-field-dropped"
         );
     }
 
@@ -244,16 +260,19 @@ public sealed class ImportMetricTests
         // "enum-constraint-dropped" added deliberately with I.A-15: GitHub's single-value
         // permission enums ({"enum": ["read"]} etc.) degrade to string — previously silent,
         // now each emits a named warning.
-        // "properties-dropped" added deliberately with Phase 4 / I5: GitHub declares inline
-        // objects with both `properties` and a typed `additionalProperties`; the dictionary
-        // side wins and the declared properties are dropped — previously silent, now named.
+        // "unrepresented-field-dropped" added deliberately: every GitHub operation links its
+        // docs page through operation `externalDocs`, which no generated contract carries —
+        // previously silent.
+        // "equivalent-path-template-merged" added deliberately: GitHub's attestation DELETE
+        // and GET author one template under two parameter names, which OpenAPI forbids.
         AssertWarningCategoriesSubsetOf(
             r,
             "unresolved-schema",
             "unsupported-schema-type",
             "array-missing-items",
             "enum-constraint-dropped",
-            "properties-dropped"
+            "unrepresented-field-dropped",
+            "equivalent-path-template-merged"
         );
     }
 
@@ -446,7 +465,7 @@ public sealed class ImportMetricTests
         );
     }
 
-    // ========== Slack — warnings from genuinely untyped schemas ==========
+    // ========== Slack — boolean literal components, now a verified corpus ==========
 
     [Fact]
     public void Slack_Metrics()
@@ -456,10 +475,8 @@ public sealed class ImportMetricTests
         Assert.True(TypeFiles(r) >= 220, $"Expected ≥220 types, got {TypeFiles(r)}");
         Assert.True(ContractFiles(r) >= 50, $"Expected ≥50 contracts, got {ContractFiles(r)}");
 
-        // Slack has genuinely untyped schemas — warnings are expected. The exact
-        // response-content pass now visits every status/media schema rather than only
-        // the primary response, exposing 14 additional unresolved-schema sites.
-        Assert.True(r.Warnings.Count <= 40, $"Expected ≤40 warnings, got {r.Warnings.Count}");
-        Assert.True(r.Warnings.Count > 0, "Slack should have some warnings for untyped schemas");
+        // Slack's last two warnings were RIV3015 on defs_ok_true/defs_ok_false, boolean
+        // enums that now keep their members as named-scalar metadata. The import is clean.
+        Assert.Empty(r.Warnings);
     }
 }

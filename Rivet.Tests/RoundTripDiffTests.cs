@@ -170,6 +170,21 @@ public sealed class RoundTripDiffTests
         Assert.Equal(0, FindingCount(result.DocumentFindings, "tags"));
     }
 
+    [Fact]
+    public void An_Empty_Document_Tags_Array_Equals_An_Absent_One()
+    {
+        // Slack authors "tags": []; no tag is declared either way, exactly as an
+        // operation's absent tags already compare equal to an empty list.
+        var original = Fixture.Json("roundtrip-probe.json");
+        original["tags"] = new JsonArray();
+        var reemitted = original.DeepClone().AsObject();
+        reemitted.Remove("tags");
+
+        var result = RoundTripDiff.Run(original, reemitted);
+
+        Assert.Equal(0, FindingCount(result.DocumentFindings, "tags"));
+    }
+
     [Theory]
     [InlineData("operationId", "operation-id")]
     [InlineData("tags", "operation-tags")]
@@ -473,6 +488,30 @@ public sealed class RoundTripDiffTests
         Assert.Equal(1, FindingCount(result.DocumentFindings, category));
     }
 
+    [Fact]
+    public void Component_Example_Extensions_Are_Judged_By_Disposition_Not_As_Content()
+    {
+        // GitHub's x-github-breaking-changes sits on two component examples; an excluded
+        // family must not count as example drift, and a preserved one still must.
+        var original = CreateSemanticSurfaceDocument();
+        var example = original["components"]!["examples"]!["NamedExample"]!;
+        example["x-github-breaking-changes"] = JsonNode.Parse("""[{"changeset":"later"}]""");
+        example["x-twilio"] = JsonNode.Parse("""{"pii":true}""");
+        var dropped = original.DeepClone().AsObject();
+        dropped["components"]!["examples"]!["NamedExample"]!
+            .AsObject()
+            .Remove("x-github-breaking-changes");
+        var lostPreserved = dropped.DeepClone().AsObject();
+        lostPreserved["components"]!["examples"]!["NamedExample"]!.AsObject().Remove("x-twilio");
+
+        var excluded = RoundTripDiff.Run(original, dropped);
+        var preserved = RoundTripDiff.Run(original, lostPreserved);
+
+        Assert.Equal(0, excluded.ExitCode);
+        Assert.Equal(0, FindingCount(preserved.DocumentFindings, "component-example"));
+        Assert.Equal(1, FindingCount(preserved.DocumentFindings, "vendor-extension-preserve"));
+    }
+
     [Theory]
     [InlineData("changed-target")]
     [InlineData("inlined")]
@@ -767,6 +806,30 @@ public sealed class RoundTripDiffTests
     }
 
     [Fact]
+    public void A_Repeated_Enum_Member_Is_Not_Drift_But_A_Lost_One_Is()
+    {
+        var original = Fixture.Json("roundtrip-probe.json");
+        original["components"]!["schemas"]!["Thing"]!["properties"]!["stage"] = JsonNode.Parse(
+            """{"type":"string","enum":["preview","production","preview"]}"""
+        );
+        var collapsed = original.DeepClone().AsObject();
+        collapsed["components"]!["schemas"]!["Thing"]!["properties"]!["stage"]!["enum"] =
+            new JsonArray("preview", "production");
+        var narrowed = original.DeepClone().AsObject();
+        narrowed["components"]!["schemas"]!["Thing"]!["properties"]!["stage"]!["enum"] =
+            new JsonArray("preview");
+
+        Assert.Equal(
+            0,
+            FindingCount(RoundTripDiff.Run(original, collapsed).SchemaFindings, "schema-enum")
+        );
+        Assert.Equal(
+            1,
+            FindingCount(RoundTripDiff.Run(original, narrowed).SchemaFindings, "schema-enum")
+        );
+    }
+
+    [Fact]
     public void Lost_Nullability_Remains_Real_Drift()
     {
         var original = Fixture.Json("roundtrip-probe.json");
@@ -890,6 +953,73 @@ public sealed class RoundTripDiffTests
             defect.GetProperty("reason").GetString()
         );
         Assert.Equal(0, FindingCount(result.OperationFindings, "parameter-missing"));
+    }
+
+    [Fact]
+    public void A_Path_Repeating_An_Earlier_Template_Is_A_Source_Defect_Once_Merged()
+    {
+        var original = JsonNode
+            .Parse(
+                """
+                {
+                  "openapi": "3.0.3",
+                  "info": { "title": "Deployments", "version": "1.0.0" },
+                  "paths": {
+                    "/deployments/{idOrUrl}": { "get": { "operationId": "get", "parameters": [{ "name": "idOrUrl", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "Found" } } } },
+                    "/deployments/{id}": { "delete": { "operationId": "delete", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "Deleted" } } } }
+                  }
+                }
+                """
+            )!
+            .AsObject();
+        var merged = original.DeepClone().AsObject();
+        var paths = merged["paths"]!.AsObject();
+        var delete = paths["/deployments/{id}"]!["delete"]!.DeepClone();
+        delete["parameters"]![0]!["name"] = "idOrUrl";
+        paths.Remove("/deployments/{id}");
+        paths["/deployments/{idOrUrl}"]!["delete"] = delete;
+        var unmerged = merged.DeepClone().AsObject();
+        unmerged["paths"]!["/deployments/{idOrUrl}"]!.AsObject().Remove("delete");
+
+        var result = RoundTripDiff.Run(original, merged);
+
+        Assert.Equal(0, result.ExitCode);
+        var defect = Assert.Single(result.Details.GetProperty("sourceDefects").EnumerateArray());
+        Assert.Equal("#/paths/~1deployments~1{id}", defect.GetProperty("path").GetString());
+        Assert.Equal(
+            1,
+            RoundTripDiff
+                .Run(original, unmerged)
+                .Summary.GetProperty("missingOperations")
+                .GetInt32()
+        );
+    }
+
+    [Fact]
+    public void A_Discriminator_Mapping_Into_Another_File_Is_A_Source_Defect_Once_Dropped()
+    {
+        var original = CreateSemanticSurfaceDocument();
+        original["components"]!["schemas"]!["Shape"] = JsonNode.Parse(
+            """
+            {
+              "oneOf": [{ "$ref": "#/components/schemas/Shape" }],
+              "discriminator": { "propertyName": "kind", "mapping": { "self": "Shape", "far": "models/far.yml#/Far" } }
+            }
+            """
+        );
+        var dropped = original.DeepClone().AsObject();
+        dropped["components"]!["schemas"]!["Shape"]!["discriminator"]!["mapping"]!
+            .AsObject()
+            .Remove("far");
+
+        var result = RoundTripDiff.Run(original, dropped);
+
+        Assert.Equal(0, result.ExitCode);
+        var defect = Assert.Single(result.Details.GetProperty("sourceDefects").EnumerateArray());
+        Assert.Equal(
+            "#/components/schemas/Shape/discriminator/mapping/far",
+            defect.GetProperty("path").GetString()
+        );
     }
 
     [Fact]

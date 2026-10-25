@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
@@ -628,6 +629,249 @@ public sealed class ComponentProvenanceTests
                 warning.Contains(Diagnostics.ImportNamedScalarAlgebraUnsupported)
                 && warning.Contains("Named scalar component 'Unsupported'")
         );
+    }
+
+    [Theory]
+    [InlineData("{ \"type\": \"boolean\", \"enum\": [false], \"title\": \"failure\" }")]
+    [InlineData("{ \"type\": \"number\", \"enum\": [0.5, 1.5] }")]
+    public void Named_scalar_enum_no_CSharp_enum_can_hold_keeps_its_members_and_its_refs(
+        string schema
+    )
+    {
+        // Slack's defs_ok_false: the members ride on the primitive as metadata, so a typed
+        // record's property still $refs the component instead of inlining a bare boolean.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: $$"""
+            "Literal": {{schema}},
+            "Envelope": {
+                "type": "object",
+                "properties": { "value": { "$ref": "#/components/schemas/Literal" } },
+                "required": ["value"]
+            }
+            """,
+            paths: """
+            "/envelope": {
+                "get": {
+                    "operationId": "getEnvelope",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec, "LiteralScalar");
+        Assert.DoesNotContain(
+            imported.Warnings,
+            warning => warning.Contains(Diagnostics.ImportNamedScalarAlgebraUnsupported)
+        );
+
+        using var emitted = ImportCompileWalkAndEmit(spec);
+        var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(
+            JsonNode.Parse(schema)!["enum"]!.ToJsonString(),
+            JsonNode.Parse(schemas.GetProperty("Literal").GetRawText())!["enum"]!.ToJsonString()
+        );
+        Assert.Equal(
+            "#/components/schemas/Literal",
+            schemas
+                .GetProperty("Envelope")
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("$ref")
+                .GetString()
+        );
+    }
+
+    [Fact]
+    public void Typed_record_members_keep_what_their_items_and_values_reference()
+    {
+        // Discord's snowflake arrays, GitHub's arrays of a nullable app, name_localizations'
+        // property bounds and webhook start_side's null member each used to fall off a
+        // typed record: an inlined scalar, a oneOf that matches null twice, two silently
+        // dropped keywords, and a lost enum member.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Snow": { "type": "string", "format": "snowflake", "pattern": "^(0|[1-9][0-9]*)$" },
+            "App": {
+                "type": "object",
+                "nullable": true,
+                "properties": { "id": { "type": "integer" } },
+                "required": ["id"]
+            },
+            "Envelope": {
+                "type": "object",
+                "properties": {
+                    "ids": { "type": "array", "items": { "$ref": "#/components/schemas/Snow" } },
+                    "byName": { "type": "object", "additionalProperties": { "$ref": "#/components/schemas/Snow" } },
+                    "apps": { "type": "array", "items": { "$ref": "#/components/schemas/App" } },
+                    "names": {
+                        "type": ["object", "null"],
+                        "additionalProperties": { "type": "string" },
+                        "maxProperties": 34,
+                        "minProperties": 1
+                    },
+                    "side": { "type": "string", "nullable": true, "enum": ["LEFT", "RIGHT", null] }
+                },
+                "required": ["ids", "byName", "apps", "names", "side"]
+            }
+            """,
+            paths: """
+            "/envelope": {
+                "get": {
+                    "operationId": "getEnvelope",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        using var emitted = ImportCompileWalkAndEmit(spec);
+        var properties = JsonNode.Parse(
+            emitted
+                .RootElement.GetProperty("components")
+                .GetProperty("schemas")
+                .GetProperty("Envelope")
+                .GetProperty("properties")
+                .GetRawText()
+        )!;
+
+        Assert.Equal(
+            """{"$ref":"#/components/schemas/Snow"}""",
+            properties["ids"]!["items"]!.ToJsonString()
+        );
+        Assert.Equal(
+            """{"$ref":"#/components/schemas/Snow"}""",
+            properties["byName"]!["additionalProperties"]!.ToJsonString()
+        );
+        Assert.Equal(
+            """{"$ref":"#/components/schemas/App"}""",
+            properties["apps"]!["items"]!.ToJsonString()
+        );
+        Assert.Equal(34, properties["names"]!["maxProperties"]!.GetValue<int>());
+        Assert.Equal(1, properties["names"]!["minProperties"]!.GetValue<int>());
+        Assert.Equal("""["LEFT","RIGHT",null]""", properties["side"]!["enum"]!.ToJsonString());
+    }
+
+    [Fact]
+    public void Titled_const_one_of_imports_as_an_enum_named_by_its_titles()
+    {
+        // OpenAPI 3.1's enum idiom (discord's ThreadAutoArchiveDuration) used to become a
+        // union record of four indistinguishable int slots, under RIV3015.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Duration": {
+                "type": "integer",
+                "format": "int32",
+                "oneOf": [
+                    { "title": "ONE_HOUR", "const": 60 },
+                    { "title": "ONE_DAY", "description": "A day.", "const": 1440 }
+                ]
+            },
+            "Kind": {
+                "type": "string",
+                "oneOf": [{ "title": "USERS", "const": "users" }, { "title": "Roles", "const": "Roles" }]
+            },
+            "Envelope": {
+                "type": "object",
+                "properties": {
+                    "duration": { "$ref": "#/components/schemas/Duration" },
+                    "kinds": { "type": "array", "items": { "$ref": "#/components/schemas/Kind" } }
+                },
+                "required": ["duration", "kinds"]
+            }
+            """,
+            paths: """
+            "/envelope": {
+                "get": {
+                    "operationId": "getEnvelope",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec, "TitledConst");
+        Assert.DoesNotContain(
+            imported.Warnings,
+            warning => warning.Contains(Diagnostics.ImportNamedScalarAlgebraUnsupported)
+        );
+        var duration = CompilationHelper.FindFile(imported, "Duration.cs");
+        Assert.Contains("public enum Duration", duration);
+        Assert.Contains(" = 60", duration);
+        Assert.Contains(" = 1440", duration);
+        var kind = CompilationHelper.FindFile(imported, "Kind.cs");
+        Assert.Contains("[JsonStringEnumMemberName(\"users\")]", kind);
+        Assert.Contains("[JsonStringEnumMemberName(\"Roles\")]", kind);
+
+        using var emitted = ImportCompileWalkAndEmit(spec);
+        var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(
+            "#/components/schemas/Duration",
+            schemas
+                .GetProperty("Envelope")
+                .GetProperty("properties")
+                .GetProperty("duration")
+                .GetProperty("$ref")
+                .GetString()
+        );
+        Assert.Equal(
+            ["users", "Roles"],
+            schemas
+                .GetProperty("Kind")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(value => value.GetString()!)
+        );
+    }
+
+    [Fact]
+    public void Branded_scalar_component_keeps_its_annotations()
+    {
+        // GitHub's uri components are branded by format and lost readOnly and example.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Link": {
+                "type": "string",
+                "format": "uri",
+                "readOnly": true,
+                "example": "https://api.github.com/repos/octocat/Hello-World",
+                "description": "A link."
+            }
+            """
+        );
+
+        using var emitted = ImportCompileWalkAndEmit(spec);
+        var link = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Link");
+        Assert.True(link.GetProperty("readOnly").GetBoolean());
+        Assert.Equal(
+            "https://api.github.com/repos/octocat/Hello-World",
+            link.GetProperty("example").GetString()
+        );
+        Assert.Equal("A link.", link.GetProperty("description").GetString());
     }
 
     [Fact]

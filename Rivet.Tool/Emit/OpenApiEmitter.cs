@@ -29,8 +29,21 @@ public sealed class OpenApiEmitter
     /// <summary>Controller/endpoint/shape identity → assigned route-filtered body component name.</summary>
     private readonly Dictionary<string, string> _filteredBodyNames = [];
 
-    /// <summary>Variant component schemas synthesized for tagged unions.</summary>
-    private readonly Dictionary<string, JsonObject> _extraComponents = [];
+    /// <summary>Tagged-union canonical shape hash + variant tag → assigned variant component name.</summary>
+    private readonly Dictionary<(string UnionHash, string Tag), string> _variantNames = [];
+
+    /// <summary>
+    /// Every component schema name already spoken for: emitted definitions, brands, enums,
+    /// preserved provenance schemas, producer-pinned variant ids, and every name the pre-pass
+    /// or a variant claim handed out. Variant names are claimed against it lazily.
+    /// </summary>
+    private readonly HashSet<string> _claimedNames = new(StringComparer.Ordinal);
+
+    /// <summary>Variant component schemas synthesized for tagged unions, with the variant that asked for each.</summary>
+    private readonly Dictionary<string, (JsonObject Schema, string Origin)> _extraComponents = [];
+
+    /// <summary>Component schemas the producer preserved verbatim (generated document provenance).</summary>
+    private readonly HashSet<string> _preservedSchemaNames = new(StringComparer.Ordinal);
 
     private OpenApiEmitter(
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
@@ -65,13 +78,13 @@ public sealed class OpenApiEmitter
                 }
             )
             .ToList();
+        documentInfo ??= new OpenApiDocumentInfo();
         var emitter = new OpenApiEmitter(definitions, brands, enums);
-        emitter.AssignComponentNames(normalizedEndpoints);
-        return emitter.EmitCore(
+        emitter.AssignComponentNames(
             normalizedEndpoints,
-            security,
-            documentInfo ?? new OpenApiDocumentInfo()
+            (documentInfo.Provenance?.ComponentSchemas ?? []).Select(schema => schema.Name)
         );
+        return emitter.EmitCore(normalizedEndpoints, security, documentInfo);
     }
 
     private string EmitCore(
@@ -83,6 +96,7 @@ public sealed class OpenApiEmitter
         var requestBodyComponents = documentInfo.Provenance?.ComponentRequestBodies ?? [];
         var parameterComponents = documentInfo.Provenance?.ComponentParameters ?? [];
         var responseComponents = documentInfo.Provenance?.ComponentResponses ?? [];
+        var headerComponents = documentInfo.Provenance?.ComponentHeaders ?? [];
         var paths = BuildPaths(
             endpoints,
             requestBodyComponents
@@ -91,7 +105,10 @@ public sealed class OpenApiEmitter
             parameterComponents
                 .Select(component => component.Name)
                 .ToHashSet(StringComparer.Ordinal),
-            responseComponents.Select(component => component.Name).ToHashSet(StringComparer.Ordinal)
+            responseComponents
+                .Select(component => component.Name)
+                .ToHashSet(StringComparer.Ordinal),
+            headerComponents.Select(component => component.Name).ToHashSet(StringComparer.Ordinal)
         );
         var schemas = BuildSchemas(endpoints);
         foreach (var schema in documentInfo.Provenance?.ComponentSchemas ?? [])
@@ -108,15 +125,18 @@ public sealed class OpenApiEmitter
         );
         var requestBodies = BuildComponentRequestBodies(requestBodyComponents);
 
-        // Tagged-union variant components synthesized while mapping types above
-        foreach (var (name, schema) in _extraComponents)
+        // Tagged-union variant components synthesized while mapping types above. Synthesized
+        // names were claimed against every other component name, so only a producer-pinned
+        // componentId can land on a taken name — sharing it is fine when the shapes agree.
+        foreach (var (name, (schema, origin)) in _extraComponents)
         {
-            if (!schemas.TryAdd(name, schema))
+            if (!schemas.TryGetPropertyValue(name, out var existing))
             {
-                Diagnostics.Warn(
-                    Diagnostics.TaggedUnionComponentCollision,
-                    $"tagged-union variant component '{name}' collides with an existing schema — existing schema wins"
-                );
+                schemas[name] = schema;
+            }
+            else if (!JsonNode.DeepEquals(existing, schema))
+            {
+                throw PinnedVariantCollision(name, origin, "another component schema");
             }
         }
 
@@ -216,6 +236,11 @@ public sealed class OpenApiEmitter
             "responses",
             responseComponents.Select(value => (value.Name, value.Json))
         );
+        AddJsonComponents(
+            components,
+            "headers",
+            headerComponents.Select(value => (value.Name, value.Json))
+        );
 
         var securitySchemes = new JsonObject();
 
@@ -233,33 +258,12 @@ public sealed class OpenApiEmitter
             }
         }
 
-        // Every endpoint security requirement must reference the configured scheme. Its type
+        // Every endpoint security requirement must reference a defined scheme. Its type
         // cannot be inferred from a name, so generation fails rather than inventing semantics.
-        var endpointSchemes = endpoints
-            .Select(ep => ep.Security?.Scheme)
-            .Where(scheme => scheme is not null)
-            .Distinct()
-            .OrderBy(scheme => scheme, StringComparer.Ordinal);
-
-        foreach (var scheme in endpointSchemes)
-        {
-            if (securitySchemes.ContainsKey(scheme!))
-            {
-                continue;
-            }
-
-            throw new RivetUserException(
-                $"error {Diagnostics.UndefinedSecurityScheme}: security scheme '{scheme}' is referenced by "
-                    + $"an endpoint's .Secure(\"{scheme}\") but has no definition; define the same scheme with --security"
-            );
-        }
-
-        foreach (
-            var endpoint in endpoints.Where(endpoint => endpoint.SecurityRequirements is not null)
-        )
+        foreach (var endpoint in endpoints.Where(endpoint => endpoint.Security is not null))
         {
             ValidateSecurityRequirements(
-                endpoint.SecurityRequirements!,
+                endpoint.Security!,
                 security?.Schemes ?? new Dictionary<string, SecuritySchemeDefinition>(),
                 $"operation {endpoint.HttpMethod} {endpoint.RouteTemplate}"
             );
@@ -270,49 +274,53 @@ public sealed class OpenApiEmitter
             components["securitySchemes"] = securitySchemes;
         }
 
-        EnsureReferencedSchemaComponents(paths, components, schemas);
-        if (schemas.Count > 0 && !components.ContainsKey("schemas"))
-        {
-            components["schemas"] = schemas;
-        }
-
         if (components.Count > 0)
         {
             doc["components"] = components;
         }
 
-        var vendorExtensions = documentInfo.Provenance?.VendorExtensions ?? [];
-        RetainVendorExtensionPathItemOwners(paths, vendorExtensions);
-        AttachVendorExtensions(doc, vendorExtensions);
+        // After attaching, so each reference's JSON path is rooted at the document.
+        RejectDanglingSchemaReferences(paths, components, schemas);
+
+        var preservedFields = documentInfo.Provenance?.PreservedFields ?? [];
+        RetainPreservedFieldOwners(doc, paths, components, preservedFields);
+        AttachPreservedFields(doc, preservedFields);
 
         return doc.ToJsonString(_jsonOptions);
     }
 
-    private static void EnsureReferencedSchemaComponents(
+    private static void RejectDanglingSchemaReferences(
         JsonObject paths,
         JsonObject components,
         JsonObject schemas
     )
     {
-        var referenced = new HashSet<string>(StringComparer.Ordinal);
+        // Component id → JSON path of its first reference, so the error names a site.
+        var referenced = new Dictionary<string, string>(StringComparer.Ordinal);
         CollectSchemaReferences(paths, referenced);
         CollectSchemaReferences(components, referenced);
-        foreach (var componentId in referenced.Order(StringComparer.Ordinal))
+        foreach (
+            var (componentId, site) in referenced.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+        )
         {
             if (schemas.ContainsKey(componentId))
             {
                 continue;
             }
 
-            Diagnostics.Warn(
-                Diagnostics.UnknownTypeUntypedSchema,
-                $"schema component '{componentId}' is referenced by emitted OpenAPI but has no recovered definition — emitting an untyped fallback component"
+            throw new RivetUserException(
+                $"error {Diagnostics.UnknownTypeUntypedSchema}: schema component '{componentId}' is referenced at {site} "
+                    + "but no type definition, enum, brand or preserved component schema defines it. "
+                    + $"Add a definition named '{componentId}' to the contract's types (a --from producer must ship every type it references), "
+                    + "or point the reference at a type that exists"
             );
-            schemas[componentId] = new JsonObject();
         }
     }
 
-    private static void CollectSchemaReferences(JsonNode? node, HashSet<string> referenced)
+    private static void CollectSchemaReferences(
+        JsonNode? node,
+        Dictionary<string, string> referenced
+    )
     {
         switch (node)
         {
@@ -325,7 +333,7 @@ public sealed class OpenApiEmitter
                         && value.TryGetValue<string>(out var reference)
                     )
                     {
-                        AddSchemaReference(reference, referenced);
+                        AddSchemaReference(reference, value.GetPath(), referenced);
                     }
                     else
                     {
@@ -342,34 +350,49 @@ public sealed class OpenApiEmitter
         }
     }
 
-    private static void AddSchemaReference(string reference, HashSet<string> referenced)
+    private static void AddSchemaReference(
+        string reference,
+        string site,
+        Dictionary<string, string> referenced
+    )
     {
         if (JsonPointer.TryGetComponentName(reference, "schemas", out var name))
         {
-            referenced.Add(name);
+            referenced.TryAdd(name, site);
         }
     }
 
-    private static void RetainVendorExtensionPathItemOwners(
+    /// <summary>
+    /// A preserved field can belong to an owner the contracts alone don't produce: a path
+    /// item with no operations, or an otherwise empty components object.
+    /// </summary>
+    private static void RetainPreservedFieldOwners(
+        JsonObject document,
         JsonObject paths,
-        IReadOnlyList<OpenApiVendorExtensionProvenance> extensions
+        JsonObject components,
+        IReadOnlyList<OpenApiPreservedFieldProvenance> fields
     )
     {
-        foreach (var extension in extensions)
+        foreach (var field in fields)
         {
-            if (JsonPointer.FromUriFragment(extension.OwnerPointer) is ["paths", var path])
+            switch (JsonPointer.FromUriFragment(field.OwnerPointer))
             {
-                paths.TryAdd(path, new JsonObject());
+                case ["paths", var path]:
+                    paths.TryAdd(path, new JsonObject());
+                    break;
+                case ["components", ..]:
+                    document.TryAdd("components", components);
+                    break;
             }
         }
     }
 
-    private static void AttachVendorExtensions(
+    private static void AttachPreservedFields(
         JsonObject document,
-        IReadOnlyList<OpenApiVendorExtensionProvenance> extensions
+        IReadOnlyList<OpenApiPreservedFieldProvenance> fields
     )
     {
-        foreach (var extension in extensions)
+        foreach (var extension in fields)
         {
             if (
                 !JsonPointer.TryResolve(document, extension.OwnerPointer, out var target)
@@ -377,13 +400,13 @@ public sealed class OpenApiEmitter
             )
             {
                 throw new RivetUserException(
-                    $"Cannot attach preserved vendor extension '{extension.Name}': emitted owner '{extension.OwnerPointer}' does not exist or is not an object."
+                    $"Cannot attach preserved field '{extension.Name}': emitted owner '{extension.OwnerPointer}' does not exist or is not an object."
                 );
             }
             if (owner.ContainsKey(extension.Name))
             {
                 throw new RivetUserException(
-                    $"Cannot attach preserved vendor extension '{extension.Name}' at '{extension.OwnerPointer}': the emitted owner already contains that property."
+                    $"Cannot attach preserved field '{extension.Name}' at '{extension.OwnerPointer}': the emitted owner already contains that property."
                 );
             }
 
@@ -394,7 +417,7 @@ public sealed class OpenApiEmitter
             catch (JsonException exception)
             {
                 throw new RivetUserException(
-                    $"Cannot attach preserved vendor extension '{extension.Name}' at '{extension.OwnerPointer}': invalid JSON value ({exception.Message})."
+                    $"Cannot attach preserved field '{extension.Name}' at '{extension.OwnerPointer}': invalid JSON value ({exception.Message})."
                 );
             }
         }
@@ -504,7 +527,8 @@ public sealed class OpenApiEmitter
             if (!schemes.ContainsKey(name))
             {
                 throw new RivetUserException(
-                    $"error {Diagnostics.UndefinedSecurityScheme}: security scheme '{name}' is referenced by {context} security requirements but has no definition"
+                    $"error {Diagnostics.UndefinedSecurityScheme}: security scheme '{name}' is referenced by {context} security requirements but has no definition; "
+                        + "define it with --security or [assembly: RivetSecurityScheme(...)]"
                 );
             }
         }
@@ -523,7 +547,8 @@ public sealed class OpenApiEmitter
         IReadOnlyList<TsEndpointDefinition> endpoints,
         IReadOnlySet<string> requestBodyComponentIds,
         IReadOnlySet<string> parameterComponentIds,
-        IReadOnlySet<string> responseComponentIds
+        IReadOnlySet<string> responseComponentIds,
+        IReadOnlySet<string> headerComponentIds
     )
     {
         var paths = new JsonObject();
@@ -533,12 +558,25 @@ public sealed class OpenApiEmitter
         // route-derived disambiguator on ALL of its members.
         var operationIds = AssignOperationIds(endpoints);
 
+        // OpenAPI identifies a path by its template with the parameter names erased, so
+        // /items/{id} and /items/{itemId} are one path; writing both is an invalid document.
+        var pathKeysByShape = new Dictionary<string, string>(StringComparer.Ordinal);
+
         foreach (var ep in endpoints)
         {
             var pathKey = ep.RouteTemplate;
 
             if (paths[pathKey] is not JsonObject pathItem)
             {
+                var shape = RouteParser.EraseParameterNames(pathKey);
+                if (pathKeysByShape.TryGetValue(shape, out var twin))
+                {
+                    throw new RivetUserException(
+                        $"error {Diagnostics.EquivalentPathTemplates}: paths '{twin}' and '{pathKey}' differ only in parameter names, which OpenAPI forbids ('{ep.ControllerName}.{ep.Name}' declares the second). "
+                            + "Use one set of parameter names for the routes."
+                    );
+                }
+                pathKeysByShape[shape] = pathKey;
                 pathItem = [];
                 paths[pathKey] = pathItem;
             }
@@ -582,7 +620,8 @@ public sealed class OpenApiEmitter
                 operationIds,
                 requestBodyComponentIds,
                 parameterComponentIds,
-                responseComponentIds
+                responseComponentIds,
+                headerComponentIds
             );
             pathItem[methodKey] = operation;
         }
@@ -654,7 +693,8 @@ public sealed class OpenApiEmitter
         IReadOnlyDictionary<TsEndpointDefinition, string> operationIds,
         IReadOnlySet<string> requestBodyComponentIds,
         IReadOnlySet<string> parameterComponentIds,
-        IReadOnlySet<string> responseComponentIds
+        IReadOnlySet<string> responseComponentIds,
+        IReadOnlySet<string> headerComponentIds
     )
     {
         var operation = new JsonObject();
@@ -1105,6 +1145,22 @@ public sealed class OpenApiEmitter
             responses[resp.EffectiveStatusKey] = respObj;
         }
 
+        foreach (var reference in ep.Provenance?.ResponseHeaderComponentReferences ?? [])
+        {
+            if (
+                headerComponentIds.Contains(reference.ComponentId)
+                && responses[reference.StatusKey] is JsonObject response
+                && response["headers"] is JsonObject headers
+                && headers.ContainsKey(reference.HeaderName)
+            )
+            {
+                headers[reference.HeaderName] = ComponentReference(
+                    "headers",
+                    reference.ComponentId
+                );
+            }
+        }
+
         foreach (var reference in ep.Provenance?.ResponseComponentReferences ?? [])
         {
             if (
@@ -1121,24 +1177,9 @@ public sealed class OpenApiEmitter
 
         operation["responses"] = responses;
 
-        // Security
-        if (ep.SecurityRequirements is { } securityRequirements)
+        if (ep.Security is { } securityRequirements)
         {
             operation["security"] = BuildSecurityRequirements(securityRequirements);
-        }
-        else if (ep.Security is not null)
-        {
-            if (ep.Security.IsAnonymous)
-            {
-                operation["security"] = new JsonArray();
-            }
-            else if (ep.Security.Scheme is not null)
-            {
-                operation["security"] = new JsonArray
-                {
-                    new JsonObject { [ep.Security.Scheme] = new JsonArray() },
-                };
-            }
         }
 
         // QueryAuth: emit extension for round-trip fidelity
@@ -1327,6 +1368,10 @@ public sealed class OpenApiEmitter
         if (location == "query" && parameter.AllowEmptyValue)
         {
             result["allowEmptyValue"] = true;
+        }
+        if (location == "query" && parameter.AllowReserved)
+        {
+            result["allowReserved"] = true;
         }
 
         return result;
@@ -1838,6 +1883,8 @@ public sealed class OpenApiEmitter
                 && groupedExamples[0].Name is null
                 && groupedExamples[0].Json is not null
                 && groupedExamples[0].ComponentExampleId is null
+                && groupedExamples[0].Summary is null
+                && groupedExamples[0].Description is null
             )
             {
                 var inlineExampleJson = groupedExamples[0].Json;
@@ -1882,13 +1929,20 @@ public sealed class OpenApiEmitter
         }
 
         var json = example.Json ?? example.ResolvedJson;
-        if (json is null)
+        if (json is null && example.Summary is null && example.Description is null)
         {
             return null;
         }
 
-        // null is a legal example value (`value: null`) — see ParseJson.
-        return new JsonObject { ["value"] = ParseJson(json) };
+        var result = new JsonObject();
+        AddOptionalString(result, "summary", example.Summary);
+        AddOptionalString(result, "description", example.Description);
+        if (json is not null)
+        {
+            // null is a legal example value (`value: null`) — see ParseJson.
+            result["value"] = ParseJson(json);
+        }
+        return result;
     }
 
     // Returns null only for the JSON literal `null`, a legal example value (the importer
@@ -1925,7 +1979,7 @@ public sealed class OpenApiEmitter
 
             TsType.Brand b => MapBrandReference(b, context),
 
-            TsType.TypeParam tp => FallbackTypeParam(tp, context),
+            TsType.TypeParam tp => throw UnresolvedTypeParam(tp, context),
 
             TsType.InlineObject obj => BuildInlineObjectSchema(obj, context),
 
@@ -2122,9 +2176,8 @@ public sealed class OpenApiEmitter
         // OpenAPI `discriminator` is only meaningful on a oneOf of $ref'd named schemas with
         // a tag→$ref mapping — consumers reject or ignore a discriminator over inline schemas.
         // Each inline variant becomes a named component schema referenced via $ref.
-        var baseName =
-            _taggedUnionNames.GetValueOrDefault(InlineTypeExtractor.CanonicalHash(tu))
-            ?? TsType.GetNameSuffix(tu);
+        var unionHash = InlineTypeExtractor.CanonicalHash(tu);
+        var baseName = _taggedUnionNames.GetValueOrDefault(unionHash) ?? TsType.GetNameSuffix(tu);
 
         var oneOf = new JsonArray();
         var mapping = new JsonObject();
@@ -2139,12 +2192,30 @@ public sealed class OpenApiEmitter
                 // Variant is already a named schema (TypeRef/Generic/Brand) — ref it directly.
                 refPath = existingRef.GetValue<string>();
             }
+            else if (
+                variant.Metadata?.ComponentId is { } preserved
+                && _preservedSchemaNames.Contains(preserved)
+            )
+            {
+                // The producer pinned the variant to a component it also preserved verbatim:
+                // that copy is the variant's schema, and the shape re-derived from the C# type
+                // (no member annotations, a synthesized tag enum) is only an approximation of it.
+                refPath = $"#/components/schemas/{JsonPointer.Escape(preserved)}";
+            }
             else
             {
-                var componentName =
-                    variant.Metadata?.ComponentId
-                    ?? $"{baseName}_{Naming.ToPascalCase(variant.Tag)}";
-                _extraComponents.TryAdd(componentName, variantSchema);
+                var componentName = VariantComponentName(unionHash, baseName, variant);
+                var origin = $"variant '{variant.Tag}' of the tagged union '{baseName}'";
+                if (!_extraComponents.TryGetValue(componentName, out var claimed))
+                {
+                    _extraComponents[componentName] = (variantSchema, origin);
+                }
+                else if (!JsonNode.DeepEquals(claimed.Schema, variantSchema))
+                {
+                    // Synthesized names are unique per (union, tag), so only two pinned
+                    // componentIds can meet here.
+                    throw PinnedVariantCollision(componentName, origin, claimed.Origin);
+                }
                 refPath = $"#/components/schemas/{JsonPointer.Escape(componentName)}";
             }
 
@@ -2163,6 +2234,49 @@ public sealed class OpenApiEmitter
         };
     }
 
+    /// <summary>
+    /// A variant the producer pinned (<c>metadata.componentId</c>) keeps its id. Every other
+    /// variant claims <c>{Base}_{Tag}</c> once per (union shape, tag), against every name
+    /// already taken, with the same numeric-suffix scheme the pre-pass uses — so two tags that
+    /// PascalCase alike, or a <c>{Base}_{Tag}</c> that a real type already owns, still give
+    /// each variant a <c>$ref</c> to its own schema.
+    /// </summary>
+    private string VariantComponentName(
+        string unionHash,
+        string baseName,
+        TsType.TaggedUnionVariant variant
+    )
+    {
+        if (variant.Metadata?.ComponentId is { } pinned)
+        {
+            return pinned;
+        }
+
+        var key = (unionHash, variant.Tag);
+        if (!_variantNames.TryGetValue(key, out var name))
+        {
+            name = ClaimName($"{baseName}_{Naming.ToPascalCase(variant.Tag)}", _claimedNames);
+            _variantNames[key] = name;
+        }
+
+        return name;
+    }
+
+    private static RivetUserException PinnedVariantCollision(
+        string componentName,
+        string origin,
+        string other
+    ) =>
+        new(
+            $"error {Diagnostics.TaggedUnionComponentCollision}: {origin} pins component id '{componentName}', "
+                + $"which {other} already uses with a different schema — one id cannot $ref two shapes. "
+                + "Give the variant's metadata.componentId a name of its own, or make the variant a ref to the existing type"
+        );
+
+    // System.Text.Json's TimeSpan "c" format: [-][d.]hh:mm:ss[.fffffff].
+    private const string TimeSpanPattern =
+        @"^-?(\d{1,8}\.)?([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d{1,7})?$";
+
     private static JsonObject MapPrimitive(TsType.Primitive p, string? context = null)
     {
         if (p.Name == "File")
@@ -2177,13 +2291,25 @@ public sealed class OpenApiEmitter
 
         if (p.Name == "unknown")
         {
-            if (p.CSharpType is null)
+            // "Any JSON value" has one honest schema, the empty one: TypeScript's `unknown`
+            // (no csharpType), object, JsonElement and the JsonNode family all map to it
+            // silently. Any other csharpType names a type with no schema mapping at all,
+            // and an untyped stand-in would advertise "anything goes" for a fixed wire shape.
+            if (
+                p.CSharpType
+                is not (
+                    null
+                    or "object"
+                    or "JsonElement"
+                    or "JsonNode"
+                    or "JsonObject"
+                    or "JsonArray"
+                )
+            )
             {
-                // The catch-all used to name no symbol at all —
-                // context threads the offending type/property or endpoint site through.
-                Diagnostics.Warn(
-                    Diagnostics.UnknownTypeUntypedSchema,
-                    $"'unknown' type (JsonElement/JsonNode or an unmapped C# type) in OpenAPI schema{AtContext(context)} — emitting as untyped"
+                throw new RivetUserException(
+                    $"error {Diagnostics.UnknownTypeUntypedSchema}: type '{p.CSharpType}'{AtContext(context)} has no schema mapping. "
+                        + "Replace it with a supported type, or with JsonElement/object if the value really is any JSON"
                 );
             }
 
@@ -2231,19 +2357,34 @@ public sealed class OpenApiEmitter
             };
         }
 
+        // TimeSpan: System.Text.Json writes and reads only the invariant "c" format, so the
+        // pattern tells clients which strings the server will take.
+        if (p is { Name: "string", CSharpType: "TimeSpan" })
+        {
+            return new JsonObject
+            {
+                ["type"] = "string",
+                ["pattern"] = TimeSpanPattern,
+                ["x-rivet-csharp-type"] = "TimeSpan",
+            };
+        }
+
         // CLR integer primitives are represented internally as number + format.
         // An imported schema can legitimately use an integer-looking format on a string.
         var type =
             p.Name == "number"
-            && p.Format
-                is "int32"
-                    or "int64"
-                    or "int16"
-                    or "uint16"
-                    or "int8"
-                    or "uint8"
-                    or "uint32"
-                    or "uint64"
+            && (
+                p.Format
+                    is "int32"
+                        or "int64"
+                        or "int16"
+                        or "uint16"
+                        or "int8"
+                        or "uint8"
+                        or "uint32"
+                        or "uint64"
+                || p.CSharpType is "Int128" or "UInt128"
+            )
                 ? "integer"
                 : p.Name;
 
@@ -2265,6 +2406,17 @@ public sealed class OpenApiEmitter
     private JsonObject MapNullable(TsType.Nullable n, string? context = null)
     {
         var inner = MapTsTypeToJsonSchema(n.Inner, context);
+
+        // A component that already admits null needs no null alternative: a oneOf of it
+        // and {type: null} would match null twice, which oneOf rejects.
+        if (
+            n.Inner is TsType.TypeRef { Name: var referenced }
+            && _definitions.TryGetValue(referenced, out var definition)
+            && (definition.Type is TsType.Nullable || definition.ScalarMetadata?.IsNullable == true)
+        )
+        {
+            return inner;
+        }
 
         // OpenAPI 3.1 / JSON Schema 2020-12: null is a type. Schemas with a single
         // type become a type array; everything else gets an explicit null branch.
@@ -2307,14 +2459,15 @@ public sealed class OpenApiEmitter
         };
     }
 
-    private static JsonObject FallbackTypeParam(TsType.TypeParam tp, string? context = null)
-    {
-        Diagnostics.Warn(
-            Diagnostics.UnresolvedTypeParameter,
-            $"unresolved type parameter '{tp.Name}' in OpenAPI schema{AtContext(context)} — emitting as object"
+    private static RivetUserException UnresolvedTypeParam(
+        TsType.TypeParam tp,
+        string? context = null
+    ) =>
+        new(
+            $"error {Diagnostics.UnresolvedTypeParameter}: type parameter '{tp.Name}'{AtContext(context)} is never bound to a concrete type, "
+                + "so there is no schema to emit for it. Use a closed generic (Wrapper<OrderDto>, not Wrapper<T>), "
+                + "and give every generic instantiation one type argument per template parameter"
         );
-        return new JsonObject { ["type"] = "object" };
-    }
 
     private static string AtContext(string? context) => context is null ? "" : $" at {context}";
 
@@ -2337,7 +2490,10 @@ public sealed class OpenApiEmitter
     /// Identical shapes share a name; distinct shapes whose pure names collide get a
     /// deterministic numeric suffix (discovery order).
     /// </summary>
-    private void AssignComponentNames(IReadOnlyList<TsEndpointDefinition> endpoints)
+    private void AssignComponentNames(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        IEnumerable<string> preservedSchemaNames
+    )
     {
         var roots = endpoints
             .SelectMany(endpoint => endpoint.AllTypes().Select(site => site.Type))
@@ -2363,12 +2519,33 @@ public sealed class OpenApiEmitter
             }
         }
 
-        // Names already claimed by emitted definition/brand/enum schemas
-        var usedNames = new HashSet<string>(
-            _definitions.Where(kv => kv.Value.TypeParameters.Count == 0).Select(kv => kv.Key)
+        // Names already claimed by emitted definition/brand/enum schemas (under their
+        // pinned component ids too), preserved provenance schemas, and variant ids a
+        // producer pinned — a synthesized name must never land on any of them.
+        var usedNames = _claimedNames;
+        foreach (var (name, def) in _definitions.Where(kv => kv.Value.TypeParameters.Count == 0))
+        {
+            usedNames.Add(name);
+            usedNames.Add(def.Metadata?.ComponentId ?? name);
+        }
+        foreach (var (name, brand) in _brands)
+        {
+            usedNames.Add(name);
+            usedNames.Add(brand.Metadata?.ComponentId ?? name);
+        }
+        foreach (var (name, enumType) in _enums)
+        {
+            usedNames.Add(name);
+            usedNames.Add(GetMetadata(enumType)?.ComponentId ?? name);
+        }
+        _preservedSchemaNames.UnionWith(preservedSchemaNames);
+        usedNames.UnionWith(_preservedSchemaNames);
+        usedNames.UnionWith(
+            taggedUnions
+                .SelectMany(tu => tu.Variants)
+                .Select(variant => variant.Metadata?.ComponentId)
+                .OfType<string>()
         );
-        usedNames.UnionWith(_brands.Keys);
-        usedNames.UnionWith(_enums.Keys);
 
         foreach (var g in generics)
         {
@@ -2530,22 +2707,15 @@ public sealed class OpenApiEmitter
         {
             if (!_definitions.TryGetValue(generic.Name, out var genericDef))
             {
-                // A generic instantiation whose template is absent from definitions used
-                // to emit a $ref with no matching component — a dangling reference every
-                // consumer rejects. Never emit a dangling $ref: warn loudly and
-                // synthesize a valid free-form fallback component under the $ref'd name.
-                Diagnostics.Warn(
-                    Diagnostics.GenericTemplateMissing,
-                    $"generic template '{generic.Name}' (instantiated as '{monoName}') is not present in the contract's type definitions — emitting a free-form object schema; fix the upstream producer to include the template definition"
+                // A generic instantiation without its template has no properties to
+                // monomorphise. A free-form stand-in would advertise "any object" for a fixed
+                // wire shape, so the contract is refused, naming the producer's omission.
+                throw new RivetUserException(
+                    $"error {Diagnostics.GenericTemplateMissing}: generic '{generic.Name}' is instantiated as '{monoName}' "
+                        + "but the contract's types carry no template definition for it. "
+                        + $"Add a '{generic.Name}' definition with its typeParameters to the contract's types "
+                        + "(a --from producer must ship the template of every generic it instantiates)"
                 );
-
-                schemas[monoName] = new JsonObject
-                {
-                    ["type"] = "object",
-                    ["description"] =
-                        $"Unresolved generic instantiation of '{generic.Name}' — template definition missing from source contract",
-                };
-                continue;
             }
 
             var typeParamMap = TypeParameterMap(genericDef, generic);
@@ -2588,6 +2758,10 @@ public sealed class OpenApiEmitter
             if (brand.Description is not null)
             {
                 brandSchema["description"] = brand.Description;
+            }
+            if (_definitions.TryGetValue(name, out var scalarDefinition))
+            {
+                EnrichScalarSchema(brandSchema, scalarDefinition.ScalarMetadata);
             }
             schemas[brand.Metadata?.ComponentId ?? name] = brandSchema;
         }
@@ -2710,6 +2884,18 @@ public sealed class OpenApiEmitter
             schema["writeOnly"] = true;
         }
         SchemaEnricher.EnrichConstraints(schema, metadata.Constraints);
+        if (metadata.Enum is not null)
+        {
+            schema["enum"] = SchemaEnricher.ParseJsonLiteral(metadata.Enum, "schema metadata enum");
+        }
+        if (
+            metadata.EnumListsNull
+            && schema["enum"] is JsonArray members
+            && !members.Any(member => member is null)
+        )
+        {
+            members.Add(null);
+        }
         if (metadata.Xml is { } xml)
         {
             var value = new JsonObject();
@@ -2855,6 +3041,10 @@ public sealed class OpenApiEmitter
             {
                 schema["minLength"] = 1;
                 schema["maxLength"] = 1;
+            }
+            if (p.CSharpType is "TimeSpan")
+            {
+                schema["pattern"] = TimeSpanPattern;
             }
             if (p.CSharpType is not null)
             {

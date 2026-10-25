@@ -1,7 +1,7 @@
 namespace Rivet;
 
 // Builder methods whose arguments (all or some) only Rivet.Tool reads, from the call syntax at
-// generation time. At runtime they record nothing beyond what terminals validate against;
+// generation time. At runtime they record nothing beyond what terminals and adapters validate;
 // they still throw once the definition is published.
 // Their parameters are deliberately unused, so the local .editorconfig turns IDE0060 off for
 // this file only. Parameter names are part of the Tool contract (named arguments): don't rename.
@@ -57,17 +57,18 @@ public abstract partial class RouteDefinitionBase<TSelf>
         });
 
     /// <summary>
-    /// Declares a response header on the given status code (contract concept).
-    /// Rivet never sets or validates response headers at runtime —
-    /// emitting Location/ETag/... is handler code. <paramref name="required"/> is an
-    /// explicit opt-in promise that the header is always present.
+    /// Declares a response header on the given status code. Emitting Location/ETag/... is
+    /// handler code. <paramref name="required"/> promises the header is always present, and
+    /// the adapters hold the handler to it: a response at that status written without the
+    /// header is a <see cref="RivetContractViolationException"/>. The other arguments are
+    /// spec-only.
     /// </summary>
     public TSelf WithResponseHeader(
         int statusCode,
         string name,
         string? description = null,
         bool required = false
-    ) => Marker();
+    ) => AddRequiredHeader(statusCode.ToString(), name, required);
 
     public TSelf WithResponseHeader<THeader>(
         int statusCode,
@@ -85,14 +86,14 @@ public abstract partial class RouteDefinitionBase<TSelf>
         bool allowReserved = false,
         bool allowEmptyValue = false,
         string? contentType = null
-    ) => Marker();
+    ) => AddRequiredHeader(statusCode.ToString(), name, required);
 
     public TSelf WithResponseHeaderKey(
         string statusKey,
         string name,
         string? description = null,
         bool required = false
-    ) => Marker();
+    ) => AddRequiredHeader(statusKey, name, required);
 
     public TSelf WithResponseHeaderKey<THeader>(
         string statusKey,
@@ -110,17 +111,17 @@ public abstract partial class RouteDefinitionBase<TSelf>
         bool allowReserved = false,
         bool allowEmptyValue = false,
         string? contentType = null
-    ) => Marker();
+    ) => AddRequiredHeader(statusKey, name, required);
 
     /// <summary>
-    /// Declares a response header on the endpoint's success status (contract concept).
+    /// Declares a response header on the endpoint's success status.
     /// See <see cref="WithResponseHeader(int, string, string?, bool)"/>.
     /// </summary>
     public TSelf WithResponseHeader(
         string name,
         string? description = null,
         bool required = false
-    ) => Marker();
+    ) => AddRequiredHeader(null, name, required);
 
     public TSelf WithResponseHeader<THeader>(
         string name,
@@ -137,13 +138,15 @@ public abstract partial class RouteDefinitionBase<TSelf>
         bool allowReserved = false,
         bool allowEmptyValue = false,
         string? contentType = null
-    ) => Marker();
+    ) => AddRequiredHeader(null, name, required);
 
     public TSelf RequestExampleJson(
-        string json,
+        string? json,
         string? name = null,
         string? mediaType = null,
-        string? referencedComponentsJson = null
+        string? referencedComponentsJson = null,
+        string? summary = null,
+        string? description = null
     ) => Marker();
 
     public TSelf RequestExampleRef(
@@ -156,18 +159,22 @@ public abstract partial class RouteDefinitionBase<TSelf>
 
     public TSelf ResponseExampleJson(
         int statusCode,
-        string json,
+        string? json,
         string? name = null,
         string? mediaType = null,
-        string? referencedComponentsJson = null
+        string? referencedComponentsJson = null,
+        string? summary = null,
+        string? description = null
     ) => Marker();
 
     public TSelf ResponseExampleJson(
         string statusKey,
-        string json,
+        string? json,
         string? name = null,
         string? mediaType = null,
-        string? referencedComponentsJson = null
+        string? referencedComponentsJson = null,
+        string? summary = null,
+        string? description = null
     ) => Marker();
 
     public TSelf ResponseExampleRef(
@@ -188,14 +195,30 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null
     ) => Marker();
 
+    /// <summary>
+    /// No credentials required (<c>security: []</c>). Stands alone: an endpoint that also
+    /// accepts credentials uses <see cref="Secure"/> plus <see cref="OrAnonymous"/>.
+    /// </summary>
     public TSelf Anonymous() => Marker();
 
-    public TSelf Secure(string scheme) => Marker();
+    /// <summary>
+    /// Adds one way to authenticate: the named scheme, with the scopes it must grant. Each
+    /// call is an alternative (OpenAPI ORs them); <see cref="AndSecure"/> adds schemes the
+    /// same alternative also needs.
+    /// </summary>
+    public TSelf Secure(string scheme, params string[] scopes) => Marker();
 
-    public TSelf SecurityRequirement(int requirementOrder) => Marker();
+    /// <summary>
+    /// Adds a scheme, with its scopes, to the alternative the previous <see cref="Secure"/>
+    /// started: the caller must satisfy both.
+    /// </summary>
+    public TSelf AndSecure(string scheme, params string[] scopes) => Marker();
 
-    public TSelf SecurityRequirement(int requirementOrder, string scheme, string? scope = null) =>
-        Marker();
+    /// <summary>
+    /// Adds an alternative that needs no credentials (an empty requirement, <c>{}</c>):
+    /// authentication is optional.
+    /// </summary>
+    public TSelf OrAnonymous() => Marker();
 
     public TSelf RequestContent<T>(
         string mediaType,

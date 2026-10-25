@@ -12,6 +12,7 @@ public enum CoverageWarningKind
     HttpMethodMismatch,
     RouteMismatch,
     UnbindableEnumParameter,
+    InputBindingMismatch,
 }
 
 public sealed record CoverageWarning(
@@ -91,7 +92,9 @@ public static class CoverageChecker
                         && bindingHandlers.Add(handler.Syntax)
                     )
                     {
-                        consumedBindings.UnionWith(BindingsPassedOnReturn(wkt, handler, fieldMap));
+                        consumedBindings.UnionWith(
+                            BindingsPassedOnReturn(wkt, adapterType, handler, fieldMap)
+                        );
                     }
                 }
 
@@ -352,6 +355,28 @@ public static class CoverageChecker
                     warnings.AddRange(
                         UnbindableEnumParameters(wkt, field, endpoint, handler, host, infersBody)
                     );
+                    warnings.AddRange(
+                        ContractInputBinding
+                            .Compare(
+                                wkt,
+                                endpoint,
+                                handler,
+                                host,
+                                infersBody,
+                                implementation.Context.Route
+                            )
+                            .Select(mismatch => new CoverageWarning(
+                                CoverageWarningKind.InputBindingMismatch,
+                                field.ContainingType.Name,
+                                field.Name,
+                                mismatch.Expected,
+                                mismatch.Actual,
+                                mismatch.Location,
+                                Message: $"{field.ContainingType.Name}.{field.Name} "
+                                    + $"({endpoint.HttpMethod} {endpoint.RouteTemplate}): "
+                                    + mismatch.Problem
+                            ))
+                    );
                 }
 
                 if (
@@ -420,13 +445,11 @@ public static class CoverageChecker
     }
 
     /// <summary>
-    /// RIV4005: each handler parameter the host binds from route, query, header or form
-    /// (or member of an [AsParameters] / explicitly sourced complex parameter) whose enum
-    /// advertises a wire value the host's enum parser refuses. Minimal APIs and MVC both
-    /// bind an unattributed enum from route or query, so only [FromBody], [FromServices],
-    /// an MVC [ModelBinder] and an unattributed collection or complex type inferred as a
-    /// body exempt a parameter. A handler binding a string and parsing it itself is never reported: it
-    /// binds no enum.
+    /// RIV4005: each value the handler binds from route, query, header or form (a parameter,
+    /// or a member of a complex parameter bound member by member, at any depth) whose enum
+    /// advertises a wire value the host's enum parser refuses. What reaches which parser is
+    /// <see cref="ParameterBindingSources"/>' call. A handler binding a string and parsing it
+    /// itself is never reported: it binds no enum.
     /// </summary>
     private static IEnumerable<CoverageWarning> UnbindableEnumParameters(
         WellKnownTypes wkt,
@@ -702,21 +725,37 @@ public static class CoverageChecker
     /// <summary>
     /// The bindings <paramref name="handler"/> passes as an argument, an extension method's
     /// receiver included (classic or extension block), to a call within a value it returns, as in
-    /// <c>return Done(endpoint.Refuse(r))</c>. The returned values are
-    /// <see cref="ReturnedValues"/>'s, so Match arms count. Inside them each call argument
-    /// is searched through what <see cref="LeavesOf"/> looks through and through a local
-    /// holding a call, but never into a lambda, so <c>Ok(items.Select(...))</c> doesn't count. Passing a binding makes
-    /// it used, so it isn't orphaned, but it never covers a field: that still takes a
-    /// terminal the handler returns through the adapter itself.
+    /// <c>return Done(endpoint.Refuse(r))</c>, or uses as the receiver of a terminal it passes
+    /// that way, as in <c>return Done(endpoint.Success(x))</c>. The returned values are
+    /// <see cref="ReturnedValues"/>'s, so Match arms count, held in a local or not. Inside them
+    /// each call argument is searched through what <see cref="LeavesOf"/> looks through and
+    /// through a local holding a call, but never into a lambda, so <c>Ok(items.Select(...))</c>
+    /// doesn't count. A terminal handed straight to a returned Rivet adapter is the terminal
+    /// path's business, not a helper's: a handler returning <c>endpoint.Success(x).ToResult()</c>
+    /// has used its binding only if that's its host's adapter, which the terminal path decides.
+    /// A helper's answer handed to the adapter, as in <c>NotFound(endpoint).ToResult()</c>, is
+    /// still searched. Passing
+    /// a binding makes it used, so it isn't orphaned, but it never covers a field: that still
+    /// takes a terminal the handler returns through the adapter itself.
     /// </summary>
     private static IEnumerable<SyntaxNode> BindingsPassedOnReturn(
         WellKnownTypes wkt,
+        INamedTypeSymbol? adapterType,
         IOperation handler,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
     )
     {
         HashSet<ILocalSymbol> visitedLocals = [];
-        return ReturnedValues(handler).SelectMany(Passed);
+        return ReturnedValues(handler)
+            .SelectMany(value =>
+                value is IInvocationOperation { Arguments: [var receiver, ..] } adapter
+                && SymbolEqualityComparer.Default.Equals(
+                    adapter.TargetMethod.ContainingType,
+                    adapterType
+                )
+                    ? Passed(receiver.Value)
+                    : Passed(value)
+            );
 
         IEnumerable<SyntaxNode> Passed(IOperation value) =>
             LeavesOf(value)
@@ -738,7 +777,10 @@ public static class CoverageChecker
                 .SelectMany(leaf =>
                     ResolveContractReference(wkt, leaf, fieldMap, []) is { Binding: { } binding }
                         ? [binding]
-                        : Passed(leaf)
+                    : leaf is IInvocationOperation { Instance: { } receiver } terminal
+                    && IsTerminal(wkt, terminal)
+                        ? Argument(receiver).Concat(Passed(leaf))
+                    : Passed(leaf)
                 );
 
         // A C# 14 extension block's receiver is the call's instance, not its first argument.
@@ -838,7 +880,11 @@ public static class CoverageChecker
             route.StartsWith('/')
                 ? $"Invalid Functions trigger route '{route}': remove the leading slash"
                 : null
-        );
+        )
+        {
+            Handler = method,
+            BindingHost = ParameterBindingHost.Functions,
+        };
     }
 
     /// <summary>
@@ -897,18 +943,19 @@ public static class CoverageChecker
     /// <summary>
     /// The leaf values an expression can produce: each switch arm and conditional branch
     /// (recursively), the operand of an <c>await</c> (through <c>ConfigureAwait</c>) or a
-    /// cast, and for an invocation, the
-    /// invocation itself plus whatever each lambda passed straight to it returns, such
-    /// as the arms of <c>outcome.Match(ok => ..., error => ...)</c>. A lambda buried
-    /// deeper, as in <c>Ok(items.Select(item => ...))</c>, isn't followed.
+    /// cast, and for an invocation, the invocation itself plus whatever each function passed
+    /// straight to it returns, such as the arms of <c>outcome.Match(ok => ..., error => ...)</c>.
+    /// A function passed straight is a lambda, a local holding one, or a local function, as
+    /// <see cref="FunctionOf"/> resolves it. A lambda buried deeper, as in
+    /// <c>Ok(items.Select(item => ...))</c>, isn't followed.
     /// </summary>
     private static IEnumerable<IOperation> ValuesOf(IOperation? expression) =>
         LeavesOf(expression)
             .SelectMany(leaf =>
                 leaf is IInvocationOperation invocation
                     ? invocation
-                        .Arguments.Select(argument => LambdaOf(argument.Value))
-                        .OfType<IAnonymousFunctionOperation>()
+                        .Arguments.Select(argument => FunctionOf(argument.Value, []))
+                        .OfType<IOperation>()
                         .SelectMany(ReturnedValues)
                         .Prepend(invocation)
                     : [leaf]
@@ -934,13 +981,28 @@ public static class CoverageChecker
             var value => [value],
         };
 
-    /// <summary>The lambda an argument value is, through its delegate creation.</summary>
-    private static IAnonymousFunctionOperation? LambdaOf(IOperation value) =>
+    /// <summary>
+    /// The function an argument value is, through its delegate creation: a lambda, a local
+    /// holding one (whose single value <see cref="ProvenanceValue"/> knows), or a local
+    /// function named as a method group. Each is the handler's own code, so its returns are
+    /// the handler's answer. A method group naming any other method is a helper.
+    /// </summary>
+    private static IOperation? FunctionOf(IOperation value, HashSet<ILocalSymbol> visitedLocals) =>
         value switch
         {
             IAnonymousFunctionOperation lambda => lambda,
-            IDelegateCreationOperation creation => LambdaOf(creation.Target),
-            IConversionOperation conversion => LambdaOf(conversion.Operand),
+            IDelegateCreationOperation creation => FunctionOf(creation.Target, visitedLocals),
+            IConversionOperation conversion => FunctionOf(conversion.Operand, visitedLocals),
+            ILocalReferenceOperation local
+                when visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } provenance =>
+                FunctionOf(provenance, visitedLocals),
+            IMethodReferenceOperation
+            {
+                Method: { MethodKind: MethodKind.LocalFunction } localFunction,
+                SemanticModel: { } semanticModel,
+            } => localFunction.DeclaringSyntaxReferences is [var reference]
+                ? semanticModel.GetOperation(reference.GetSyntax()) as ILocalFunctionOperation
+                : null,
             _ => null,
         };
 
@@ -1012,10 +1074,9 @@ public static class CoverageChecker
     private sealed record ContractReference(IFieldSymbol Field, SyntaxNode? Binding);
 
     /// <summary>
-    /// A resolved implementation. <see cref="Handler"/>, <see cref="BindingHost"/> and
-    /// <see cref="InfersBody"/> are set for minimal-API and MVC handlers only: Azure Functions
-    /// binds its own parameters, and its enum binding is unmeasured, so Functions handlers
-    /// carry none of them.
+    /// A resolved implementation. <see cref="Handler"/> and <see cref="BindingHost"/> are set
+    /// for every handler whose binding <see cref="ParameterBindingSources"/> knows: minimal
+    /// APIs, MVC actions and Azure Functions.
     /// </summary>
     private sealed record EndpointContext(
         bool IsEndpoint,
@@ -1031,9 +1092,8 @@ public static class CoverageChecker
         public ParameterBindingHost? BindingHost { get; init; }
 
         /// <summary>
-        /// Whether the host infers a JSON body for an unattributed collection or complex
-        /// parameter: <see cref="EnumParameterBinding.MinimalApiInfersBody"/> or
-        /// <see cref="EnumParameterBinding.MvcInfersBody"/>.
+        /// Whether the host infers binding sources: <see cref="EnumParameterBinding.MinimalApiInfersBody"/>
+        /// or <see cref="EnumParameterBinding.MvcInfersBody"/>. Unused for Azure Functions.
         /// </summary>
         public bool InfersBody { get; init; }
     }

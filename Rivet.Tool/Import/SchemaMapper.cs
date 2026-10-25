@@ -365,6 +365,12 @@ internal sealed class SchemaMapper
                 continue;
             }
 
+            if (SchemaClassifier.IsTitledConstEnum(schema))
+            {
+                enums.Add(SchemaClassifier.MapTitledConstEnum(name, schema));
+                continue;
+            }
+
             if (SchemaClassifier.IsStringEnum(schema))
             {
                 enums.Add(SchemaClassifier.MapEnum(name, schema));
@@ -690,6 +696,20 @@ internal sealed class SchemaMapper
             return false;
         }
 
+        if (SchemaClassifier.IsTitledConstEnum(schema))
+        {
+            scalar = new GeneratedScalarSchema(
+                name,
+                componentId,
+                schemaType,
+                schema.Format,
+                declared.HasFlag(JsonSchemaType.Null),
+                BuildScalarMetadata(schema, declared.HasFlag(JsonSchemaType.Null)),
+                IsEnum: true
+            );
+            return true;
+        }
+
         if (
             schema.AllOf is { Count: > 0 }
             || schema.OneOf is { Count: > 0 }
@@ -713,20 +733,34 @@ internal sealed class SchemaMapper
             return false;
         }
 
-        if (
-            schema.Enum is { Count: > 0 }
-            && !SchemaClassifier.IsStringEnum(schema)
-            && !SchemaClassifier.IsIntEnum(schema)
-        )
+        var metadata = BuildScalarMetadata(schema, declared.HasFlag(JsonSchemaType.Null));
+        var isEnum = false;
+        if (schema.Enum is { Count: > 0 } values)
         {
-            WarnUnsupportedNamedScalar(
-                componentId,
-                "a heterogeneous or unsupported enum; only flat string and Int32 integer enums are supported"
-            );
-            return false;
+            if (SchemaClassifier.IsStringEnum(schema) || SchemaClassifier.IsIntEnum(schema))
+            {
+                isEnum = true;
+            }
+            else if (values.All(value => IsEnumValueOfType(value, nonNull)))
+            {
+                // No C# enum can hold these members, so the primitive carries them as metadata.
+                metadata = metadata with
+                {
+                    Enum = new JsonArray([
+                        .. values.Select(value => value?.DeepClone()),
+                    ]).ToJsonString(),
+                };
+            }
+            else
+            {
+                WarnUnsupportedNamedScalar(
+                    componentId,
+                    "a heterogeneous or unsupported enum; only flat string and Int32 integer enums are supported"
+                );
+                return false;
+            }
         }
 
-        var metadata = BuildScalarMetadata(schema, declared.HasFlag(JsonSchemaType.Null));
         scalar = new GeneratedScalarSchema(
             name,
             componentId,
@@ -734,10 +768,23 @@ internal sealed class SchemaMapper
             schema.Format,
             declared.HasFlag(JsonSchemaType.Null),
             metadata,
-            IsEnum: schema.Enum is { Count: > 0 }
+            IsEnum: isEnum
         );
         return true;
     }
+
+    private static bool IsEnumValueOfType(JsonNode? value, JsonSchemaType type) =>
+        value is JsonValue scalar
+        && scalar.GetValueKind() switch
+        {
+            System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False => type
+                == JsonSchemaType.Boolean,
+            System.Text.Json.JsonValueKind.Number => type == JsonSchemaType.Number
+                || type == JsonSchemaType.Integer
+                    && scalar.TryGetValue<decimal>(out var number)
+                    && number == decimal.Truncate(number),
+            _ => false,
+        };
 
     private bool TryMapNamedArray(
         string name,
@@ -858,7 +905,10 @@ internal sealed class SchemaMapper
                 || (schema.Type & ~JsonSchemaType.Null)
                     is JsonSchemaType.Integer
                         or JsonSchemaType.Number,
-            Required: schema.Required is { Count: > 0 } ? schema.Required.ToList() : null
+            Required: schema.Required is { Count: > 0 } ? schema.Required.ToList() : null,
+            EnumListsNull: schema.Extensions?.ContainsKey(
+                OpenApiImporter.ImportedEnumNullMemberExtension
+            ) == true
         );
 
     private static bool HasExplicitNullBranch(IOpenApiSchema schema) =>
@@ -870,10 +920,6 @@ internal sealed class SchemaMapper
         IOpenApiSchema schema
     )
     {
-        if (schema is OpenApiSchemaReference)
-        {
-            return [];
-        }
         var result = new List<GeneratedSchemaMetadata>();
         CollectGeneratedSchemaMetadata(schema, "", result, new HashSet<IOpenApiSchema>());
         return result;
@@ -886,7 +932,9 @@ internal sealed class SchemaMapper
         HashSet<IOpenApiSchema> visited
     )
     {
-        if (!visited.Add(schema))
+        // A $ref node is the referenced component's identity; its metadata belongs to
+        // the component, and copying it to the use site wraps the $ref on emission.
+        if (schema is OpenApiSchemaReference || !visited.Add(schema))
         {
             return;
         }
@@ -929,7 +977,8 @@ internal sealed class SchemaMapper
         || metadata.IsFormatSpecified
         || metadata.Required is { Count: > 0 }
         || metadata.Constraints is { HasAny: true }
-        || metadata.Xml is not null;
+        || metadata.Xml is not null
+        || metadata.EnumListsNull;
 
     private void WarnUnsupportedNamedScalar(string componentId, string reason)
     {
@@ -944,6 +993,48 @@ internal sealed class SchemaMapper
                 $"Named scalar component '{componentId}' uses {reason}. Existing fallback mapping retained."
             )
         );
+    }
+
+    /// <summary>
+    /// Named scalar references below a property schema, keyed by the JSON pointer the
+    /// generated-schema metadata uses. Stops at a reference: its target owns the rest.
+    /// </summary>
+    internal IReadOnlyList<(string Pointer, string Name)>? CollectNestedScalarReferences(
+        IOpenApiSchema schema
+    )
+    {
+        var result = new List<(string Pointer, string Name)>();
+        Collect(schema, "");
+        return result.Count > 0 ? result : null;
+
+        void Collect(IOpenApiSchema node, string pointer)
+        {
+            if (node is OpenApiSchemaReference)
+            {
+                return;
+            }
+            foreach (
+                var (child, childPointer) in new[]
+                {
+                    (node.Items, pointer + "/items"),
+                    (node.AdditionalProperties, pointer + "/additionalProperties"),
+                }
+            )
+            {
+                if (child is null)
+                {
+                    continue;
+                }
+                if (ResolveScalarReferenceName(child) is { } name)
+                {
+                    result.Add((childPointer, name));
+                }
+                else
+                {
+                    Collect(child, childPointer);
+                }
+            }
+        }
     }
 
     internal string? ResolveScalarReferenceName(IOpenApiSchema schema)

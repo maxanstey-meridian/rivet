@@ -109,7 +109,12 @@ public sealed record TsScalarMetadata(
     string? Format = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool IsFormatSpecified = false,
-    IReadOnlyList<string>? Required = null
+    IReadOnlyList<string>? Required = null,
+    // A named scalar's enum the C# type cannot spell (booleans, non-Int32 numbers), as JSON.
+    string? Enum = null,
+    // The authored enum lists null as a member (distinct from nullability itself).
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool EnumListsNull =
+        false
 );
 
 public sealed record TsSchemaXmlMetadata(
@@ -163,7 +168,9 @@ public sealed record TsPropertyConstraints(
     double? MultipleOf = null,
     int? MinItems = null,
     int? MaxItems = null,
-    bool? UniqueItems = null
+    bool? UniqueItems = null,
+    int? MinProperties = null,
+    int? MaxProperties = null
 )
 {
     [JsonIgnore]
@@ -178,5 +185,7 @@ public sealed record TsPropertyConstraints(
         || MultipleOf.HasValue
         || MinItems.HasValue
         || MaxItems.HasValue
-        || UniqueItems == true;
+        || UniqueItems == true
+        || MinProperties.HasValue
+        || MaxProperties.HasValue;
 }

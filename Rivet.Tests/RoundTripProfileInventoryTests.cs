@@ -35,6 +35,11 @@ public sealed class RoundTripProfileInventoryTests
                 "box",
                 "kubernetes",
                 "zoom",
+                "stripe",
+                "slack",
+                "vercel",
+                "github",
+                "discord",
             ],
             facts
                 .GetProperty("corpora")
@@ -44,30 +49,30 @@ public sealed class RoundTripProfileInventoryTests
         );
         Assert.Empty(facts.GetProperty("unknownKeywords").EnumerateArray());
         Assert.Equal(
-            2764,
+            5649,
             facts.GetProperty("normalizedComponentTotals").GetProperty("schemas").GetInt32()
         );
         Assert.Equal(
-            72,
+            73,
             facts.GetProperty("normalizedComponentTotals").GetProperty("requestBodies").GetInt32()
         );
         Assert.Equal(
-            17,
+            24,
             facts
                 .GetProperty("sourceComponentTotals")
                 .GetProperty("components.securitySchemes")
                 .GetInt32()
         );
         Assert.Equal(
-            19,
+            26,
             facts.GetProperty("normalizedComponentTotals").GetProperty("securitySchemes").GetInt32()
         );
         Assert.Equal(
-            154,
+            345,
             facts.GetProperty("normalizedComponentTotals").GetProperty("parameters").GetInt32()
         );
         Assert.Equal(
-            95,
+            140,
             facts.GetProperty("normalizedComponentTotals").GetProperty("responses").GetInt32()
         );
         var groups = facts.GetProperty("carrierSensitiveGroups");

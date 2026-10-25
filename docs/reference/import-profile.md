@@ -1,14 +1,22 @@
 # Import profile (`--from-openapi`)
 
-> **Round-trip status (2026-07-13): 16/25 verified locally.** The hardened real-disk gate
-> covers 2,516 operations and 3,104 normalized component identities: 2,764
-> schemas, 72 request bodies, 154 parameters, 95 responses, and 19 security
-> schemes. All valid finding categories, unsupported markers, compilation,
-> integrity, fixed-point, generated-carrier shape-class behavior, and independently
-> recomputed source-to-first audit findings are empty. One invalid parameter and
-> ten ignored reserved Header Parameters are hash- and pointer-bound in the profile. Corpus
-> artifacts and reports remain local/gitignored, so this is not reproducible CI
-> proof.
+> **Round-trip status (2026-10-25): 21/25 verified.** The hardened real-disk gate
+> covers 4,895 operations and 6,233 normalized component identities: 5,649
+> schemas, 73 request bodies, 345 parameters, 140 responses, and 26 security
+> schemes, plus 12 header and 504 example components. All valid finding
+> categories, unsupported markers, compilation, integrity, fixed-point,
+> generated-carrier shape-class behavior, and recomputed source-to-first findings
+> are empty. What the source documents themselves get wrong (259 sites: an empty
+> parameter name, reserved headers, bodies on body-forbidden statuses, and paths
+> that repeat a template under other parameter names) is bound by hash, pointer,
+> diagnostic, and count in the profile. The four corpora still outside the gate,
+> and exactly what keeps each one out, are listed under
+> [Outside the gate](#outside-the-gate).
+> The 25 source documents are committed under `openapi/`, pinned by SHA-256 in
+> `corpus/openapi-manifest.json`, and `RoundTripCorpusGateTests` runs inside the
+> plain `dotnet test` that every release tag's publish workflow runs first, so
+> anyone with a checkout can reproduce the gate. Only the per-run reports
+> (`TestResults/roundtrip/`) stay out of git.
 
 `--from-openapi` is an **onboarding scaffold**, not a sync tool. Run it once to
 bring an existing OpenAPI 3.x API into Rivet: it generates C# contracts + DTOs,
@@ -20,7 +28,7 @@ a re-onboarding, not an incremental merge.
 The importer contract is that nothing is dropped silently: anything the
 generated C# representation cannot preserve must produce a stable `RIV`
 diagnostic or a structured marker at the affected site. The verified corpus gate
-proves that contract over its inventoried 16-corpus surface. Broader limitations
+proves that contract over its inventoried 21-corpus surface. Broader limitations
 are listed below rather than being treated as permitted equivalences.
 
 ## Verified corpus inventory
@@ -30,11 +38,14 @@ are listed below rather than being treated as permitted equivalences.
 component namespaces, and vendor-extension families and fails on an unknown
 keyword/extension, artifact or profile drift, or changed reviewed disposition.
 
-The source namespaces contain 2,758 `components.schemas` plus 6 Swagger
-`definitions` (2,764 normalized schemas), 72 `components.requestBodies`, 154
-`components.parameters`, 95 `components.responses`, 17
-`components.securitySchemes`, and 2 Swagger `securityDefinitions` (19 normalized
-security schemes). Together these are 3,104 normalized component identities.
+The source namespaces contain 5,643 `components.schemas` plus 6 Swagger
+`definitions` (5,649 normalized schemas), 73 `components.requestBodies`, 345
+`components.parameters`, 140 `components.responses`, 24
+`components.securitySchemes`, and 2 Swagger `securityDefinitions` (26 normalized
+security schemes). Together these are 6,233 normalized component identities.
+GitHub and Discord add the first `components.headers` (12) and GitHub the first
+`components.examples` (504); both survive by name, and a header `$ref` stays a
+`$ref` wherever the source wrote one.
 The full preserve/map/exclude table and value-based evidence are in
 `corpus/verified-profile.json`.
 Preserve/map families cover enum member metadata, concrete request/response
@@ -45,7 +56,15 @@ language-specific Java annotations are explicitly excluded rather than being
 blanket-ignored. Box's 14, Kubernetes' 8, and Zoom's 4 newly observed private
 extension families are explicit excludes; the profile does not claim
 provider-specific Box behavior, Kubernetes discovery/merge/apply/union
-semantics, or Zoom private example and enum-description behavior.
+semantics, or Zoom private example and enum-description behavior. The five
+newest corpora brought 16 more families. The ones that change what a caller may
+send or receive are preserved: Stripe's expandable fields and unvalidated enums,
+GitHub's per-operation availability and preview metadata, GitHub's
+slash-carrying path parameters, and Discord's "this anyOf is really exclusive".
+Code samples, Speakeasy SDK naming, Stripe's SDK resource ids, GitHub's future
+breaking-change notes and its `x-webhooks` map are excluded, each with its
+evidence in the profile. That makes 97 reviewed families: 17 preserved, 7
+mapped, 73 excluded.
 
 All preserve rows survive as exact opaque JSON provenance at their owning
 pointers through the fixed point; this does not mean Rivet interprets
@@ -54,9 +73,9 @@ explicit. Swagger `collectionFormat` comparison is fixed and mutation-covered.
 Named request-body components retain identity and content even when shared or
 unused.
 
-The carrier inventory contains 7,851 owner/shape classifications across 7,818
+The carrier inventory contains 23,904 owner/shape classifications across 23,834
 unique pointers. It covers named-property records, empty-schema `JsonElement`
-carriers, propertyless open/closed objects, and 123 schema-valued dictionaries;
+carriers, propertyless open/closed objects, and 784 schema-valued dictionaries;
 each observed carrier shape class is tied to an executable compiled-runtime
 behavior test. This is shape-class proof, not an assertion that every pointer is
 independently deserialized.
@@ -70,7 +89,11 @@ honest degradation, not full support.
 - **Operations**: GET/HEAD/POST/PUT/PATCH/DELETE/OPTIONS; exact authored
   `operationId` presence/value and tags persist as generated provenance (as do
   the `x-rivet-contract`/`x-rivet-endpoint` extensions when present); summaries,
-  descriptions, deprecation, and effective scoped servers are preserved. TRACE
+  descriptions, deprecation, and effective scoped servers are preserved.
+  Documentation the typed model has no slot for (path-item `summary` and
+  `description`, operation `externalDocs`, response and component `links`,
+  media-type `encoding`, `info.summary` and `jsonSchemaDialect`) rides along as
+  preserved fields: exact JSON, re-attached at the same pointer on emit. TRACE
   operations have no contract representation and are dropped with a named
   warning (`RIV3003` / `operation-method-dropped`).
 - **Bodies**: `application/json` (typed records), `application/x-www-form-urlencoded`
@@ -102,6 +125,9 @@ honest degradation, not full support.
   reachable component-example closure through the generated contract, so a
   round-trip preserves their shape without dangling them.
   Unresolvable refs degrade loudly (`unresolvable-embedded-example-ref`).
+  A named Example Object keeps its `summary` and `description`, and one that is
+  *only* a summary (GitHub documents request variants that way; OpenAPI makes the
+  value optional) is a whole example, not a gap.
 - **Parameters**: path, query, header, and cookie parameters retain their exact
   name, location, requiredness, schema/reference identity, descriptions,
   deprecation, defaults, examples, constraints, and represented serialization
@@ -114,6 +140,14 @@ honest degradation, not full support.
   `oneOf`/`anyOf` → `As*` wrapper union records; string/int enums; single-value
   branded primitives (`x-rivet-brand`); generics (`x-rivet-generic`);
   dictionaries via `additionalProperties`; `$ref` aliases (resolved to targets).
+  OpenAPI 3.1's titled-const idiom (`oneOf` of `{"title": "ONE_HOUR", "const": 60}`)
+  is an enum named by its titles, not a union of indistinguishable slots. An enum
+  is a set, so a repeated member (Vercel lists `preview` twice) collapses to one;
+  a `null` member is kept as a member, separately from nullability. A named
+  boolean or non-integer number enum keeps its members as metadata on the
+  primitive. A typed record's array items and map values keep their `$ref` to a
+  named scalar, a nullable component is referenced bare (it already admits
+  null), and `minProperties`/`maxProperties` survive on typed dictionaries.
   Framework scalar names are globally qualified when a generated component name
   would otherwise shadow their CLR type.
 - **Nullability and requiredness — independent axes, both preserved.**
@@ -155,10 +189,15 @@ honest degradation, not full support.
   component examples, operation identity, and request-body descriptions persist
   in generated assembly/field attributes. Explicit current CLI title/version/
   server values override imported provenance.
-- **Security**: global and operation requirement alternatives, AND combinations,
-  scopes, empty requirements, and scheme definitions persist in generated
-  provenance. Supported definitions include API key (header/query/cookie), HTTP,
-  OAuth2 flows, OpenID Connect, and mutual TLS.
+- **Security**: all of it. An operation's requirements become ordinary builder
+  calls you'd write by hand: each alternative starts with `.Secure(scheme, scopes...)`,
+  every further scheme in that AND-group is an `.AndSecure(...)`, an empty
+  requirement (`{}`) is `.OrAnonymous()`, and `security: []` is `.Anonymous()`. An
+  operation with no `security` key writes none of them and inherits the document's.
+  Document-level requirements and scheme definitions (API key in header/query/cookie,
+  HTTP, every OAuth2 flow with its scopes, OpenID Connect, mutual TLS) land in
+  `RivetSecurity.cs` as assembly attributes. Nothing is dropped, so there is no
+  security warning to watch for.
 
 ## What diagnoses
 
@@ -169,6 +208,8 @@ honest degradation, not full support.
 | `body $ref=… reason=unresolved-ref` | Request-body `$ref` could not be resolved; the input type was dropped. |
 | `request-example …` / `response-example …` (`reason=unresolved-ref` / `missing-value` / `external-value`) | An example could not be resolved/carried. `externalValue` examples have no in-document JSON value and remain unsupported. |
 | `header name=… status=… reason=undeclared-status` | Response header sits on a status the contract cannot declare (e.g. a non-lowest 2xx); the header was dropped. |
+| `header name=… status=… reason=duplicate-name` | A second spelling of a header already declared on that status (`X-Rate` and `x-rate`); HTTP header names ignore case, so the first wins and this one was dropped. |
+| `header name= status=… reason=empty-name` | Response header with an empty name; it can never be sent, so it was dropped. |
 | `param name=… in=… reason=reserved-member-renamed` | The parameter name maps to reserved C# record machinery and cannot bind under the generated member name; the rename is explicit. |
 
 ### Warnings (stderr / `ImportResult.Warnings`)
@@ -195,6 +236,21 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3021` | `reserved-content-type-header-dropped` | `Content-Type` is declared as a header parameter instead of request-body content. |
 | `RIV3022` | `reserved-authorization-header-dropped` | `Authorization` is declared as a header parameter instead of a security scheme. |
 | `RIV3023` | `reserved-accept-header-dropped` | `Accept` is declared as a header parameter instead of response content. |
+| `RIV3024` | `body-forbidden-status-content-dropped` | Response content or an example sits on a body-forbidden status (1xx/204/205/304); the content is dropped, the status kept. |
+| `RIV3025` | `schemaless-parameter-dropped` | Parameter declares `content` instead of a `schema`, or neither; the parameter is dropped from the operation. |
+| `RIV3027` | `callback-dropped` | Operation or component `callbacks` entry; contracts describe requests the API receives. |
+| `RIV3028` | `path-item-outside-paths-dropped` | `webhooks` or `components.pathItems` entry; only path items under `paths` become endpoints. |
+| `RIV3029` | `equivalent-path-template-merged` | A path repeats an earlier path's template under other parameter names, which OpenAPI forbids; its operations merge into the earlier path and adopt its parameter names. |
+
+- **Paths**: two paths that differ only in their parameter names
+  (`/deployments/{idOrUrl}` and `/deployments/{id}`) are one template, which
+  OpenAPI forbids. When their methods don't clash, the later path's operations
+  move to the earlier one and adopt its parameter names (`RIV3029`); requests
+  don't change, because path parameter names never reach the wire. Twins that
+  can't merge stop generation with `RIV2013` instead.
+- **Discriminator mappings** into another file (`models/resize.yml`) cannot
+  resolve in the one document Rivet imports. The entry is dropped with `RIV3005`
+  before anything else reads it.
 
 ## Current unsupported or degraded surface
 
@@ -202,10 +258,9 @@ These currently have no complete generated C# representation and are not
 preserved beyond the diagnostics above where applicable. This is an
 implementation inventory, not an amendment to the verified profile:
 
-- `callbacks`, `webhooks`, `links`
-- Parameter `content` and `allowReserved`
-- Parameter `style`, `explode`, and query `allowEmptyValue` are represented by
-  the explicit parameter metadata channel
+- `callbacks` on operations and in components (`RIV3027`), and `webhooks` and
+  `components.pathItems` (`RIV3028`)
+- Parameters that carry `content` instead of a `schema` (`RIV3025`)
 - Polymorphic `discriminator` dispatch *without* a usable `oneOf` mapping
   (imports as plain records/unions, loudly); usable mappings reverse to
   `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies
@@ -230,7 +285,32 @@ fails. Exact invalid-source classifications are pinned by corpus hash, pointer,
 diagnostic, and cardinality; they are not tolerated valid-contract findings.
 
 The retained audit independently recompiles both generated-source passes and
-recomputes source-to-first semantics for all 16 verified corpora, 2,516
-operations, and 3,104 normalized component identities with no valid findings.
-The source documents and generated reports are gitignored local artifacts, so
-this remains local verification rather than reproducible CI proof.
+recomputes source-to-first semantics for all 21 verified corpora, 4,895
+operations, and 6,233 normalized component identities with no valid findings.
+The source documents are committed and hash-pinned, and the gate runs in every
+release's `dotnet test`; only the generated reports are gitignored.
+
+## Outside the gate
+
+Four corpora still fail the gate, and none of them is excused. Each failure is a
+Rivet gap with a known shape, waiting on a design decision rather than a shrug:
+
+- **Bitbucket**: its `object` base carries a `discriminator` with no `oneOf`:
+  OpenAPI 3.0's allOf-inheritance style, where subtypes extend the base and the
+  tag names the subtype. The spec survives (the base is preserved verbatim), but
+  the generated C# base is a plain record, so a base-typed property neither
+  reads nor writes the subtype. One `RIV3005` says so. Everything else (14
+  bodies on 204/304 statuses) is a source defect the profile can bind.
+- **Jira**: the discriminated variants Rivet synthesizes from the C# hierarchy
+  lose their member descriptions and invent a `const`-like tag `enum` the source
+  never wrote (about 450 findings), and one union declares sibling properties
+  beside its `oneOf` (`RIV3005`).
+- **DigitalOcean**: it has no reusable components; it reuses by `$ref` into other
+  operations (`#/paths/~1v2~11-clicks/get/responses/401`), 2,797 times. The
+  importer inlines those and the reference identity is gone, which is nearly all
+  of its ~10,000 findings.
+- **Cloudflare**: the largest of them, and the longest list: a security
+  requirement that names an undefined scheme (`assets_jwt`, `RIV2002` on emit),
+  207 enums that cannot become a C# enum (`RIV3012`), 15 unusable
+  discriminators (`RIV3005`), 7 scalar compositions (`RIV3015`), 5 identity-only
+  fallbacks (`RIV3010`), and 25 unreviewed extension families.

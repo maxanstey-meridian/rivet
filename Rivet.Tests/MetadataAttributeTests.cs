@@ -169,17 +169,25 @@ public sealed class MetadataAttributeTests
 
     // ========== [RivetConstraints] ==========
 
-    [Fact]
-    public void RivetConstraints_Emit_In_OpenApi()
+    // A DataAnnotations attribute on a positional record parameter without [property:]
+    // lands on the constructor parameter, where MVC validation reads it. The spec reads
+    // it there too, so both placements emit the same constraints, inherited ones included.
+    [Theory]
+    [InlineData("property: ")]
+    [InlineData("")]
+    public void RivetConstraints_Emit_In_OpenApi(string target)
     {
-        var source = """
+        var source = $$"""
             using System.ComponentModel.DataAnnotations;
             using Rivet;
 
+            public abstract record NamedDto([{{target}}MinLength(1), MaxLength(100), RegularExpression("^[a-z]+$")] string Name);
+
             [RivetType]
             public sealed record ItemDto(
-                [property: MinLength(1), MaxLength(100), RegularExpression("^[a-z]+$")] string Name,
-                [property: Range(0, 999.5), RivetConstraints(MultipleOf = 0.5)] double Score);
+                string Name,
+                [{{target}}Range(0, 999.5)][property: RivetConstraints(MultipleOf = 0.5)] double Score,
+                [{{target}}EmailAddress] string Contact) : NamedDto(Name);
 
             [RivetContract]
             public static class ItemContract
@@ -204,6 +212,8 @@ public sealed class MetadataAttributeTests
         Assert.Equal(0, score.GetProperty("minimum").GetDouble());
         Assert.Equal(999.5, score.GetProperty("maximum").GetDouble());
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
+
+        Assert.Equal("email", props.GetProperty("contact").GetProperty("format").GetString());
     }
 
     // ========== [RivetDefault] ==========

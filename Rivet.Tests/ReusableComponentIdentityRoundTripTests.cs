@@ -7,7 +7,7 @@ namespace Rivet.Tests;
 public sealed class ReusableComponentIdentityRoundTripTests
 {
     [Fact]
-    public void Used_Shared_Unused_And_Escaped_Parameters_And_Responses_Reach_A_Fixed_Point()
+    public void Used_Shared_Unused_And_Escaped_Parameters_Responses_And_Headers_Reach_A_Fixed_Point()
     {
         const string spec = """
             {
@@ -51,7 +51,8 @@ public sealed class ReusableComponentIdentityRoundTripTests
                   "Shared.Response": {
                     "description": "Shared response",
                     "headers": {
-                      "X-Next": { "schema": { "type": "string" } }
+                      "X-Next": { "schema": { "type": "string" } },
+                      "X-Rate": { "$ref": "#/components/headers/Rate~1Limit" }
                     }
                   },
                   "Unused~Response": {
@@ -60,6 +61,13 @@ public sealed class ReusableComponentIdentityRoundTripTests
                       "text/plain": { "schema": { "type": "string" } }
                     }
                   }
+                },
+                "headers": {
+                  "Rate/Limit": {
+                    "description": "Requests left",
+                    "schema": { "type": "integer", "format": "int32" }
+                  },
+                  "Unused.Header": { "schema": { "type": "string" } }
                 }
               },
               "paths": {
@@ -98,7 +106,12 @@ public sealed class ReusableComponentIdentityRoundTripTests
                         "schema": { "type": "integer", "format": "int32" }
                       }
                     ],
-                    "responses": { "204": { "description": "No content" } }
+                    "responses": {
+                      "204": {
+                        "description": "No content",
+                        "headers": { "X-Rate": { "$ref": "#/components/headers/Rate~1Limit" } }
+                      }
+                    }
                   }
                 }
               }
@@ -128,6 +141,9 @@ public sealed class ReusableComponentIdentityRoundTripTests
                 first["components"]!["responses"],
                 second["components"]!["responses"]
             )
+        );
+        Assert.True(
+            JsonNode.DeepEquals(first["components"]!["headers"], second["components"]!["headers"])
         );
         Assert.True(JsonNode.DeepEquals(first["paths"], second["paths"]));
     }
@@ -388,8 +404,11 @@ public sealed class ReusableComponentIdentityRoundTripTests
     }
 
     [Fact]
-    public void Preserved_Component_With_Missing_Schema_Gets_An_Untyped_Emission_Fallback()
+    public void Preserved_Component_With_Missing_Schema_Fails_Emission_With_RIV2005()
     {
+        // The source's own $ref dangles. Emission used to invent an untyped
+        // MissingFilter component under a warning, which turns "this schema doesn't
+        // exist" into "anything goes"; it now refuses, naming the component and site.
         const string spec = """
             {
               "openapi": "3.1.0",
@@ -417,17 +436,30 @@ public sealed class ReusableComponentIdentityRoundTripTests
         using var workDirectory = new TempDir();
         var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
         File.WriteAllText(sourcePath, spec);
-        var emitted = RealCliOpenApiPass.ImportAndEmit(
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        var import = CliRunner.RunCli(
             workDirectory.FullName,
-            sourcePath,
-            "missing-schema"
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+        Assert.True(import.ExitCode == 0, import.StdErr);
+
+        var outputDirectory = Path.Combine(workDirectory.FullName, "output");
+        var emit = CliRunner.RunCli(
+            workDirectory.FullName,
+            [generatedDirectory, "--openapi", "--output", outputDirectory]
         );
 
-        Assert.NotNull(emitted["components"]!["schemas"]!["MissingFilter"]);
-        Assert.Equal(
-            "#/components/schemas/MissingFilter",
-            emitted["components"]!["parameters"]!["Filter"]!["schema"]!["$ref"]!.GetValue<string>()
-        );
+        Assert.Equal(1, emit.ExitCode);
+        Assert.Contains("error RIV2005: schema component 'MissingFilter'", emit.StdErr);
+        Assert.Contains("Filter", emit.StdErr);
+        Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
     }
 
     private static void AssertNamedArray(JsonObject document)
@@ -500,5 +532,21 @@ public sealed class ReusableComponentIdentityRoundTripTests
             ]!.GetValue<string>()
         );
         Assert.Null(document["paths"]!["/override"]!["get"]!["parameters"]![0]!["$ref"]);
+
+        // Header components survive, used or not, and both an operation's own response
+        // and a preserved component response keep their $ref to one.
+        var headers = document["components"]!["headers"]!.AsObject();
+        Assert.Equal(["Rate/Limit", "Unused.Header"], headers.Select(entry => entry.Key));
+        Assert.Equal("Requests left", headers["Rate/Limit"]!["description"]!.GetValue<string>());
+        Assert.Equal(
+            "#/components/headers/Rate~1Limit",
+            responses["Shared.Response"]!["headers"]!["X-Rate"]!["$ref"]!.GetValue<string>()
+        );
+        Assert.Equal(
+            "#/components/headers/Rate~1Limit",
+            document["paths"]!["/override"]!["get"]!["responses"]!["204"]!["headers"]!["X-Rate"]![
+                "$ref"
+            ]!.GetValue<string>()
+        );
     }
 }

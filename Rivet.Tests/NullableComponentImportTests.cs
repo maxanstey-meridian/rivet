@@ -90,12 +90,21 @@ public sealed class NullableComponentImportTests
         Assert.Contains("label", required);
         Assert.DoesNotContain("note", required);
 
-        // owner: nullable $ref — a null branch beside the component ref
+        // owner: the bare $ref the source wrote. The component itself admits null, so a
+        // null branch beside it would match null twice, and oneOf rejects that.
         var owner = item.GetProperty("properties").GetProperty("owner");
-        Assert.True(owner.TryGetProperty("oneOf", out var oneOf));
+        Assert.Equal(
+            "#/components/schemas/nullable-owner",
+            Assert.Single(owner.EnumerateObject()).Value.GetString()
+        );
         Assert.Contains(
-            oneOf.EnumerateArray(),
-            b => b.TryGetProperty("type", out var t) && t.GetString() == "null"
+            emitted
+                .GetProperty("components")
+                .GetProperty("schemas")
+                .GetProperty("nullable-owner")
+                .GetProperty("type")
+                .EnumerateArray(),
+            type => type.GetString() == "null"
         );
     }
 }

@@ -1,4 +1,4 @@
-using Rivet.Tool.Model;
+using Rivet.Tool;
 
 namespace Rivet.Tests;
 
@@ -14,12 +14,36 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class CrossCorpusFindingsTests
 {
-    // ---- #1, emit side: no property surface → no params, loudly ----
+    // ---- #1, emit side: no property surface → refused, never dropped ----
 
-    [Fact]
-    public void Dictionary_Input_On_Get_Warns_RIV1020_And_Lowers_No_Query_Params()
+    [Theory]
+    [InlineData(
+        "RouteDefinition<Dictionary<string, string>, ThingDto>",
+        "Define.Get<Dictionary<string, string>, ThingDto>(\"/dict-input-things/{thing_id}\")",
+        "GET /dict-input-things/{thing_id}"
+    )]
+    [InlineData(
+        "InputRouteDefinition<List<string>>",
+        "Define.Delete(\"/list-input-things\").Status(204).Accepts<List<string>>()",
+        "DELETE /list-input-things"
+    )]
+    [InlineData(
+        "RouteDefinition<int, ThingDto>",
+        "Define.Get<int, ThingDto>(\"/scalar-input-things\")",
+        "GET /scalar-input-things"
+    )]
+    [InlineData(
+        "RouteDefinition<string, ThingDto>",
+        "Define.Post<string, ThingDto>(\"/binary-scalar-things\").AcceptsBinary()",
+        "POST /binary-scalar-things"
+    )]
+    public void Unlowerable_Input_Without_Json_Body_Is_Refused_With_RIV1020(
+        string fieldType,
+        string definition,
+        string operation
+    )
     {
-        var source = """
+        var source = $$"""
             using Rivet;
             using System.Collections.Generic;
 
@@ -31,54 +55,17 @@ public sealed class CrossCorpusFindingsTests
             [RivetContract]
             public static class ThingsContract
             {
-                public static readonly RouteDefinition<Dictionary<string, string>, ThingDto> GetThing =
-                    Define.Get<Dictionary<string, string>, ThingDto>("/dict-input-things/{thing_id}");
+                public static readonly {{fieldType}} Thing = {{definition}};
             }
             """;
 
-        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            endpoints = CompilationHelper.WalkContract(source).Endpoints
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
         );
 
-        Assert.Contains("RIV1020", stderr);
-        Assert.Contains("/dict-input-things/", stderr);
-
-        var ep = Assert.Single(endpoints);
-        // the route token survives untyped; no CLR member becomes a query param
-        var param = Assert.Single(ep.Params);
-        Assert.Equal("thing_id", param.Name);
-        Assert.Equal(ParamSource.Route, param.Source);
-        Assert.DoesNotContain(ep.Params, p => p.Source == ParamSource.Query);
-    }
-
-    [Fact]
-    public void Collection_Input_On_Delete_Warns_RIV1020_And_Lowers_No_Query_Params()
-    {
-        var source = """
-            using Rivet;
-            using System.Collections.Generic;
-
-            namespace Test;
-
-            [RivetContract]
-            public static class ThingsContract
-            {
-                public static readonly InputRouteDefinition<List<string>> PurgeThings =
-                    Define.Delete("/list-input-things")
-                        .Status(204)
-                        .Accepts<List<string>>();
-            }
-            """;
-
-        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            endpoints = CompilationHelper.WalkContract(source).Endpoints
-        );
-
-        Assert.Contains("RIV1020", stderr);
-        Assert.Contains("/list-input-things", stderr);
-        Assert.Empty(Assert.Single(endpoints).Params);
+        Assert.StartsWith("error RIV1020:", exception.Message);
+        Assert.Contains(operation, exception.Message);
+        Assert.Contains("record with one property per route or query parameter", exception.Message);
     }
 
     [Fact]

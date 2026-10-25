@@ -98,54 +98,86 @@ public sealed class StringEnumConverterTests
         Assert.Equal("\"L3\"", JsonSerializer.Serialize(ColourPinned.Level3));
         Assert.Equal("\"darkGreen\"", JsonSerializer.Serialize(ColourPinned.DarkGreen));
         Assert.Equal(ColourPinned.Level3, JsonSerializer.Deserialize<ColourPinned>("\"L3\""));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<ColourPinned>("\"level3\""));
     }
 #endif
 
-    // The spec Rivet emits for these enums is a string union, so the converters
-    // refuse integers: a bare 0 always, and a numeric string "0" (which STJ would
-    // otherwise read as an integer value) from .NET 9 on. They still read the C#
-    // member name in any casing; that's STJ, and the spec doesn't advertise it.
+    // The spec Rivet emits for these enums is a string union of the written names, so
+    // reading takes exactly those names and nothing else, on every runtime.
     public static TheoryData<Type> RivetConvertedEnums =>
         [typeof(Colour), typeof(ColourSnake), typeof(ColourKebab), typeof(ColourLower)];
 
     [Theory]
     [MemberData(nameof(RivetConvertedEnums))]
-    public void Rivet_Converters_Refuse_A_Json_Integer(Type enumType)
+    public void Rivet_Converters_Read_Back_Every_Name_They_Write(Type enumType)
     {
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("0", enumType));
+        foreach (var value in Enum.GetValues(enumType))
+        {
+            Assert.Equal(
+                value,
+                JsonSerializer.Deserialize(JsonSerializer.Serialize(value, enumType), enumType)
+            );
+        }
     }
 
-#if NET9_0_OR_GREATER
+    // "3" rather than "0": 0 is default(T), so reading it back wouldn't prove the string
+    // was read at all. .NET 8's own converter reads both; these don't.
     [Theory]
     [MemberData(nameof(RivetConvertedEnums))]
-    public void Rivet_Converters_Refuse_A_Numeric_String(Type enumType)
+    public void Rivet_Converters_Refuse_Anything_But_A_Written_Name(Type enumType)
     {
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize("\"0\"", enumType));
+        foreach (
+            var json in new[]
+            {
+                "0",
+                "3",
+                "\"0\"",
+                "\"3\"",
+                "\"RestrictedByway2A\"",
+                "\"RESTRICTEDBYWAY2A\"",
+                "\"unknown, level3\"",
+                "null",
+                "true",
+            }
+        )
+        {
+            Assert.Throws<JsonException>(() => JsonSerializer.Deserialize(json, enumType));
+        }
     }
-#else
-    // .NET 8's System.Text.Json reads a numeric string as the enum value even with
-    // allowIntegerValues: false; .NET 9 fixed it. Pinned rather than patched with a
-    // newer STJ package, so moving off .NET 8 shows up here. "3" rather than "0": 0 is
-    // default(T), so reading it back wouldn't prove the string was read at all.
-    [Theory]
-    [MemberData(nameof(RivetConvertedEnums))]
-    public void Rivet_Converters_Still_Read_A_Numeric_String_On_Net8(Type enumType)
+
+    [Fact]
+    public void A_Refusal_Lists_The_Names_To_Send()
     {
-        Assert.Equal(
-            Enum.Parse(enumType, "RestrictedByway2A"),
-            JsonSerializer.Deserialize("\"3\"", enumType)
+        var refusal = Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<Colour>("\"DarkGreen\"")
+        );
+
+        Assert.Contains("\"DarkGreen\" is not a Colour value", refusal.Message);
+        Assert.Contains(
+            "\"unknown\", \"darkGreen\", \"level3\", \"restrictedByway2A\"",
+            refusal.Message
         );
     }
-#endif
 
-    [Theory]
-    [MemberData(nameof(RivetConvertedEnums))]
-    public void Rivet_Converters_Read_The_Member_Name_In_Any_Casing(Type enumType)
+    [Fact]
+    public void Dictionary_Keys_And_Nullable_Values_Follow_The_Same_Names()
     {
-        foreach (var json in new[] { "\"RestrictedByway2A\"", "\"RESTRICTEDBYWAY2A\"" })
-        {
-            Assert.Equal(3, Convert.ToInt32(JsonSerializer.Deserialize(json, enumType)));
-        }
+        var keyed = new Dictionary<Colour, int> { [Colour.DarkGreen] = 1 };
+
+        Assert.Equal("{\"darkGreen\":1}", JsonSerializer.Serialize(keyed));
+        Assert.Equal(
+            keyed,
+            JsonSerializer.Deserialize<Dictionary<Colour, int>>("{\"darkGreen\":1}")
+        );
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<Dictionary<Colour, int>>("{\"DarkGreen\":1}")
+        );
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<Dictionary<Colour, int>>("{\"1\":1}")
+        );
+        Assert.Null(JsonSerializer.Deserialize<Colour?>("null"));
+        Assert.Equal(Colour.Level3, JsonSerializer.Deserialize<Colour?>("\"level3\""));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<Colour?>("\"Level3\""));
     }
 
     [Fact]

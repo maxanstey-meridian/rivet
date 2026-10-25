@@ -16,7 +16,7 @@ namespace Rivet;
 /// <c>[Required]</c> to reject nulls, as with DataAnnotations.
 /// </para>
 /// </summary>
-[AttributeUsage(AttributeTargets.Property, Inherited = false)]
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Parameter, Inherited = false)]
 public sealed class RivetConstraintsAttribute : ValidationAttribute
 {
     /// <summary>

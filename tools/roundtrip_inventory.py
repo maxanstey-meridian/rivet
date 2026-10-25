@@ -29,25 +29,25 @@ from openapi_common import (
 STANDARD_KEYWORDS = {
     "$anchor", "$comment", "$defs", "$dynamicAnchor", "$dynamicRef", "$id",
     "$ref", "$schema", "$vocabulary", "additionalItems", "additionalProperties",
-    "allOf", "allowEmptyValue", "allowReserved", "anyOf", "apiKey", "authorizationCode", "authorizationUrl",
+    "allOf", "allowEmptyValue", "allowReserved", "anyOf", "apiKey", "attribute", "authorizationCode", "authorizationUrl",
     "basePath", "bearerFormat", "callbacks", "clientCredentials", "collectionFormat",
-    "components", "const", "consume", "consumes", "contact", "content", "contentEncoding",
+    "components", "const", "consume", "consumes", "contact", "content", "contentEncoding", "contentType",
     "contentMediaType", "contentSchema", "cookie", "default", "definitions", "dependentRequired",
     "dependentSchemas", "deprecated", "description", "discriminator", "email", "encoding", "enum",
     "example", "examples", "exclusiveMaximum", "exclusiveMinimum", "explode", "externalDocs",
     "externalValue", "flow", "flows", "format", "formData", "headers", "host", "http", "id", "identifier",
     "implicit", "in", "info", "items", "jsonSchemaDialect", "license", "links", "mapping", "maxContains",
     "maximum", "maxItems", "maxLength", "maxProperties", "mediaType", "minContains", "minimum",
-    "minItems", "minLength", "minProperties", "multipleOf", "mutualTLS", "name", "not", "nullable",
+    "minItems", "minLength", "minProperties", "multipleOf", "mutualTLS", "name", "namespace", "not", "nullable",
     "oauth2", "oneOf", "openIdConnect", "openIdConnectUrl", "openapi", "operationId", "parameters", "password",
-    "pathItems", "paths", "pattern", "patternProperties", "prefixItems", "produces", "properties",
+    "pathItems", "paths", "pattern", "patternProperties", "prefix", "prefixItems", "produces", "properties",
     "propertyName", "propertyNames", "readOnly", "refreshUrl", "requestBodies", "requestBody", "required", "responses",
     "schema", "schemas", "scheme", "schemes", "scopes", "security", "securityDefinitions", "securitySchemes",
     "servers", "source", "style", "summary", "swagger", "tags", "termsOfService", "title", "tokenUrl",
-    "type", "unevaluatedItems", "unevaluatedProperties", "uniqueItems", "url", "variables", "version",
+    "type", "unevaluatedItems", "unevaluatedProperties", "uniqueItems", "url", "value", "variables", "version",
     "webhooks", "wrapped", "writeOnly", "xml",
 }
-OPAQUE_KEYS = {"const", "default", "enum", "example"}
+OPAQUE_KEYS = {"const", "default", "enum", "example", "value"}
 MAP_KEYS = {
     "$defs", "callbacks", "content", "definitions", "dependentSchemas", "encoding", "headers", "links",
     "pathItems", "paths", "patternProperties", "properties", "requestBodies", "schemas",

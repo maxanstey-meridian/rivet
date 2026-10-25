@@ -82,7 +82,10 @@ internal sealed record RecordProperty(
     bool IsFormatSpecified = false,
     string? SchemaType = null,
     string? SchemaRef = null,
-    IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null
+    IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null,
+    // Named scalar components referenced inside the property schema (/items,
+    // /additionalProperties), whose $ref the C# element type alone cannot carry.
+    IReadOnlyList<(string Pointer, string Name)>? NestedSchemaRefs = null
 );
 
 internal sealed record GeneratedEnumMember(
@@ -131,8 +134,7 @@ internal sealed record GeneratedEndpointField(
     string? SuccessStatusKey,
     string? SuccessResponseDescription,
     IReadOnlyList<GeneratedErrorResponse> ErrorResponses,
-    bool IsAnonymous,
-    string? SecurityScheme,
+    SecurityRequirements? Security,
     IReadOnlyList<string> UnsupportedMarkers = null!,
     string? FileContentType = null,
     bool IsFormEncoded = false,
@@ -147,7 +149,6 @@ internal sealed record GeneratedEndpointField(
     string? RequestBodyType = null,
     bool? RequestBodyRequired = null,
     bool RequestBodyPresent = false,
-    SecurityRequirements? SecurityRequirements = null,
     IReadOnlyList<GeneratedMediaTypeContent>? RequestContents = null,
     IReadOnlyList<GeneratedResponseMediaTypeContent>? ResponseContents = null,
     IReadOnlyList<GeneratedEndpointParameter>? Parameters = null,

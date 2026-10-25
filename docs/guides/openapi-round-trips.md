@@ -21,9 +21,6 @@ within the document (`SpecRefResolutionTests`).
 
 ## Known non-round-tripping facts
 
-- **Security scheme types.** The contract model carries only scheme *names*; the
-  scheme *definition* in a re-emitted spec comes from the `--security` flag, not
-  from the original document.
 - **Anything in the importer's out-of-scope list** (callbacks, webhooks, links,
   response-header schemas beyond `string`, parameter serialization styles, ...) —
   see the [Import Profile](/reference/import-profile).

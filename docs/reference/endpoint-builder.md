@@ -27,18 +27,56 @@ All return the definition for chaining.
 | `.Status(code)` | Override the success status. May only be called once. |
 | `.Returns<T>(status[, description])` | Declare an additional typed response (errors, alternates). Each status may be declared once. |
 | `.Returns(status[, description])` | Same, without a payload type. |
-| `.WithResponseHeader<T>(status, name[, description][, required:])` | Declare a typed response header on a status (`responses[status].headers`). The non-generic overload declares a string header; `required` is an explicit opt-in promise. **Spec-only** — Rivet never sets or validates it; emitting the header is handler code. Each (status, name) pair may be declared once. |
+| `.WithResponseHeader<T>(status, name[, description][, required:])` | Declare a typed response header on a status (`responses[status].headers`). The non-generic overload declares a string header. Rivet never sets it: emitting the header is handler code. `required: true` is a promise the adapters hold you to, so a response at that status written without the header throws `RivetContractViolationException` (see [Runtime responses](#runtime-responses)). Each (status, name) pair may be declared once. |
 | `.WithResponseHeader<T>(name[, description][, required:])` | Same, targeting the endpoint's success status; omit `<T>` for a string header. |
-| `.Secure(scheme)` | Reference a security scheme by name (define it with `--security`). |
-| `.Anonymous()` | No auth required (`security: []`). |
+| `.Secure(scheme[, scopes...])` | One way in: the named scheme, granting these scopes. Call it again for another way in; OpenAPI ORs them. Define the scheme with `--security`. See [Security](#security). |
+| `.AndSecure(scheme[, scopes...])` | Adds a scheme to the alternative the previous `.Secure()` started: the caller needs both. |
+| `.OrAnonymous()` | Adds a no-credentials alternative (`{}`), so authentication is optional. |
+| `.Anonymous()` | No auth required (`security: []`). Stands alone. |
 | `.QueryAuth(name = "token")` | Auth token as a required query parameter — for media players that cannot set headers. Emits `x-rivet-query-auth`. |
 | `.FormEncoded()` | Request body is `application/x-www-form-urlencoded`. |
 | `.AcceptsFile()` | Request body is `multipart/form-data` with a binary file part. |
 | `.AcceptsBinary(contentType = "application/octet-stream")` | Request body is the raw bytes (`type: string, format: binary`). **Spec-only** — host code reads the stream; `TInput` properties lower to route/query params instead of a JSON body. Mutually exclusive with `.AcceptsFile()` / `.FormEncoded()`. |
 | `.ProducesFile(contentType = "application/octet-stream")` | Response is a binary download. |
 | `.AcceptsContentType(mediaType)` | Declared media type for a non-JSON request body (e.g. `"text/plain"` for a `string` body). The body SCHEMA is unchanged — only the content-type key. **Spec-only.** Mutually exclusive with `.FormEncoded()` / `.AcceptsBinary()`. |
-| `.ProducesContentType(mediaType)` | Declared media type for a non-JSON success response (e.g. `"text/html"`). Schema unchanged; error responses stay `application/json`. **Spec-only.** Mutually exclusive with `.ProducesFile()`. |
+| `.ProducesContentType(mediaType)` | Declared media type for a non-JSON success response (e.g. `"text/html"`). Schema unchanged; error responses stay `application/json`. `.Success(...)` writes with it, and a non-JSON type needs a `string` payload. Mutually exclusive with `.ProducesFile()`. |
 | `.RequestExampleJson(json, ...)` / `.ResponseExampleJson(status, json, ...)` | Attach examples. **Runtime no-ops** — read by Roslyn only. The `...Ref` variants reference component examples. |
+
+## Security
+
+OpenAPI security is an OR of AND-groups: the caller satisfies any one alternative, and
+an alternative only by satisfying every scheme in it, each with its scopes. The builder
+spells that out in the order you'd say it aloud. Most endpoints only ever need the
+first line:
+
+```csharp
+Define.Get<TaskDto>("/api/tasks/{id}").Secure("bearer");
+// security: [{ bearer: [] }]
+
+Define.Delete("/api/tasks/{id}").Secure("oauth", "tasks:write");
+// security: [{ oauth: ["tasks:write"] }]
+
+Define.Post("/api/reports")
+    .Secure("oauth", "reports:write")           // either an OAuth token with that scope...
+    .Secure("apiKey").AndSecure("signature");   // ...or an API key plus a request signature
+// security: [{ oauth: ["reports:write"] }, { apiKey: [], signature: [] }]
+
+Define.Get<FeedDto>("/api/feed").Secure("bearer").OrAnonymous();
+// security: [{ bearer: [] }, {}]: signed-in callers get more, everyone gets something
+
+Define.Get("/api/health").Anonymous();
+// security: []
+```
+
+An endpoint with none of these inherits the document's security: the first
+`--security` scheme, or whatever an import recorded at document level.
+
+These are spec-only: Rivet writes them into the OpenAPI document and nothing at
+runtime checks a token. Authorization stays with ASP.NET (`RequireAuthorization`,
+`[Authorize]`). Rivet reads the calls from source, so scheme names and scopes must
+be literals or `const`s (`RIV1113`), and the calls have to agree with each other:
+`.Anonymous()` stands alone, and `.AndSecure()` joins the alternative a `.Secure()`
+started (`RIV1114`).
 
 ## Runtime responses
 
@@ -77,6 +115,21 @@ All return the definition for chaining.
 - All terminals return `RivetResult`. Use the first-party `.ToActionResult()` for
   MVC or `.ToResult()` for minimal APIs at the host boundary. Application execution
   remains ordinary C# outside the contract response API.
+- A header declared `required: true` has to be on the response when the adapter
+  runs. Set it on `HttpContext.Response.Headers` before returning the result, the
+  way a redirect sets `Location`:
+
+  ```csharp
+  Response.Headers.Location = uri.ToString();
+  return DownloadsContract.LatestWindows.Success().ToActionResult();
+  ```
+
+  A file gets the headers its own arguments produce for free: `entityTag:` gives an
+  `ETag`, `lastModified:` a `Last-Modified`, `downloadName:` or `inline:` a
+  `Content-Disposition`, `enableRangeProcessing:` an `Accept-Ranges`, and a body whose
+  length is known (bytes, a path, a seekable stream) a `Content-Length`. A header a
+  middleware only adds in `OnStarting` turns up after the check, so it doesn't count:
+  set it before the endpoint runs instead.
 
 See [Runtime Validation](/guides/runtime-validation) for the exact enforcement scope
 and `RivetContractViolationHandler` for the structured failure envelope.

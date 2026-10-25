@@ -247,12 +247,6 @@ internal static class ContractBuilder
             unsupported
         );
 
-        // Security
-        var (isAnonymous, securityScheme, securityRequirements) = ResolveSecurity(
-            operation,
-            globalSecurityScheme
-        );
-
         return new GeneratedEndpointField(
             fieldName,
             method,
@@ -265,8 +259,7 @@ internal static class ContractBuilder
             successStatusKey,
             successResponseDescription,
             errorResponses,
-            isAnonymous,
-            securityScheme,
+            ResolveSecurity(operation, globalSecurityScheme),
             unsupported,
             fileContentType,
             isFormEncoded,
@@ -281,7 +274,6 @@ internal static class ContractBuilder
             requestBodyType,
             operation.RequestBody is null ? null : operation.RequestBody.Required,
             operation.RequestBody is not null,
-            securityRequirements,
             requestContents,
             responseContents,
             explicitParameters,
@@ -571,6 +563,7 @@ internal static class ContractBuilder
             {
                 if (string.IsNullOrEmpty(name))
                 {
+                    unsupported.Add($"header name= status={statusStr} reason=empty-name");
                     continue;
                 }
 
@@ -592,6 +585,8 @@ internal static class ContractBuilder
                     )
                 )
                 {
+                    // HTTP header names are case-insensitive: a second spelling is the same header.
+                    unsupported.Add($"header name={name} status={statusStr} reason=duplicate-name");
                     continue;
                 }
 
@@ -866,6 +861,16 @@ internal static class ContractBuilder
 
             if (param.Schema is null)
             {
+                var declared = param.Content is { Count: > 0 } content
+                    ? $"content ({string.Join(", ", content.Keys)}) instead of a schema; Rivet parameters carry a schema. "
+                        + "Give it a schema (a JSON-serialised value is a string parameter) or move the value into the request body."
+                    : "neither a schema nor content, which OpenAPI requires. Give it a schema.";
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportSchemalessParameterDropped,
+                        $"Parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}' (in={location}) with {declared}"
+                    )
+                );
                 continue;
             }
 
@@ -1123,6 +1128,10 @@ internal static class ContractBuilder
         if (parameter.In is ParameterLocation.Query && parameter.AllowEmptyValue)
         {
             metadata["allowEmptyValue"] = true;
+        }
+        if (parameter.In is ParameterLocation.Query && parameter.AllowReserved)
+        {
+            metadata["allowReserved"] = true;
         }
 
         return metadata.Count == 0 ? null : metadata.ToJsonString();
@@ -1615,17 +1624,26 @@ internal static class ContractBuilder
                 : null;
         }
 
-        reason = resolvedJson is null
-            ? example.ExternalValue is not null
-                ? "external-value"
-                : "missing-value"
-            : null;
-        return resolvedJson is not null
+        var summary = string.IsNullOrEmpty(example.Summary) ? null : example.Summary;
+        var description = string.IsNullOrEmpty(example.Description) ? null : example.Description;
+        // An Example Object with neither value nor externalValue is complete: OpenAPI makes
+        // the value optional, and its summary/description still document the operation.
+        var documentationOnly =
+            resolvedJson is null
+            && example.ExternalValue is null
+            && (summary is not null || description is not null);
+        reason =
+            resolvedJson is not null || documentationOnly ? null
+            : example.ExternalValue is not null ? "external-value"
+            : "missing-value";
+        return resolvedJson is not null || documentationOnly
             ? new TsEndpointExample(
                 mediaType,
                 name,
                 Json: resolvedJson,
-                ReferencedComponents: referencedComponents
+                ReferencedComponents: referencedComponents,
+                Summary: summary,
+                Description: description
             )
             : null;
     }
@@ -1854,24 +1872,19 @@ internal static class ContractBuilder
         return false;
     }
 
-    private static (
-        bool IsAnonymous,
-        string? Scheme,
-        SecurityRequirements? Requirements
-    ) ResolveSecurity(OpenApiOperation operation, string? globalSecurityScheme)
-    {
-        if (operation.Security is null)
-        {
-            return (false, globalSecurityScheme, null);
-        }
-
-        if (operation.Security.Count == 0)
-        {
-            return (true, null, null);
-        }
-
-        return (false, null, MapSecurityRequirements(operation.Security));
-    }
+    /// <summary>
+    /// The operation's own security requirements, or null when it inherits the document's.
+    /// The <c>--security</c> import override stands in for an operation that declares none.
+    /// </summary>
+    private static SecurityRequirements? ResolveSecurity(
+        OpenApiOperation operation,
+        string? globalSecurityScheme
+    ) =>
+        operation.Security is { } requirements ? MapSecurityRequirements(requirements)
+        : globalSecurityScheme is null ? null
+        : new SecurityRequirements([
+            new SecurityRequirement([new SecurityRequirementScheme(globalSecurityScheme, [])]),
+        ]);
 
     internal static SecurityRequirements MapSecurityRequirements(
         IEnumerable<OpenApiSecurityRequirement> requirements

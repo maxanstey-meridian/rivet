@@ -223,7 +223,7 @@ internal static class CSharpWriter
                     ? null
                     : JsonSerializer.Serialize(example.ReferencedComponents);
                 sb.AppendLine(
-                    $"[assembly: RivetDocumentRequestBodyExample({requestBodyIndex}, {exampleIndex}, {StringLiteral(example.MediaType)}, {NullableStringLiteral(example.Name)}, {NullableStringLiteral(example.Json)}, {NullableStringLiteral(example.ComponentExampleId)}, {NullableStringLiteral(example.ResolvedJson)}, {NullableStringLiteral(referencedComponentsJson)})]"
+                    $"[assembly: RivetDocumentRequestBodyExample({requestBodyIndex}, {exampleIndex}, {StringLiteral(example.MediaType)}, {NullableStringLiteral(example.Name)}, {NullableStringLiteral(example.Json)}, {NullableStringLiteral(example.ComponentExampleId)}, {NullableStringLiteral(example.ResolvedJson)}, {NullableStringLiteral(referencedComponentsJson)}, {NullableStringLiteral(example.Summary)}, {NullableStringLiteral(example.Description)})]"
                 );
             }
         }
@@ -241,6 +241,13 @@ internal static class CSharpWriter
                 $"[assembly: RivetDocumentResponse({index}, {StringLiteral(response.Name)}, {StringLiteral(response.Json)})]"
             );
         }
+        for (var index = 0; index < (document.ComponentHeaders?.Count ?? 0); index++)
+        {
+            var header = document.ComponentHeaders![index];
+            sb.AppendLine(
+                $"[assembly: RivetDocumentHeader({index}, {StringLiteral(header.Name)}, {StringLiteral(header.Json)})]"
+            );
+        }
         for (var index = 0; index < (document.ComponentSchemas?.Count ?? 0); index++)
         {
             var schema = document.ComponentSchemas![index];
@@ -254,10 +261,10 @@ internal static class CSharpWriter
                 $"[assembly: RivetImportedSourceFile({StringLiteral(sourceFile.Path)}, {StringLiteral(sourceFile.Fingerprint)})]"
             );
         }
-        foreach (var extension in document.VendorExtensions ?? [])
+        foreach (var extension in document.PreservedFields ?? [])
         {
             sb.AppendLine(
-                $"[assembly: RivetVendorExtension({StringLiteral(extension.OwnerPointer)}, {StringLiteral(extension.Name)}, {StringLiteral(extension.JsonValue)})]"
+                $"[assembly: RivetPreservedField({StringLiteral(extension.OwnerPointer)}, {StringLiteral(extension.Name)}, {StringLiteral(extension.JsonValue)})]"
             );
         }
         return sb.ToString();
@@ -496,6 +503,12 @@ internal static class CSharpWriter
         {
             sb.AppendLine($"    [{target}RivetSchemaRef({StringLiteral(prop.SchemaRef)})]");
         }
+        foreach (var (pointer, name) in prop.NestedSchemaRefs ?? [])
+        {
+            sb.AppendLine(
+                $"    [{target}RivetSchemaRef({StringLiteral(name)}, {StringLiteral(pointer)})]"
+            );
+        }
         if (!prop.IsRequired)
         {
             sb.AppendLine($"    [{target}RivetOptional]");
@@ -561,7 +574,7 @@ internal static class CSharpWriter
         var constraints = metadata.Constraints;
         var xml = metadata.Xml;
         sb.AppendLine(
-            $"{indent}[{target}RivetGeneratedSchemaMetadata({StringLiteral(generated.Pointer)}, {NullableStringLiteral(metadata.Title)}, {NullableStringLiteral(metadata.Description)}, {NullableStringLiteral(metadata.DefaultValue)}, {NullableStringLiteral(metadata.Example)}, {NullableStringLiteral(metadata.Examples)}, {NullableIntLiteral(constraints?.MinLength)}, {NullableIntLiteral(constraints?.MaxLength)}, {NullableStringLiteral(constraints?.Pattern)}, {NullableDoubleLiteral(constraints?.Minimum)}, {NullableDoubleLiteral(constraints?.Maximum)}, {NullableDoubleLiteral(constraints?.ExclusiveMinimum)}, {NullableDoubleLiteral(constraints?.ExclusiveMaximum)}, {NullableDoubleLiteral(constraints?.MultipleOf)}, {NullableIntLiteral(constraints?.MinItems)}, {NullableIntLiteral(constraints?.MaxItems)}, {Literal((constraints?.UniqueItems == true))}, {NullableStringLiteral(xml?.Name)}, {NullableStringLiteral(xml?.Namespace)}, {NullableStringLiteral(xml?.Prefix)}, {Literal((xml?.IsAttribute == true))}, {Literal((xml?.IsWrapped == true))}, {NullableStringLiteral(metadata.Format)}, {Literal(metadata.IsFormatSpecified)}, {Literal(metadata.IsNullable)}, {Literal(metadata.IsDeprecated)}, {Literal(metadata.IsReadOnly)}, {Literal(metadata.IsWriteOnly)}, {NullableStringLiteral(metadata.Required is null ? null : JsonSerializer.Serialize(metadata.Required))})]"
+            $"{indent}[{target}RivetGeneratedSchemaMetadata({StringLiteral(generated.Pointer)}, {NullableStringLiteral(metadata.Title)}, {NullableStringLiteral(metadata.Description)}, {NullableStringLiteral(metadata.DefaultValue)}, {NullableStringLiteral(metadata.Example)}, {NullableStringLiteral(metadata.Examples)}, {NullableIntLiteral(constraints?.MinLength)}, {NullableIntLiteral(constraints?.MaxLength)}, {NullableStringLiteral(constraints?.Pattern)}, {NullableDoubleLiteral(constraints?.Minimum)}, {NullableDoubleLiteral(constraints?.Maximum)}, {NullableDoubleLiteral(constraints?.ExclusiveMinimum)}, {NullableDoubleLiteral(constraints?.ExclusiveMaximum)}, {NullableDoubleLiteral(constraints?.MultipleOf)}, {NullableIntLiteral(constraints?.MinItems)}, {NullableIntLiteral(constraints?.MaxItems)}, {Literal((constraints?.UniqueItems == true))}, {NullableStringLiteral(xml?.Name)}, {NullableStringLiteral(xml?.Namespace)}, {NullableStringLiteral(xml?.Prefix)}, {Literal((xml?.IsAttribute == true))}, {Literal((xml?.IsWrapped == true))}, {NullableStringLiteral(metadata.Format)}, {Literal(metadata.IsFormatSpecified)}, {Literal(metadata.IsNullable)}, {Literal(metadata.IsDeprecated)}, {Literal(metadata.IsReadOnly)}, {Literal(metadata.IsWriteOnly)}, {NullableStringLiteral(metadata.Required is null ? null : JsonSerializer.Serialize(metadata.Required))}, {NullableIntLiteral(constraints?.MinProperties)}, {NullableIntLiteral(constraints?.MaxProperties)}, {Literal(metadata.EnumListsNull)})]"
         );
     }
 
@@ -802,6 +815,17 @@ internal static class CSharpWriter
                 var reference = provenance.ResponseComponentReferences![index];
                 sb.AppendLine(
                     $"    [RivetOperationResponseComponent({index}, {StringLiteral(reference.StatusKey)}, {StringLiteral(reference.ComponentId)})]"
+                );
+            }
+            for (
+                var index = 0;
+                index < (provenance.ResponseHeaderComponentReferences?.Count ?? 0);
+                index++
+            )
+            {
+                var reference = provenance.ResponseHeaderComponentReferences![index];
+                sb.AppendLine(
+                    $"    [RivetOperationResponseHeaderComponent({index}, {StringLiteral(reference.StatusKey)}, {StringLiteral(reference.HeaderName)}, {StringLiteral(reference.ComponentId)})]"
                 );
             }
         }
@@ -1061,35 +1085,27 @@ internal static class CSharpWriter
             }
         }
 
-        if (field.IsAnonymous)
+        if (field.Security is { } security)
         {
-            calls.Add(".Anonymous()");
-        }
-        else if (field.SecurityScheme is not null)
-        {
-            calls.Add($".Secure({StringLiteral(field.SecurityScheme)})");
-        }
-
-        if (field.SecurityRequirements is { } securityRequirements)
-        {
-            for (var order = 0; order < securityRequirements.Alternatives.Count; order++)
+            if (security.Alternatives.Count == 0)
             {
-                calls.Add($".SecurityRequirement({order})");
-                foreach (var scheme in securityRequirements.Alternatives[order].Schemes)
+                calls.Add(".Anonymous()");
+            }
+
+            foreach (var alternative in security.Alternatives)
+            {
+                if (alternative.Schemes.Count == 0)
                 {
-                    if (scheme.Scopes.Count == 0)
-                    {
-                        calls.Add($".SecurityRequirement({order}, {StringLiteral(scheme.Name)})");
-                    }
-                    else
-                    {
-                        foreach (var scope in scheme.Scopes)
-                        {
-                            calls.Add(
-                                $".SecurityRequirement({order}, {StringLiteral(scheme.Name)}, {StringLiteral(scope)})"
-                            );
-                        }
-                    }
+                    calls.Add(".OrAnonymous()");
+                }
+
+                for (var index = 0; index < alternative.Schemes.Count; index++)
+                {
+                    var scheme = alternative.Schemes[index];
+                    var arguments = scheme.Scopes.Prepend(scheme.Name).Select(StringLiteral);
+                    calls.Add(
+                        $".{(index == 0 ? "Secure" : "AndSecure")}({string.Join(", ", arguments)})"
+                    );
                 }
             }
         }
@@ -1232,6 +1248,11 @@ internal static class CSharpWriter
 
     private static string? BuildRequestExampleCall(Rivet.Tool.Model.TsEndpointExample example)
     {
+        if (example.Json is null && example.ComponentExampleId is null)
+        {
+            return $".RequestExampleJson(null, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
+        }
+
         if (example.Json is not null)
         {
             return $".RequestExampleJson({StringLiteral(example.Json)}, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
@@ -1252,6 +1273,11 @@ internal static class CSharpWriter
         var example = responseExample.Example;
         var statusArgument = StatusArgument(responseExample.StatusKey);
 
+        if (example.Json is null && example.ComponentExampleId is null)
+        {
+            return $".ResponseExampleJson({statusArgument}, null, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
+        }
+
         if (example.Json is not null)
         {
             return $".ResponseExampleJson({statusArgument}, {StringLiteral(example.Json)}, mediaType: {StringLiteral(example.MediaType)}{BuildOptionalExampleArguments(example)})";
@@ -1268,6 +1294,14 @@ internal static class CSharpWriter
     private static string BuildOptionalExampleArguments(Rivet.Tool.Model.TsEndpointExample example)
     {
         var arguments = example.Name is not null ? $", name: {StringLiteral(example.Name)}" : "";
+        if (example.Summary is not null)
+        {
+            arguments += $", summary: {StringLiteral(example.Summary)}";
+        }
+        if (example.Description is not null)
+        {
+            arguments += $", description: {StringLiteral(example.Description)}";
+        }
         if (example.ReferencedComponents is not null)
         {
             arguments +=
@@ -1276,9 +1310,19 @@ internal static class CSharpWriter
         return arguments;
     }
 
-    /// <summary>Everything but MultipleOf and UniqueItems maps to a DataAnnotations attribute.</summary>
+    /// <summary>
+    /// Everything but MultipleOf and UniqueItems maps to a DataAnnotations attribute, and
+    /// the property-count bounds, which only the generated schema metadata carries.
+    /// </summary>
     private static bool HasDataAnnotationConstraints(TsPropertyConstraints c) =>
-        c with { MultipleOf = null, UniqueItems = null } is { HasAny: true };
+        c with
+        {
+            MultipleOf = null,
+            UniqueItems = null,
+            MinProperties = null,
+            MaxProperties = null,
+        }
+            is { HasAny: true };
 
     private static void EmitConstraintAttributes(
         StringBuilder sb,

@@ -67,9 +67,14 @@ public sealed class RivetGeneratedSchemaAttribute : Attribute
     public string? ItemSchemaRef { get; }
 }
 
-/// <summary>Generated use-site provenance for a non-object OpenAPI component reference.</summary>
-[AttributeUsage(AttributeTargets.Property, Inherited = false)]
-public sealed class RivetSchemaRefAttribute(string name) : Attribute
+/// <summary>
+/// Generated use-site provenance for a non-object OpenAPI component reference, at the
+/// property schema itself or at a JSON pointer inside it (<c>/items</c>,
+/// <c>/additionalProperties</c>).
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, Inherited = false, AllowMultiple = true)]
+public sealed class RivetSchemaRefAttribute(string name, string pointer = "") : Attribute
 {
     public string Name { get; } = name;
+    public string Pointer { get; } = pointer;
 }

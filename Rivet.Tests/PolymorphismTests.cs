@@ -179,10 +179,15 @@ public sealed class PolymorphismTests
         Assert.True(variant.GetProperty("properties").TryGetProperty("$type", out _));
     }
 
-    [Fact]
-    public void Int_Discriminator_Tag_Is_Diagnosed_And_Falls_Back_To_Flattening()
+    // Do NOT stringify int tags: a spec validating string tags against an int wire value
+    // is a lie, and flattening the base describes a payload STJ never writes. A tagless
+    // registration writes no discriminator at all. Both are refused.
+    [Theory]
+    [InlineData("typeof(Circle), 1", "a non-string")]
+    [InlineData("typeof(Circle)", "no")]
+    public void Non_String_Discriminator_Tag_Fails_With_RIV1014(string registration, string kind)
     {
-        var source = """
+        var source = $$"""
             using System.Text.Json.Serialization;
             using Rivet;
 
@@ -190,8 +195,8 @@ public sealed class PolymorphismTests
 
             [RivetType]
             [JsonPolymorphic]
-            [JsonDerivedType(typeof(Circle), 1)]
-            [JsonDerivedType(typeof(Square), 2)]
+            [JsonDerivedType({{registration}})]
+            [JsonDerivedType(typeof(Square), "square")]
             public abstract record Shape(string Id);
 
             public sealed record Circle(string Id, double Radius) : Shape(Id);
@@ -205,23 +210,40 @@ public sealed class PolymorphismTests
             }
             """;
 
-        JsonDocument? doc = null;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            doc = CompilationHelper.EmitOpenApi(source)
-        );
-        using var emitted = doc;
+        var message = Assert
+            .Throws<Rivet.Tool.RivetUserException>(() => CompilationHelper.EmitOpenApi(source))
+            .Message;
 
-        // Do NOT stringify int tags — a spec validating string tags against an int
-        // wire value is a lie. The base falls back to today's flattening, loudly.
-        Assert.Contains("RIV1014", stderr);
-        Assert.Contains("non-string discriminator tag", stderr);
+        Assert.StartsWith("error RIV1014:", message);
+        Assert.Contains($"with {kind} discriminator tag", message);
+        Assert.Contains("'Test.Circle'", message);
+        Assert.Contains("[JsonDerivedType(typeof(Circle), \"circle\")]", message);
+    }
 
-        var shape = doc!
-            .RootElement.GetProperty("components")
-            .GetProperty("schemas")
-            .GetProperty("Shape");
-        Assert.False(shape.TryGetProperty("oneOf", out _));
-        Assert.True(shape.GetProperty("properties").TryGetProperty("id", out _));
+    [Fact]
+    public void RivetUnion_Without_Variants_Fails_With_RIV1018()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetUnion]
+            public sealed record Nothing;
+
+            [RivetType]
+            public sealed record Holder(Nothing Value);
+            """;
+
+        var message = Assert
+            .Throws<Rivet.Tool.RivetUserException>(() =>
+                CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
+            )
+            .Message;
+
+        Assert.StartsWith("error RIV1018:", message);
+        Assert.Contains("'Nothing'", message);
+        Assert.Contains("remove [RivetUnion]", message);
     }
 
     [Fact]

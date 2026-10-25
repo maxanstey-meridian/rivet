@@ -16,7 +16,8 @@ public sealed record TsEndpointDefinition(
     IReadOnlyList<TsResponseType> Responses,
     string? Summary = null,
     string? Description = null,
-    EndpointSecurity? Security = null,
+    // null inherits the document's security; no alternatives is `security: []`.
+    SecurityRequirements? Security = null,
     string? FileContentType = null,
     string? InputTypeName = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -39,8 +40,6 @@ public sealed record TsEndpointDefinition(
     )] string? RequestContentTypeOverride = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? ResponseContentTypeOverride = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        SecurityRequirements? SecurityRequirements = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         IReadOnlyList<TsMediaTypeContent>? RequestContents = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -107,11 +106,6 @@ public sealed record TsEndpointDefinition(
         }
     }
 }
-
-/// <summary>
-/// Security metadata for an endpoint. null = inherit CLI default.
-/// </summary>
-public sealed record EndpointSecurity(bool IsAnonymous, string? Scheme = null);
 
 /// <summary>
 /// A typed response for a given status code.
@@ -210,7 +204,9 @@ public sealed record TsEndpointParam(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool IsFormatSpecified = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        bool AllowEmptyValue = false
+        bool AllowEmptyValue = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool AllowReserved = false
 );
 
 public enum ParamSource

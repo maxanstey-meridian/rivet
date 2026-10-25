@@ -13,6 +13,14 @@ Verified limits of the current tool, so you don't discover them in production.
   leakage, and declared content types before first-party MVC or Minimal API
   adaptation. They do not inspect serialized JSON against its schema. Full
   statement: [Runtime Validation](/guides/runtime-validation).
+- The spec assumes System.Text.Json's web defaults, so the adapters refuse host JSON
+  options that would change the wire: another naming policy, global converters,
+  ignore conditions, resolver modifiers and the rest of the
+  [list](/guides/runtime-validation#runtime-guarantees-contract-responses). Declare
+  that behaviour on the types instead, where generation can see it.
+- A response header declared `required: true` has to be on the response when the
+  adapter runs, which means set before the handler returns. One a middleware only
+  adds in `OnStarting` arrives too late to count.
 - Host effects such as authentication challenges, sign-out cookies, and dynamic
   response headers happen through ordinary ASP.NET APIs before returning a
   matching bodyless terminal. Rivet preserves an already-started matching
@@ -25,24 +33,26 @@ Verified limits of the current tool, so you don't discover them in production.
 
 ## Generation
 
-- Input must compile: generation aborts on compilation errors, and on type-name
-  collisions between namespaces (component names are global).
+- Input must compile: generation aborts on compilation errors, and on two types
+  that share a simple name, whether across namespaces, nesting or generic arity
+  (`RIV1007`: component names are global, so rename one).
 - Enums are emitted as integers by default, matching ordinary System.Text.Json
   serialization of unannotated enums. String-valued enums require a type-level
   `[JsonConverter(typeof(JsonStringEnumConverter<T>))]`; Rivet reads only explicit
-  type-level serializer metadata, not application-wide serializer options, so if
-  your API registers that converter globally the spec will not match the wire.
-- `TimeSpan` and `BigInteger` have no schema mapping — they emit an untyped (empty)
-  schema with a diagnostic (`RIV1009`/`RIV1010`). Escape hatch: expose the value as a
-  `string` property (ISO 8601 for `TimeSpan`, digits for `BigInteger`) or as a number
-  when the range allows.
-- Security scheme definitions come from the `--security` flag; `.Secure("name")`
-  with no matching definition fails generation (`RIV2002`).
+  type-level serializer metadata. A converter registered globally in the host's
+  JSON options is refused when a result runs, so the spec and the wire can't part
+  ways over it.
+- Security scheme definitions come from the `--security` flag, or from the
+  `[assembly: RivetSecurityScheme(...)]` attributes an import writes; a `.Secure("name")`
+  with no matching definition fails generation (`RIV2002`). Security is spec-only:
+  Rivet describes it, ASP.NET enforces it.
 - The spec reflects *declared* C# types and the default System.Text.Json
   conventions. `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies emit as
-  `oneOf` + `discriminator`; runtime polymorphism *without* those registrations,
-  custom serializer settings, and validation living outside attributes
-  (e.g. FluentValidation) are invisible to the spec.
+  `oneOf` + `discriminator`; runtime polymorphism *without* those registrations
+  and validation living outside attributes (e.g. FluentValidation) are invisible
+  to the spec. A serializer attribute Rivet can't model, such as a custom
+  `[JsonConverter]` or a `[JsonNumberHandling]` that writes numbers as strings,
+  stops generation (`RIV1111`, `RIV1112`) rather than shipping the CLR shape.
 - `info.title`, `info.version`, and `servers` come from the `--title`, `--version`,
   and `--server` flags (defaults: `"API"` / `"1.0.0"` / no `servers` block); there
   is no flag for `info.contact`, `info.description`, or `info.license`.
@@ -82,18 +92,22 @@ combination:
 - **`RIV4005`** (`--check`): a handler implementing a contract binds an enum from the
   route, query, header or form, and not every wire value will bind on that host.
   Minimal APIs need each value to equal its member name exactly; MVC needs it to
-  equal ignoring case. Azure Functions handlers aren't checked.
+  equal ignoring case. An Azure Functions handler takes no name at all: the worker
+  fills an enum parameter from the route by parsing the raw text as JSON, and an
+  unquoted name isn't JSON, so only a plain enum (or a `string`) binds there.
 
   A parameter the host reads as a JSON body is left alone. On a minimal API an
   unattributed array comes from the query when the endpoint is mapped to a body-less
   verb such as GET, written in capitals the way `MapGet` passes it (a `MapMethods`
-  `"get"` still infers a body), and any other unattributed collection is a body. On
-  MVC an unattributed collection or complex type is a body under `[ApiController]`.
-  Without it, a collection is checked as it stands and a complex type member by
-  member. Two `[ApiController]` cases look like a body to Rivet but are bound piece
-  by piece, so they go unchecked: a complex type whose members carry their own
-  binding source (a `[FromQuery]` property, an `IFormFile`), and an app that sets
-  `SuppressInferBindingSourcesForParameters`.
+  `"get"` still infers a body), and any other unattributed collection is a body. A
+  `[FromForm]` complex type goes through the form mapper, which binds each member by
+  name and, unlike the rest of the minimal-API binder, ignores case. On MVC an
+  unattributed collection or complex type is a body under `[ApiController]`, with the
+  same two exceptions MVC makes: a complex type whose members carry their own binding
+  source (a `[FromQuery]` property, an `IFormFile`) is bound piece by piece, and so is
+  everything once the app sets `SuppressInferBindingSourcesForParameters`. Without a
+  body, a collection is checked as it stands and a complex type member by member, all
+  the way down, since MVC binds `?Filter.Kind=` into a nested type just as happily.
 - **`RIV1110`** (generation): the same rule for a `[RivetEndpoint]` or `[RivetClient]`
   action. A static `[RivetEndpoint]` is a minimal-API handler and gets the exact rule.
 
@@ -116,24 +130,20 @@ Rivet doesn't promise it or turn it off. The promise runs one way: every value t
 spec advertises binds. A client that sends anything else and gets a 200 is leaning
 on the framework, not the contract.
 
-### JSON bodies are a little loose too
+### JSON bodies take exactly the spec's names
 
-In a JSON body, the Rivet converters refuse integers, but they aren't an exact
-match on the spec's names. System.Text.Json also reads the C# member name in any
-casing, whatever the policy, so `"RestrictedByway2A"` and `"RESTRICTEDBYWAY2A"` get
-through a camelCase converter alongside `"restrictedByway2A"`.
-
-A bare `0` is refused on every runtime. A numeric string `"0"` is refused from
-.NET 9 on, but .NET 8's System.Text.Json still reads it as the member with that
-value, `allowIntegerValues: false` or not. .NET 9 fixed it upstream. Rivet doesn't
-drag in a newer System.Text.Json package to paper over it, so if that matters to
-you, run on .NET 9 or later.
+A JSON body is stricter than the host's binders. The Rivet converters write through
+System.Text.Json's own enum converter and read back exactly what it writes, nothing
+more: `"restrictedByway2A"` gets through a camelCase converter, and the member name
+`"RestrictedByway2A"`, `"RESTRICTEDBYWAY2A"`, `0` and `"0"` all come back as a
+`JsonException` that lists the names to send. Dictionary keys follow the same rule.
+It's the same on .NET 8, 9 and 10; .NET 8's System.Text.Json would happily read
+`"0"` on its own, but these converters never ask it to.
 
 ## Importer (`--from-openapi`)
 
-A one-shot onboarding scaffold, not a sync tool. Callbacks, webhooks, links,
-parameter serialization styles, multi-scheme security, and
-security scheme types are out of scope (discriminator dispatch imports as a
+A one-shot onboarding scaffold, not a sync tool. Callbacks, webhooks, links and
+parameter serialization styles are out of scope (discriminator dispatch imports as a
 `[JsonPolymorphic]` hierarchy when the `oneOf` mapping is usable, and falls
 back loudly otherwise) — the full
 honest list, including every diagnostic marker and warning category, is in the

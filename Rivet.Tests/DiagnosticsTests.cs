@@ -1,6 +1,9 @@
 using System.Reflection;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Rivet.Tool;
+using Rivet.Tool.Emit;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
@@ -121,10 +124,10 @@ public sealed class DiagnosticsTests
     public void Warn_Writes_The_Canonical_Stderr_Line()
     {
         var stderr = CompilationHelper.CaptureStdErr(() =>
-            Diagnostics.Warn(Diagnostics.TypeNameCollision, "test message")
+            Diagnostics.Warn(Diagnostics.DictionaryKeyTypeDropped, "test message")
         );
 
-        Assert.Contains("warning RIV1007: test message", stderr);
+        Assert.Contains("warning RIV1013: test message", stderr);
     }
 
     [Fact]
@@ -139,10 +142,9 @@ public sealed class DiagnosticsTests
     }
 
     // ---------------------------------------------------------------
-    // Diagnosed-unsupported TypeWalker holes (FABLE_GAPS §7 item 12):
-    // TimeSpan, BigInteger, char and object used to produce empty/wrong
-    // schemas with zero diagnostics. The fallback schema is unchanged —
-    // each hole now emits its RIV1xxx warning naming type and property.
+    // TypeWalker holes (FABLE_GAPS §7 item 12): TimeSpan, BigInteger, char and
+    // object used to produce empty schemas. char, object and TimeSpan now map to
+    // what System.Text.Json writes; BigInteger, which STJ cannot round-trip, is refused.
     // ---------------------------------------------------------------
 
     private static string WalkDtoCapturingStdErr(string propertyType, string extraUsing = "")
@@ -171,23 +173,158 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void TimeSpan_Property_Emits_RIV1009_Naming_Type_And_Property()
+    public void Int128_UInt128_And_Half_Map_To_The_Numbers_System_Text_Json_Writes()
     {
-        var stderr = WalkDtoCapturingStdErr("TimeSpan");
+        var source = """
+            using System;
+            using Rivet;
 
-        Assert.Contains("warning RIV1009:", stderr);
-        Assert.Contains("TimeSpan", stderr);
-        Assert.Contains("'HolderDto.Value'", stderr);
+            namespace Test;
+
+            [RivetType]
+            public sealed record HolderDto(Int128 Big, UInt128 Bigger, Half Small);
+
+            [RivetContract]
+            public static class HolderContract
+            {
+                public static readonly RouteDefinition<HolderDto> Get = Define.Get<HolderDto>("/api/holder");
+            }
+            """;
+
+        using var emitted = CompilationHelper.EmitOpenApi(source);
+        var props = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("HolderDto")
+            .GetProperty("properties");
+        foreach (
+            var (name, type, csharpType) in new[]
+            {
+                ("big", "integer", "Int128"),
+                ("bigger", "integer", "UInt128"),
+                ("small", "number", "Half"),
+            }
+        )
+        {
+            Assert.Equal(type, props.GetProperty(name).GetProperty("type").GetString());
+            Assert.Equal(
+                csharpType,
+                props.GetProperty(name).GetProperty("x-rivet-csharp-type").GetString()
+            );
+        }
+
+        Assert.Equal(
+            "{\"big\":170141183460469231731687303715884105727,\"bigger\":1,\"small\":0.5}",
+            System.Text.Json.JsonSerializer.Serialize(
+                new
+                {
+                    big = Int128.MaxValue,
+                    bigger = (UInt128)1,
+                    small = (Half)0.5,
+                }
+            )
+        );
     }
 
     [Fact]
-    public void BigInteger_Property_Emits_RIV1010_Naming_Type_And_Property()
+    public void TimeSpan_Maps_To_The_String_System_Text_Json_Writes()
     {
-        var stderr = WalkDtoCapturingStdErr("System.Numerics.BigInteger");
+        var source = """
+            using System;
+            using System.Collections.Generic;
+            using Rivet;
 
-        Assert.Contains("warning RIV1010:", stderr);
-        Assert.Contains("BigInteger", stderr);
-        Assert.Contains("'HolderDto.Value'", stderr);
+            namespace Test;
+
+            [RivetType]
+            public sealed record HolderDto(TimeSpan Value, TimeSpan? Maybe, Dictionary<TimeSpan, int> ByDuration);
+
+            [RivetContract]
+            public static class HolderContract
+            {
+                public static readonly RouteDefinition<HolderDto> Get = Define.Get<HolderDto>("/api/holder");
+            }
+            """;
+
+        JsonDocument? doc = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            doc = CompilationHelper.EmitOpenApi(source)
+        );
+        using var emitted = doc!;
+        Assert.DoesNotContain("'HolderDto.value'", stderr);
+
+        var props = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("HolderDto")
+            .GetProperty("properties");
+        var value = props.GetProperty("value");
+        Assert.Equal("string", value.GetProperty("type").GetString());
+        Assert.Equal("TimeSpan", value.GetProperty("x-rivet-csharp-type").GetString());
+        Assert.False(value.TryGetProperty("format", out _));
+        Assert.Equal(
+            @"^-?(\d{1,8}\.)?([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d{1,7})?$",
+            value.GetProperty("pattern").GetString()
+        );
+        Assert.Equal(JsonValueKind.Array, props.GetProperty("maybe").GetProperty("type").ValueKind);
+        Assert.Equal(
+            "TimeSpan",
+            props
+                .GetProperty("byDuration")
+                .GetProperty("propertyNames")
+                .GetProperty("x-rivet-csharp-type")
+                .GetString()
+        );
+
+        // The wire side: STJ writes the invariant "c" format as a JSON string, days and
+        // sign included, and uses the same text for dictionary keys.
+        foreach (
+            var (span, wire) in new[]
+            {
+                (TimeSpan.Zero, "\"00:00:00\""),
+                (new TimeSpan(1, 2, 3, 4, 500), "\"1.02:03:04.5000000\""),
+                (TimeSpan.FromDays(-3.5), "\"-3.12:00:00\""),
+            }
+        )
+        {
+            Assert.Equal(wire, JsonSerializer.Serialize(span, JsonSerializerOptions.Web));
+        }
+        Assert.Equal(
+            """{"01:00:00":1}""",
+            JsonSerializer.Serialize(
+                new Dictionary<TimeSpan, int> { [TimeSpan.FromHours(1)] = 1 },
+                JsonSerializerOptions.Web
+            )
+        );
+    }
+
+    [Fact]
+    public void BigInteger_Property_Fails_With_RIV1010_Naming_Type_And_Property()
+    {
+        // STJ has no converter: it writes the struct's properties and cannot read them back.
+        Assert.Contains(
+            "\"isZero\"",
+            JsonSerializer.Serialize(new System.Numerics.BigInteger(5), JsonSerializerOptions.Web)
+        );
+
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record HolderDto(System.Numerics.BigInteger Value);
+            """;
+        var compilation = CompilationHelper.CreateCompilation(source);
+
+        var message = Assert
+            .Throws<RivetUserException>(() => CompilationHelper.DiscoverAndWalk(compilation))
+            .Message;
+
+        Assert.StartsWith("error RIV1010:", message);
+        Assert.Contains("BigInteger", message);
+        Assert.Contains("'HolderDto.Value'", message);
+        Assert.Contains("string of digits", message);
     }
 
     // char and object graduated to supported mappings in P2 wave 6 — RIV1011 and
@@ -221,12 +358,12 @@ public sealed class DiagnosticsTests
     }
 
     // ---------------------------------------------------------------
-    // RIV2005 — the emitter's catch-all unknown-type warning used to name
-    // no symbol at all; it must name the offending type/property site.
+    // RIV2005 — a type with no schema mapping fails generation; "any JSON
+    // value" (JsonElement, object, the JsonNode family) is a mapping, not a gap.
     // ---------------------------------------------------------------
 
     [Fact]
-    public void Explicit_JsonElement_Emits_An_Untyped_Schema_Without_A_Warning()
+    public void Explicit_JsonElement_Emits_An_Untyped_Schema_Without_A_Diagnostic()
     {
         var source = """
             using System.Text.Json;
@@ -245,18 +382,49 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            CompilationHelper.EmitOpenApi(source).Dispose()
+        // RIV2005 is an error now, so a regression would throw here rather than warn.
+        using var doc = CompilationHelper.EmitOpenApi(source);
+
+        var data = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("PayloadDto")
+            .GetProperty("properties")
+            .GetProperty("data");
+        Assert.Empty(data.EnumerateObject());
+    }
+
+    [Fact]
+    public void Unmapped_CSharpType_Fails_With_RIV2005_Naming_The_Site()
+    {
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["SlotDto"] = new(
+                "SlotDto",
+                [],
+                [
+                    new TsPropertyDefinition(
+                        "window",
+                        new TsType.Primitive("unknown", CSharpType: "System.TimeSpan"),
+                        false
+                    ),
+                ]
+            ),
+        };
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            OpenApiEmitter.Emit(
+                [],
+                definitions,
+                new Dictionary<string, TsType.Brand>(),
+                new Dictionary<string, TsType>(),
+                null
+            )
         );
 
-        // Scoped assertion: a JsonElement property with a mapped CSharpType emits
-        // silently. The generic "warning RIV2005:" prefix is unusable here — other
-        // parallel tests (e.g. the DisplayState tagged-union fixture, which refs
-        // undefined "Summary"/"WorkspaceKey" components) legitimately emit RIV2005
-        // concurrently into the process-wide Console.Error capture, as CaptureStdErr's
-        // contract documents. A JsonElement regression would warn at this exact
-        // property context, which only the unknown-primitive site emits.
-        Assert.DoesNotContain("at property 'PayloadDto.data'", stderr);
+        Assert.StartsWith("error RIV2005:", exception.Message);
+        Assert.Contains("'System.TimeSpan'", exception.Message);
+        Assert.Contains("SlotDto", exception.Message);
     }
 
     // ---------------------------------------------------------------

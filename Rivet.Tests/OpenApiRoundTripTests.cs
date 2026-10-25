@@ -536,11 +536,7 @@ public sealed class OpenApiRoundTripTests
             );
         });
         Assert.DoesNotContain("RIV1012", stderr);
-        // Scoped needle: the process-global stderr capture also carries legitimate
-        // RIV2005 warnings from parallel fixtures (undefined "Summary"/"WorkspaceKey"
-        // components — see DiagnosticsTests). A regression in *this* fixture would
-        // name EnvelopeDto's own properties, which only this site emits.
-        Assert.DoesNotContain("at property 'EnvelopeDto.", stderr);
+        // RIV2005 is an error, so reaching this line means object mapped silently.
 
         // Wire shape: bare {} for object, no sidecar; object? is identical
         // (the empty schema already admits null).
@@ -1107,8 +1103,7 @@ public sealed class OpenApiRoundTripTests
 
         // Anonymous endpoint
         var health = endpoints.First(e => e.RouteTemplate == "/api/health");
-        Assert.True(health.Security?.IsAnonymous);
-        Assert.Null(health.SecurityRequirements);
+        Assert.Empty(Assert.IsType<SecurityRequirements>(health.Security).Alternatives);
 
         // Override endpoint
         var admin = endpoints.First(e => e.RouteTemplate == "/api/admin");
@@ -1117,11 +1112,7 @@ public sealed class OpenApiRoundTripTests
             Assert
                 .Single(
                     Assert
-                        .Single(
-                            Assert
-                                .IsType<SecurityRequirements>(admin.SecurityRequirements)
-                                .Alternatives
-                        )
+                        .Single(Assert.IsType<SecurityRequirements>(admin.Security).Alternatives)
                         .Schemes
                 )
                 .Name
@@ -1129,8 +1120,16 @@ public sealed class OpenApiRoundTripTests
 
         // The explicit import override still applies a default endpoint scheme.
         var task = endpoints.First(e => e.RouteTemplate == "/api/tasks/{id}");
-        Assert.Equal("bearer", Assert.IsType<EndpointSecurity>(task.Security).Scheme);
-        Assert.Null(task.SecurityRequirements);
+        Assert.Equal(
+            "bearer",
+            Assert
+                .Single(
+                    Assert
+                        .Single(Assert.IsType<SecurityRequirements>(task.Security).Alternatives)
+                        .Schemes
+                )
+                .Name
+        );
 
         // Return types survive through security round-trip
         Assert.True(
@@ -2206,8 +2205,7 @@ public sealed class OpenApiRoundTripTests
         // ───── Assertion group 8: Security survived ─────
 
         // Anonymous
-        Assert.True(healthCheck.Security?.IsAnonymous);
-        Assert.Null(healthCheck.SecurityRequirements);
+        Assert.Empty(Assert.IsType<SecurityRequirements>(healthCheck.Security).Alternatives);
 
         // Custom scheme
         var adminPurge = eps2.First(e => e.RouteTemplate == "/api/admin/cache");
@@ -2217,9 +2215,7 @@ public sealed class OpenApiRoundTripTests
                 .Single(
                     Assert
                         .Single(
-                            Assert
-                                .IsType<SecurityRequirements>(adminPurge.SecurityRequirements)
-                                .Alternatives
+                            Assert.IsType<SecurityRequirements>(adminPurge.Security).Alternatives
                         )
                         .Schemes
                 )
@@ -2227,17 +2223,12 @@ public sealed class OpenApiRoundTripTests
         );
 
         // Default bearer
-        Assert.Null(getItem.Security);
         Assert.Equal(
             "bearer",
             Assert
                 .Single(
                     Assert
-                        .Single(
-                            Assert
-                                .IsType<SecurityRequirements>(getItem.SecurityRequirements)
-                                .Alternatives
-                        )
+                        .Single(Assert.IsType<SecurityRequirements>(getItem.Security).Alternatives)
                         .Schemes
                 )
                 .Name

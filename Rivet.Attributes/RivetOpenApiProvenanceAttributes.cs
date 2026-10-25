@@ -146,7 +146,9 @@ public sealed class RivetDocumentRequestBodyExampleAttribute(
     string? json,
     string? componentExampleId,
     string? resolvedJson,
-    string? referencedComponentsJson
+    string? referencedComponentsJson,
+    string? summary = null,
+    string? description = null
 ) : Attribute
 {
     public int RequestBodyOrder { get; } = requestBodyOrder;
@@ -157,6 +159,8 @@ public sealed class RivetDocumentRequestBodyExampleAttribute(
     public string? ComponentExampleId { get; } = componentExampleId;
     public string? ResolvedJson { get; } = resolvedJson;
     public string? ReferencedComponentsJson { get; } = referencedComponentsJson;
+    public string? Summary { get; } = summary;
+    public string? Description { get; } = description;
 }
 
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
@@ -169,6 +173,14 @@ public sealed class RivetDocumentParameterAttribute(int order, string name, stri
 
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
 public sealed class RivetDocumentResponseAttribute(int order, string name, string json) : Attribute
+{
+    public int Order { get; } = order;
+    public string Name { get; } = name;
+    public string Json { get; } = json;
+}
+
+[AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+public sealed class RivetDocumentHeaderAttribute(int order, string name, string json) : Attribute
 {
     public int Order { get; } = order;
     public string Name { get; } = name;
@@ -191,11 +203,8 @@ public sealed class RivetImportedSourceFileAttribute(string path, string fingerp
 }
 
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
-public sealed class RivetVendorExtensionAttribute(
-    string ownerPointer,
-    string name,
-    string jsonValue
-) : Attribute
+public sealed class RivetPreservedFieldAttribute(string ownerPointer, string name, string jsonValue)
+    : Attribute
 {
     public string OwnerPointer { get; } = ownerPointer;
     public string Name { get; } = name;
@@ -251,6 +260,20 @@ public sealed class RivetOperationResponseComponentAttribute(
 {
     public int Order { get; } = order;
     public string StatusKey { get; } = statusKey;
+    public string ComponentId { get; } = componentId;
+}
+
+[AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]
+public sealed class RivetOperationResponseHeaderComponentAttribute(
+    int order,
+    string statusKey,
+    string headerName,
+    string componentId
+) : Attribute
+{
+    public int Order { get; } = order;
+    public string StatusKey { get; } = statusKey;
+    public string HeaderName { get; } = headerName;
     public string ComponentId { get; } = componentId;
 }
 

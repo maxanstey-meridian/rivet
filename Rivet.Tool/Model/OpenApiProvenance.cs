@@ -7,11 +7,12 @@ public sealed record OpenApiDocumentProvenance(
     IReadOnlyList<OpenApiServerProvenance> Servers,
     IReadOnlyList<OpenApiComponentExampleProvenance> ComponentExamples,
     IReadOnlyList<OpenApiComponentRequestBodyProvenance>? ComponentRequestBodies = null,
-    IReadOnlyList<OpenApiVendorExtensionProvenance>? VendorExtensions = null,
+    IReadOnlyList<OpenApiPreservedFieldProvenance>? PreservedFields = null,
     IReadOnlyList<OpenApiRawComponentProvenance>? ComponentParameters = null,
     IReadOnlyList<OpenApiRawComponentProvenance>? ComponentResponses = null,
     IReadOnlyList<OpenApiRawComponentProvenance>? ComponentSchemas = null,
-    IReadOnlyList<OpenApiImportedSourceFileProvenance>? ImportedSourceFiles = null
+    IReadOnlyList<OpenApiImportedSourceFileProvenance>? ImportedSourceFiles = null,
+    IReadOnlyList<OpenApiRawComponentProvenance>? ComponentHeaders = null
 );
 
 public sealed record OpenApiImportedSourceFileProvenance(string Path, string Fingerprint);
@@ -19,7 +20,7 @@ public sealed record OpenApiImportedSourceFileProvenance(string Path, string Fin
 /// <summary>A component (parameter, response or schema) kept as its raw JSON.</summary>
 public sealed record OpenApiRawComponentProvenance(string Name, string Json);
 
-public sealed record OpenApiVendorExtensionProvenance(
+public sealed record OpenApiPreservedFieldProvenance(
     string OwnerPointer,
     string Name,
     string JsonValue
@@ -125,7 +126,8 @@ public sealed record OpenApiOperationProvenance(
     string? RequestBodyComponentId = null,
     IReadOnlyList<OpenApiParameterComponentReference>? ParameterComponentReferences = null,
     IReadOnlyList<OpenApiResponseComponentReference>? ResponseComponentReferences = null,
-    OpenApiOperationSchemaProvenance? Schemas = null
+    OpenApiOperationSchemaProvenance? Schemas = null,
+    IReadOnlyList<OpenApiResponseHeaderComponentReference>? ResponseHeaderComponentReferences = null
 );
 
 public sealed record OpenApiOperationSchemaProvenance(
@@ -151,5 +153,11 @@ public sealed record OpenApiParameterComponentReference(
 );
 
 public sealed record OpenApiResponseComponentReference(string StatusKey, string ComponentId);
+
+public sealed record OpenApiResponseHeaderComponentReference(
+    string StatusKey,
+    string HeaderName,
+    string ComponentId
+);
 
 public sealed record OpenApiRivetIdentityProvenance(string? Contract, string? Endpoint);

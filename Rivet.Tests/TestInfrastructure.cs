@@ -205,6 +205,14 @@ internal static class FixtureSlices
         var (source, document) = Slice("openapi-twilio.json");
         CopyOperation(source, document, "/2010-04-01/Accounts.json", "post");
         CopyComponentEntries(source, document, "securitySchemes", "accountSid_authToken");
+        CopyComponentEntries(
+            source,
+            document,
+            "schemas",
+            "api.v2010.account",
+            "account_enum_status",
+            "account_enum_type"
+        );
         return document.ToJsonString();
     }
 

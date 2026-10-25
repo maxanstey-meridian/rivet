@@ -1,6 +1,23 @@
 {
     "types": [
         {
+            "name": "Collection",
+            "typeParameters": ["T"],
+            "properties": [
+                {
+                    "name": "data",
+                    "type": {
+                        "kind": "array",
+                        "element": {
+                            "kind": "typeParam",
+                            "name": "T"
+                        }
+                    },
+                    "optional": false
+                }
+            ]
+        },
+        {
             "name": "ProductDto",
             "typeParameters": [],
             "properties": [

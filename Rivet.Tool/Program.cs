@@ -88,11 +88,17 @@ static async Task<int> Run(string[] args)
                 CoverageWarningKind.OrphanedBinding => Diagnostics.CoverageOrphanedBinding,
                 CoverageWarningKind.UnbindableEnumParameter =>
                     Diagnostics.CoverageUnbindableEnumParameter,
+                CoverageWarningKind.InputBindingMismatch =>
+                    Diagnostics.CoverageInputBindingMismatch,
                 _ => throw new InvalidOperationException(
                     $"Unmapped coverage warning kind: {w.Kind}"
                 ),
             };
-            if (w.Kind == CoverageWarningKind.UnbindableEnumParameter)
+            if (
+                w.Kind
+                is CoverageWarningKind.UnbindableEnumParameter
+                    or CoverageWarningKind.InputBindingMismatch
+            )
             {
                 Console.Error.WriteLine($"error {id}: {w.Message}");
                 continue;

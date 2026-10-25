@@ -1043,7 +1043,7 @@ public sealed class CoverageCheckerTests
             public sealed class TasksController : ControllerBase
             {
                 [HttpPost]
-                public IActionResult Create(TaskInput input)
+                public IActionResult Create([FromBody] TaskInput input)
                 {
                     var endpoint = TasksContract.CreateTask.Bind(input);
                     return endpoint.Success(new TaskDto("1", input.Title)).ToActionResult();
@@ -1164,20 +1164,28 @@ public sealed class CoverageCheckerTests
     [InlineData(
         "HttpGet",
         "ListTasks",
-        "TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\"))"
+        "TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\"))",
+        ""
     )]
     [InlineData(
         "HttpPost",
         "CreateTask",
-        "TasksContract.CreateTask.Bind(new TaskInput(\"Test\")).Success(new TaskDto(\"1\", \"Test\"))"
+        "TasksContract.CreateTask.Bind(input).Success(new TaskDto(\"1\", \"Test\"))",
+        "[FromBody] TaskInput input"
     )]
-    [InlineData("HttpDelete(\"{id}\")", "RemoveTask", "TasksContract.RemoveTask.Success()")]
-    [InlineData("HttpHead", "HeadTasks", "TasksContract.HeadTasks.Success()")]
-    [InlineData("HttpOptions", "OptionsTasks", "TasksContract.OptionsTasks.Success()")]
+    [InlineData(
+        "HttpDelete(\"{id}\")",
+        "RemoveTask",
+        "TasksContract.RemoveTask.Success()",
+        "string id"
+    )]
+    [InlineData("HttpHead", "HeadTasks", "TasksContract.HeadTasks.Success()", "")]
+    [InlineData("HttpOptions", "OptionsTasks", "TasksContract.OptionsTasks.Success()", "")]
     public void Mvc_endpoint_context_is_recognized(
         string attribute,
         string fieldName,
-        string terminal
+        string terminal,
+        string parameters
     )
     {
         var implementation = $$"""
@@ -1190,7 +1198,7 @@ public sealed class CoverageCheckerTests
             public sealed class TasksController : ControllerBase
             {
                 [{{attribute}}]
-                public IActionResult Handle() => {{terminal}}.ToActionResult();
+                public IActionResult Handle({{parameters}}) => {{terminal}}.ToActionResult();
             }
             """;
 
@@ -2156,7 +2164,7 @@ public sealed class CoverageCheckerTests
                 {
                     app.MapGet(
                         "/api/tasks/{id}/download",
-                        () => TasksContract.DownloadTask
+                        (string id) => TasksContract.DownloadTask
                             .File(async output => await output.WriteAsync(new byte[] { 1, 2, 3 }))
                             .ToResult()
                     );
@@ -2230,7 +2238,9 @@ public sealed class CoverageCheckerTests
                 public sealed class TasksController(TaskService tasks) : ControllerBase
                 {
                     [Http{{verb}}]
-                    public async Task<IActionResult> List()
+                    public async Task<IActionResult> List({{(
+                    verb == "Post" ? "[FromBody] TaskInput request" : ""
+                )}})
                     {
                         {{body.Replace("ADAPT", "ToActionResult")}}
                     }
@@ -2270,6 +2280,54 @@ public sealed class CoverageCheckerTests
                 found: task => TasksContract.ListTasks.Success(task).ADAPT(),
                 missing: _ => TasksContract.ListTasks.Error(404).ADAPT()
             );
+            """;
+
+        AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
+    }
+
+    [Theory]
+    [InlineData(
+        "mvc",
+        "var found = (TaskDto task) => TasksContract.ListTasks.Success(task).ADAPT();",
+        "found"
+    )]
+    [InlineData(
+        "minimal",
+        "var found = (TaskDto task) => TasksContract.ListTasks.Success(task).ADAPT();",
+        "found"
+    )]
+    [InlineData(
+        "mvc",
+        "System.Func<TaskDto, IActionResult> found = task => TasksContract.ListTasks.Success(task).ADAPT();",
+        "found"
+    )]
+    [InlineData(
+        "minimal",
+        "System.Func<TaskDto, Microsoft.AspNetCore.Http.IResult> found = task => TasksContract.ListTasks.Success(task).ADAPT();",
+        "found"
+    )]
+    [InlineData(
+        "mvc",
+        "IActionResult Found(TaskDto task) => TasksContract.ListTasks.Success(task).ADAPT();",
+        "Found"
+    )]
+    [InlineData(
+        "minimal",
+        "Microsoft.AspNetCore.Http.IResult Found(TaskDto task) => TasksContract.ListTasks.Success(task).ADAPT();",
+        "Found"
+    )]
+    public void Match_arm_held_in_a_local_or_local_function_is_coverage(
+        string host,
+        string declaration,
+        string arm
+    )
+    {
+        // The arm is still the handler's own code, passed straight to the call it returns;
+        // it's only been given a name first.
+        var body = $$"""
+            {{declaration}}
+            var outcome = await tasks.Find();
+            return outcome.Match({{arm}}, _ => TasksContract.HeadTasks.Success().ADAPT());
             """;
 
         AssertCovered(RunCheck(Contract, OutcomeTypes, TasksHandler(host, body)));
@@ -2516,6 +2574,10 @@ public sealed class CoverageCheckerTests
 
             public static Task<IResult> DoneResult(IResult result) => Task.FromResult(result);
 
+            public static IActionResult Answer(RivetResult result) => result.ToActionResult();
+
+            public static IResult AnswerResult(RivetResult result) => result.ToResult();
+
             public static RivetResult NotFound(BoundRouteDefinitionBase endpoint) =>
                 endpoint.Error(404);
 
@@ -2536,13 +2598,16 @@ public sealed class CoverageCheckerTests
     /// </summary>
     private static IReadOnlyList<CoverageWarning> RunWithHelpers(string host, string body)
     {
-        var (refuse, done, deny) =
+        var (refuse, done, deny, answer) =
             host == "mvc"
-                ? ("Refuse", "Done", "Deny")
-                : ("RefuseResult", "DoneResult", "DenyResult");
+                ? ("Refuse", "Done", "Deny", "Answer")
+                : ("RefuseResult", "DoneResult", "DenyResult", "AnswerResult");
         var handler = TasksHandler(
             host,
-            body.Replace("REFUSE", refuse).Replace("DONE", done).Replace("DENY", deny),
+            body.Replace("REFUSE", refuse)
+                .Replace("DONE", done)
+                .Replace("DENY", deny)
+                .Replace("ANSWER", answer),
             verb: "Post"
         );
         return RunCheck(Contract, OutcomeTypes, BindingHelpers, handler);
@@ -2587,6 +2652,19 @@ public sealed class CoverageCheckerTests
     )]
     [InlineData("mvc", "return Respond.NotFound((BoundRouteDefinitionBase)endpoint).ADAPT();")]
     [InlineData("minimal", "return Respond.NotFound((BoundRouteDefinitionBase)endpoint).ADAPT();")]
+    [InlineData("mvc", "return Respond.ANSWER(endpoint.Success(new TaskDto(\"1\", input.Title)));")]
+    [InlineData(
+        "minimal",
+        "return Respond.ANSWER(endpoint.Success(new TaskDto(\"1\", input.Title)));"
+    )]
+    [InlineData(
+        "mvc",
+        "return await Respond.DONE(endpoint.Success(new TaskDto(\"1\", input.Title)).ADAPT());"
+    )]
+    [InlineData(
+        "minimal",
+        "return await Respond.DONE(endpoint.Success(new TaskDto(\"1\", input.Title)).ADAPT());"
+    )]
     public void Bind_passed_to_a_returned_helper_is_not_orphaned_but_is_not_coverage(
         string host,
         string returned
@@ -2920,8 +2998,394 @@ public sealed class CoverageCheckerTests
 
         var warnings = RunCheck(Contract, state, OutcomeTypes, implementation);
 
-        var warning = Assert.Single(warnings, warning => warning.FieldName == "ListTasks");
-        Assert.Equal(CoverageWarningKind.UnbindableEnumParameter, warning.Kind);
+        // The contract declares no 'state', so RIV4006 reports it too; this test is about RIV4005.
+        var warning = Assert.Single(
+            warnings,
+            warning => warning.Kind == CoverageWarningKind.UnbindableEnumParameter
+        );
+        Assert.Equal("ListTasks", warning.FieldName);
         Assert.Contains("'state'", warning.Message);
+    }
+
+    // ---------------------------------------------------------------
+    // RIV4006: the contract's inputs against what the handler binds.
+    // ---------------------------------------------------------------
+
+    private const string InputContract = """
+        using System.Text.Json.Serialization;
+        using Rivet;
+
+        namespace Test;
+
+        [RivetType]
+        public sealed record NoteDto(string Id);
+
+        [RivetType]
+        public sealed record NoteSearch(
+            string? Search,
+            [property: JsonPropertyName("q")] string? Text,
+            [property: RivetHeader("X-Tenant")] string? Tenant
+        );
+
+        [RivetType]
+        public sealed record NoteInput(string Title);
+
+        [RivetContract]
+        public static class NotesContract
+        {
+            public static readonly RouteDefinition<NoteSearch, NoteDto> Search =
+                Define.Get<NoteSearch, NoteDto>("/api/notes");
+
+            public static readonly RouteDefinition<NoteDto> Get =
+                Define.Get<NoteDto>("/api/notes/{id}");
+
+            public static readonly RouteDefinition<NoteInput, NoteDto> Create =
+                Define.Post<NoteInput, NoteDto>("/api/notes");
+
+            public static readonly RouteDefinition<NoteDto> Upload =
+                Define.Post<NoteDto>("/api/notes/upload").AcceptsFile();
+        }
+        """;
+
+    private const string SearchBinding =
+        "[FromQuery] string? search, [FromQuery(Name = \"q\")] string? text, "
+        + "[FromHeader(Name = \"X-Tenant\")] string? tenant";
+
+    private static readonly string _searchTerminal =
+        "NotesContract.Search.Bind(new NoteSearch(search, text, tenant)).Success(new NoteDto(\"1\"))";
+
+    private static string MinimalNotes(
+        string verb,
+        string route,
+        string parameters,
+        string terminal,
+        string body = ""
+    ) =>
+        $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class NoteEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.Map{{verb}}("{{route}}", ({{parameters}}) =>
+                    {
+                        {{body}}
+                        return {{terminal}}.ToResult();
+                    });
+                }
+            }
+            """;
+
+    private static string MvcNotes(
+        string verb,
+        string route,
+        string parameters,
+        string terminal,
+        bool apiController = true,
+        string body = ""
+    ) =>
+        $$"""
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            {{(apiController ? "[ApiController]" : "")}}
+            [Route("api/notes")]
+            public sealed class NotesController : ControllerBase
+            {
+                [Http{{verb}}("{{route}}")]
+                public IActionResult Handle({{parameters}})
+                {
+                    {{body}}
+                    return {{terminal}}.ToActionResult();
+                }
+            }
+            """;
+
+    private static List<CoverageWarning> InputMismatches(
+        IReadOnlyList<CoverageWarning> warnings,
+        string field
+    ) =>
+        warnings
+            .Where(warning =>
+                warning.Kind == CoverageWarningKind.InputBindingMismatch
+                && warning.FieldName == field
+            )
+            .ToList();
+
+    [Theory]
+    [InlineData("minimal", SearchBinding)]
+    [InlineData("mvc", SearchBinding)]
+    [InlineData(
+        "minimal",
+        "string? search, [FromQuery(Name = \"Q\")] string? text, [FromHeader(Name = \"x-tenant\")] string? tenant"
+    )]
+    public void Handler_binding_every_declared_input_where_declared_is_clean(
+        string host,
+        string parameters
+    )
+    {
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Get", "", parameters, _searchTerminal)
+                : MinimalNotes("Get", "/api/notes", parameters, _searchTerminal);
+
+        var warnings = RunCheck(InputContract, handler);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "Search");
+    }
+
+    [Fact]
+    public void AsParameters_on_the_contract_input_misses_a_json_renamed_query_name()
+    {
+        // The spec sends ?q=, but ASP.NET binds the member by its C# name, ?Text=.
+        var handler = MinimalNotes(
+            "Get",
+            "/api/notes",
+            "[AsParameters] NoteSearch input",
+            "NotesContract.Search.Bind(input).Success(new NoteDto(\"1\"))"
+        );
+
+        var mismatches = InputMismatches(RunCheck(InputContract, handler), "Search");
+
+        Assert.Equal(4, mismatches.Count);
+        Assert.Contains(
+            mismatches,
+            warning =>
+                warning is { Expected: "(not declared)", Actual: "query parameter 'Text'" }
+                && warning.Message!.Contains("Declare it on the contract's input type")
+        );
+        Assert.Contains(
+            mismatches,
+            warning =>
+                warning is { Expected: "query parameter 'q'", Actual: "(not bound)" }
+                && warning.Message!.Contains("[FromQuery(Name = \"q\")]")
+        );
+        // The [RivetHeader] member is a header in the spec, but [AsParameters] binds it from
+        // the query under its C# name.
+        Assert.Contains(
+            mismatches,
+            warning => warning is { Expected: "header 'X-Tenant'", Actual: "(not bound)" }
+        );
+        Assert.Contains(
+            mismatches,
+            warning => warning is { Expected: "(not declared)", Actual: "query parameter 'Tenant'" }
+        );
+    }
+
+    [Theory]
+    [InlineData("minimal")]
+    [InlineData("mvc")]
+    public void Declared_input_bound_from_another_source_is_a_mismatch(string host)
+    {
+        var parameters =
+            "[FromHeader] string? search, [FromQuery(Name = \"q\")] string? text, "
+            + "[FromHeader(Name = \"X-Tenant\")] string? tenant";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Get", "", parameters, _searchTerminal)
+                : MinimalNotes("Get", "/api/notes", parameters, _searchTerminal);
+
+        var mismatch = Assert.Single(InputMismatches(RunCheck(InputContract, handler), "Search"));
+
+        Assert.Equal("query parameter 'search'", mismatch.Expected);
+        Assert.Equal("header 'search'", mismatch.Actual);
+        Assert.Contains("[FromQuery(Name = \"search\")]", mismatch.Message);
+    }
+
+    [Theory]
+    [InlineData("minimal", "", true)]
+    [InlineData("minimal", "string id", false)]
+    [InlineData("minimal", "[FromRoute(Name = \"id\")] string noteId", false)]
+    [InlineData("minimal", "HttpRequest request", false)]
+    [InlineData("mvc", "", true)]
+    [InlineData("mvc", "string id", false)]
+    public void Declared_route_value_the_handler_never_binds_is_reported(
+        string host,
+        string parameters,
+        bool reported
+    )
+    {
+        const string terminal = "NotesContract.Get.Success(new NoteDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Get", "{id}", parameters, terminal)
+                : MinimalNotes("Get", "/api/notes/{id}", parameters, terminal);
+
+        var mismatches = InputMismatches(RunCheck(InputContract, handler), "Get");
+
+        if (reported)
+        {
+            var mismatch = Assert.Single(mismatches);
+            Assert.Equal("route value 'id'", mismatch.Expected);
+            Assert.Equal("(not bound)", mismatch.Actual);
+        }
+        else
+        {
+            Assert.Empty(mismatches);
+        }
+    }
+
+    [Fact]
+    public void Mvc_action_reading_the_request_itself_is_not_told_an_input_is_unbound()
+    {
+        var handler = MvcNotes(
+            "Get",
+            "{id}",
+            "",
+            "NotesContract.Get.Success(new NoteDto(\"1\"))",
+            body: "var id = Request.RouteValues[\"id\"];"
+        );
+
+        Assert.Empty(InputMismatches(RunCheck(InputContract, handler), "Get"));
+    }
+
+    [Theory]
+    [InlineData("minimal", "NoteInput input", true, false)]
+    [InlineData("minimal", "[FromBody] NoteInput input", true, false)]
+    [InlineData("mvc", "NoteInput input", true, false)]
+    [InlineData("mvc", "[FromBody] NoteInput input", false, false)]
+    [InlineData("mvc", "NoteInput input", false, true)]
+    public void Declared_body_must_be_bound_as_the_body(
+        string host,
+        string parameters,
+        bool apiController,
+        bool reported
+    )
+    {
+        const string terminal = "NotesContract.Create.Bind(input).Success(new NoteDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Post", "", parameters, terminal, apiController)
+                : MinimalNotes("Post", "/api/notes", parameters, terminal);
+
+        var mismatches = InputMismatches(RunCheck(InputContract, handler), "Create");
+
+        if (reported)
+        {
+            // Without [ApiController], MVC binds the record from route, query and form.
+            Assert.Contains(
+                mismatches,
+                warning => warning is { Expected: "request body", Actual: "(not bound)" }
+            );
+            Assert.Contains(
+                mismatches,
+                warning => warning.Actual == "route, query or form value 'Title'"
+            );
+        }
+        else
+        {
+            Assert.Empty(mismatches);
+        }
+    }
+
+    [Theory]
+    [InlineData("minimal")]
+    [InlineData("mvc")]
+    public void Body_the_contract_does_not_declare_is_reported(string host)
+    {
+        const string terminal = "NotesContract.Get.Success(new NoteDto(\"1\"))";
+        const string parameters = "string id, [FromBody] NoteInput extra";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Get", "{id}", parameters, terminal)
+                : MinimalNotes("Get", "/api/notes/{id}", parameters, terminal);
+
+        var mismatch = Assert.Single(InputMismatches(RunCheck(InputContract, handler), "Get"));
+
+        Assert.Equal("(no request body)", mismatch.Expected);
+        Assert.Contains("'extra' reads the request body", mismatch.Message);
+    }
+
+    [Fact]
+    public void ApiController_query_record_without_FromQuery_is_read_as_the_body()
+    {
+        // [ApiController] infers [FromBody] for the record, so nothing reads the query.
+        var handler = MvcNotes(
+            "Get",
+            "",
+            "NoteSearch input",
+            "NotesContract.Search.Bind(input).Success(new NoteDto(\"1\"))"
+        );
+
+        var mismatches = InputMismatches(RunCheck(InputContract, handler), "Search");
+
+        Assert.Equal(3, mismatches.Count);
+        Assert.All(mismatches, warning => Assert.Equal("(not bound)", warning.Actual));
+    }
+
+    [Fact]
+    public void Authorization_header_belongs_to_security_not_the_contract_inputs()
+    {
+        var handler = MinimalNotes(
+            "Get",
+            "/api/notes/{id}",
+            "string id, [FromHeader(Name = \"Authorization\")] string? authorization",
+            "NotesContract.Get.Success(new NoteDto(\"1\"))"
+        );
+
+        Assert.Empty(InputMismatches(RunCheck(InputContract, handler), "Get"));
+    }
+
+    [Theory]
+    [InlineData("minimal", "IFormFile file", false)]
+    [InlineData("minimal", "IFormFileCollection files", false)]
+    [InlineData("mvc", "IFormFile file", false)]
+    [InlineData("minimal", "[FromBody] NoteInput input", true)]
+    public void Multipart_file_is_bound_from_the_form(string host, string parameters, bool reported)
+    {
+        const string terminal = "NotesContract.Upload.Success(new NoteDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Post", "upload", parameters, terminal)
+                : MinimalNotes("Post", "/api/notes/upload", parameters, terminal);
+
+        var mismatches = InputMismatches(RunCheck(InputContract, handler), "Upload");
+
+        if (reported)
+        {
+            Assert.Contains(mismatches, warning => warning.Actual == "JSON request body");
+            Assert.Contains(mismatches, warning => warning.Expected == "form field 'file'");
+        }
+        else
+        {
+            Assert.Empty(mismatches);
+        }
+    }
+
+    [Fact]
+    public void Functions_handler_inputs_are_not_compared()
+    {
+        // Functions read the query, headers and body from the request by hand.
+        var implementation = """
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.Azure.Functions.Worker;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed class NoteFunctions
+            {
+                [Function("search-notes")]
+                public IActionResult Run(
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "notes")] object request
+                ) => NotesContract.Search.Bind(new NoteSearch(null, null, null))
+                    .Success(new NoteDto("1"))
+                    .ToActionResult();
+            }
+            """;
+
+        var warnings = RunCheck(InputContract, AzureAttributes, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "Search");
     }
 }

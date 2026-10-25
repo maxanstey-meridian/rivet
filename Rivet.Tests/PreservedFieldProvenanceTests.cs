@@ -5,7 +5,7 @@ using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 
-public sealed class VendorExtensionProvenanceTests
+public sealed class PreservedFieldProvenanceTests
 {
     [Fact]
     public void Preserved_extensions_survive_the_public_disk_pipeline_and_fixed_point()
@@ -18,7 +18,7 @@ public sealed class VendorExtensionProvenanceTests
         var firstSource = Path.Combine(workDirectory.FullName, "first-source");
         Import(workDirectory.FullName, sourcePath, firstSource);
         Assert.Contains(
-            "RivetVendorExtension",
+            "RivetPreservedField",
             File.ReadAllText(Path.Combine(firstSource, "RivetDocument.cs"))
         );
         var first = Emit(workDirectory.FullName, firstSource, "first-output");
@@ -43,7 +43,7 @@ public sealed class VendorExtensionProvenanceTests
 
         var documentSource = File.ReadAllText(Path.Combine(generated, "RivetDocument.cs"));
         Assert.Contains("RivetDocumentSchema", documentSource);
-        Assert.DoesNotContain("RivetVendorExtension", documentSource);
+        Assert.DoesNotContain("RivetPreservedField", documentSource);
 
         var emitted = Emit(workDirectory.FullName, generated, "output");
         Assert.True(emitted["components"]!["schemas"]!["Payload"]!["x-is-beta"]!.GetValue<bool>());
@@ -217,9 +217,9 @@ public sealed class VendorExtensionProvenanceTests
             null,
             [],
             [],
-            VendorExtensions:
+            PreservedFields:
             [
-                new OpenApiVendorExtensionProvenance(
+                new OpenApiPreservedFieldProvenance(
                     "#/components/schemas/Missing",
                     "x-is-beta",
                     "true"
@@ -438,6 +438,109 @@ public sealed class VendorExtensionProvenanceTests
         alias["description"] = alias["x-desc"]!.DeepClone();
         alias.Remove("x-desc");
     }
+
+    [Fact]
+    public void Documentation_fields_without_a_contract_slot_survive_the_disk_pipeline()
+    {
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, DocumentationFieldsSpec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
+
+        var source = JsonNode.Parse(DocumentationFieldsSpec)!.AsObject();
+        var emitted = Emit(workDirectory.FullName, generated, "output");
+        foreach (
+            var pointer in new[]
+            {
+                "#/info/summary",
+                "#/jsonSchemaDialect",
+                "#/paths/~1pets/summary",
+                "#/paths/~1pets/description",
+                "#/paths/~1pets/get/externalDocs",
+                "#/paths/~1pets/get/responses/200/links",
+                "#/paths/~1pets/put/requestBody/content/multipart~1form-data/encoding",
+                "#/components/links",
+                "#/components/requestBodies/Upload/content/multipart~1form-data/encoding",
+            }
+        )
+        {
+            Assert.True(JsonPointer.TryResolve(source, pointer, out var expected), pointer);
+            Assert.True(JsonPointer.TryResolve(emitted, pointer, out var actual), pointer);
+            Assert.True(JsonNode.DeepEquals(expected, actual), pointer);
+        }
+    }
+
+    internal const string DocumentationFieldsSpec = """
+        {
+          "openapi": "3.1.0",
+          "info": { "title": "Fields", "version": "1.0.0", "summary": "Short" },
+          "jsonSchemaDialect": "https://spec.openapis.org/oas/3.1/dialect/base",
+          "webhooks": {
+            "petCreated": { "post": { "responses": { "200": { "description": "ok" } } } }
+          },
+          "components": {
+            "requestBodies": {
+              "Upload": {
+                "content": {
+                  "multipart/form-data": {
+                    "schema": { "type": "object", "properties": { "tags": { "type": "array", "items": { "type": "string" } } } },
+                    "encoding": { "tags": { "style": "form" } }
+                  }
+                }
+              }
+            },
+            "responses": {
+              "Created": {
+                "description": "created",
+                "links": { "Self": { "$ref": "#/components/links/Self" } }
+              }
+            },
+            "links": { "Self": { "operationId": "listPets" } },
+            "callbacks": { "OnEvent": { "{$request.body#/url}": { "post": { "responses": { "200": { "description": "ok" } } } } } },
+            "pathItems": { "Spare": { "get": { "responses": { "200": { "description": "ok" } } } } }
+          },
+          "paths": {
+            "/pets": {
+              "summary": "Pets",
+              "description": "All the pets",
+              "get": {
+                "operationId": "listPets",
+                "externalDocs": { "url": "https://example.com/pets" },
+                "responses": {
+                  "200": {
+                    "description": "ok",
+                    "links": { "Next": { "operationId": "listPets" } },
+                    "content": { "application/json": { "schema": { "type": "string" } } }
+                  }
+                }
+              },
+              "post": {
+                "operationId": "createPet",
+                "requestBody": { "$ref": "#/components/requestBodies/Upload" },
+                "callbacks": { "onDone": { "{$request.body#/cb}": { "post": { "responses": { "200": { "description": "ok" } } } } } },
+                "responses": { "201": { "$ref": "#/components/responses/Created" } }
+              },
+              "put": {
+                "operationId": "replacePet",
+                "requestBody": {
+                  "content": {
+                    "multipart/form-data": {
+                      "schema": { "type": "object", "properties": { "name": { "type": "string" } } },
+                      "encoding": { "name": { "contentType": "text/plain" } }
+                    }
+                  }
+                },
+                "responses": { "204": { "description": "No Content" } }
+              },
+              "trace": {
+                "externalDocs": { "url": "https://example.com/trace" },
+                "responses": { "200": { "description": "ok" } }
+              }
+            }
+          }
+        }
+        """;
 
     private const string PreservationSpec = """
         {

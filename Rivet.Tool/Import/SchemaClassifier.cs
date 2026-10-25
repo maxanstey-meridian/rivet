@@ -552,6 +552,73 @@ internal static class SchemaClassifier
         );
     }
 
+    /// <summary>
+    /// OpenAPI 3.1's titled-const enum: a string or integer schema whose oneOf branches
+    /// are each one titled <c>const</c> (discord's <c>{"title": "ONE_MINUTE", "const": 60}</c>).
+    /// The titles name the members, so it is an enum, not a union of indistinguishable slots.
+    /// </summary>
+    internal static bool IsTitledConstEnum(IOpenApiSchema schema)
+    {
+        if (
+            schema.OneOf is not { Count: > 0 } branches
+            || schema.Type is not { } declared
+            || (declared & ~JsonSchemaType.Null)
+                is not (JsonSchemaType.String or JsonSchemaType.Integer)
+            || schema.Enum is { Count: > 0 }
+            || schema.Const is not null
+            || schema.AllOf is { Count: > 0 }
+            || schema.AnyOf is { Count: > 0 }
+            || schema.Properties is { Count: > 0 }
+            || schema.Items is not null
+        )
+        {
+            return false;
+        }
+
+        var kind = declared & ~JsonSchemaType.Null;
+        var titles = new HashSet<string>(StringComparer.Ordinal);
+        return branches.All(branch =>
+            branch is not OpenApiSchemaReference
+            && branch.Const is { } value
+            && !string.IsNullOrWhiteSpace(branch.Title)
+            && titles.Add(branch.Title)
+            && (branch.Type is null || (branch.Type & ~JsonSchemaType.Null) == kind)
+            && branch.OneOf is not { Count: > 0 }
+            && branch.AnyOf is not { Count: > 0 }
+            && branch.AllOf is not { Count: > 0 }
+            && branch.Properties is not { Count: > 0 }
+            && branch.Items is null
+            && branch.Enum is not { Count: > 0 }
+            && (
+                kind == JsonSchemaType.String
+                || long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+            )
+        );
+    }
+
+    internal static GeneratedEnum MapTitledConstEnum(string name, IOpenApiSchema schema)
+    {
+        var integer = (schema.Type & ~JsonSchemaType.Null) == JsonSchemaType.Integer;
+        var used = new HashSet<string>();
+        var members = schema
+            .OneOf!.Select(branch =>
+            {
+                var memberName = Naming.UniqueName(
+                    Naming.ToPascalCaseFromSegments(branch.Title!),
+                    used
+                );
+                var wire = branch.Const!;
+                return integer
+                    ? new GeneratedEnumMember(memberName, null, wire)
+                    : new GeneratedEnumMember(
+                        memberName,
+                        Naming.ToCamelCase(memberName) == wire ? null : wire
+                    );
+            })
+            .ToList();
+        return new GeneratedEnum(name, members, schema.Format, schema.Description);
+    }
+
     internal static GeneratedEnum MapIntEnum(string name, IOpenApiSchema schema)
     {
         var varnames = GetExtensionStringArray(schema, "x-enum-varnames");

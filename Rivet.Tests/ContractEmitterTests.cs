@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -535,7 +536,9 @@ public sealed class ContractEmitterTests
             null,
             "SecureController",
             [],
-            Security: new EndpointSecurity(false, "Bearer")
+            Security: new SecurityRequirements([
+                new SecurityRequirement([new SecurityRequirementScheme("Bearer", ["read"])]),
+            ])
         );
 
         var json = ContractEmitter.Emit(
@@ -546,8 +549,9 @@ public sealed class ContractEmitterTests
         using var doc = JsonDocument.Parse(json);
         var sec = doc.RootElement.GetProperty("endpoints")[0].GetProperty("security");
 
-        Assert.False(sec.GetProperty("isAnonymous").GetBoolean());
-        Assert.Equal("Bearer", sec.GetProperty("scheme").GetString());
+        var scheme = sec.GetProperty("alternatives")[0].GetProperty("schemes")[0];
+        Assert.Equal("Bearer", scheme.GetProperty("name").GetString());
+        Assert.Equal("read", scheme.GetProperty("scopes")[0].GetString());
     }
 
     [Fact]
@@ -1176,7 +1180,7 @@ public sealed class ContractEmitterTests
     }
 
     [Fact]
-    public void Duplicate_Response_Status_Keeps_First_Metadata_And_Sorts()
+    public void Responses_Sort_By_Status_And_Keep_Their_Metadata()
     {
         var firstExamples = new[]
         {
@@ -1202,25 +1206,17 @@ public sealed class ContractEmitterTests
                     firstExamples,
                     firstHeaders
                 ),
-                new TsResponseType(404, new TsType.Primitive("number"), "second"),
                 new TsResponseType(200, null, "success"),
             ]
         );
 
-        string? json = null;
-        // Capture the intentionally-triggered RIV2010: an uncaptured Console.Error
-        // write leaks into concurrent CaptureStdErr windows (its doc contract),
-        // breaking their exact-count assertions.
-        _ = CompilationHelper.CaptureStdErr(() =>
-        {
-            json = ContractEmitter.Emit(
-                new Dictionary<string, TsTypeDefinition>(),
-                new Dictionary<string, TsType>(),
-                [endpoint]
-            );
-        });
+        var json = ContractEmitter.Emit(
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType>(),
+            [endpoint]
+        );
 
-        using var doc = JsonDocument.Parse(json!);
+        using var doc = JsonDocument.Parse(json);
         var responses = doc.RootElement.GetProperty("endpoints")[0].GetProperty("responses");
         Assert.Equal(
             [200, 404, 500],
@@ -1237,5 +1233,35 @@ public sealed class ContractEmitterTests
             "X-First",
             response404.GetProperty("headers")[0].GetProperty("name").GetString()
         );
+    }
+
+    [Fact]
+    public void Duplicate_Response_Status_Fails_With_RIV2010()
+    {
+        // Keeping the first declaration used to drop the second's shape without a word.
+        var endpoint = new TsEndpointDefinition(
+            "getUser",
+            "GET",
+            "/api/users/{id}",
+            [],
+            null,
+            "UsersController",
+            [
+                new TsResponseType(404, new TsType.Primitive("string"), "first"),
+                new TsResponseType(404, new TsType.Primitive("number"), "second"),
+            ]
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            ContractEmitter.Emit(
+                new Dictionary<string, TsTypeDefinition>(),
+                new Dictionary<string, TsType>(),
+                [endpoint]
+            )
+        );
+
+        Assert.StartsWith("error RIV2010:", exception.Message);
+        Assert.Contains("'getUser'", exception.Message);
+        Assert.Contains("status 404", exception.Message);
     }
 }

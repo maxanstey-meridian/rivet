@@ -247,7 +247,10 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                             ? mapper.ResolveSchemaType(propSchema)
                             : null,
                         SchemaRef: scalarReference,
-                        SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(propSchema)
+                        SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(propSchema),
+                        NestedSchemaRefs: scalarReference is null
+                            ? mapper.CollectNestedScalarReferences(propSchema)
+                            : null
                     )
                 );
             }
@@ -388,7 +391,9 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             MultipleOf: (double?)schema.MultipleOf,
             MinItems: schema.MinItems.HasValue ? (int)schema.MinItems.Value : null,
             MaxItems: schema.MaxItems.HasValue ? (int)schema.MaxItems.Value : null,
-            UniqueItems: schema.UniqueItems == true ? true : null
+            UniqueItems: schema.UniqueItems == true ? true : null,
+            MinProperties: schema.MinProperties,
+            MaxProperties: schema.MaxProperties
         );
 
         return c.HasAny ? c : null;

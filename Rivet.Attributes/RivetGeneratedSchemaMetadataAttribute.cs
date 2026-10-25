@@ -40,7 +40,10 @@ public sealed class RivetGeneratedSchemaMetadataAttribute : Attribute
         bool deprecated,
         bool readOnly,
         bool writeOnly,
-        string? requiredJson
+        string? requiredJson,
+        int minProperties = -1,
+        int maxProperties = -1,
+        bool enumListsNull = false
     )
     {
         Pointer = pointer;
@@ -72,6 +75,9 @@ public sealed class RivetGeneratedSchemaMetadataAttribute : Attribute
         ReadOnly = readOnly;
         WriteOnly = writeOnly;
         RequiredJson = requiredJson;
+        MinProperties = minProperties;
+        MaxProperties = maxProperties;
+        EnumListsNull = enumListsNull;
     }
 
     public string Pointer { get; }
@@ -103,4 +109,7 @@ public sealed class RivetGeneratedSchemaMetadataAttribute : Attribute
     public bool ReadOnly { get; }
     public bool WriteOnly { get; }
     public string? RequiredJson { get; }
+    public int MinProperties { get; }
+    public int MaxProperties { get; }
+    public bool EnumListsNull { get; }
 }

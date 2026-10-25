@@ -160,12 +160,17 @@ public sealed class EnumParameterBindingCheckTests
 
     /// <summary>
     /// The handler is recognised as the field's implementation (no missing or mismatch
-    /// warning either), so the absence of RIV4005 is not vacuous.
+    /// warning either), so the absence of RIV4005 is not vacuous. The fixtures bind enums
+    /// their contract doesn't declare, which RIV4006 reports; that's not this file's subject.
     /// </summary>
     private static void AssertNotReported(
         IReadOnlyList<CoverageWarning> warnings,
         string fieldName = "List"
-    ) => Assert.DoesNotContain(warnings, w => w.FieldName == fieldName);
+    ) =>
+        Assert.DoesNotContain(
+            warnings,
+            w => w.FieldName == fieldName && w.Kind != CoverageWarningKind.InputBindingMismatch
+        );
 
     // ---------------------------------------------------------------
     // RIV4005 — --check
@@ -833,10 +838,163 @@ public sealed class EnumParameterBindingCheckTests
         AssertNotReported(warnings);
     }
 
-    [Fact]
-    public void Functions_Handler_Is_Not_Checked()
+    [Theory]
+    [InlineData("[FromQuery] string? Name")]
+    [InlineData("Microsoft.AspNetCore.Http.IFormFile? Name")]
+    public void Mvc_ApiController_Complex_Parameter_With_A_Sourced_Member_Is_Reported(
+        string otherMember
+    )
     {
-        // Functions binds its own parameters and its enum behaviour is unmeasured.
+        // InferParameterBindingInfoConvention gives a complex type no binding source when one
+        // of its members carries its own, so the type isn't a body: its other members bind
+        // from route, query and form, the enum among them.
+        var request = $$"""
+            using Microsoft.AspNetCore.Mvc;
+
+            namespace Test;
+
+            public sealed record StreetRequest(StreetKind Kind, {{otherMember}});
+            """;
+
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Snake),
+            request,
+            MvcHandler("StreetRequest request")
+        );
+
+        var warning = AssertReported(warnings);
+        Assert.Equal("restricted_byway", warning.Expected);
+        Assert.Contains("MVC parameter 'request.Kind'", warning.Message);
+    }
+
+    [Theory]
+    [InlineData("options.SuppressInferBindingSourcesForParameters = true;", true)]
+    [InlineData("options.SuppressInferBindingSourcesForParameters = false;", false)]
+    [InlineData("", false)]
+    public void Mvc_Suppressed_Inference_Binds_An_Unattributed_Complex_Parameter_From_Values(
+        string configuration,
+        bool reported
+    )
+    {
+        // With inference suppressed, [ApiController] infers no body: the unattributed record
+        // is bound member by member from route, query and form, as without [ApiController].
+        var startup = $$"""
+            using Microsoft.AspNetCore.Mvc;
+
+            namespace Test;
+
+            public static class Startup
+            {
+                public static void Configure(ApiBehaviorOptions options)
+                {
+                    {{configuration}}
+                }
+            }
+            """;
+
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Snake),
+            StreetRequest(),
+            startup,
+            MvcHandler("StreetRequest request")
+        );
+
+        if (reported)
+        {
+            Assert.Contains("MVC parameter 'request.Kind'", AssertReported(warnings).Message);
+        }
+        else
+        {
+            AssertNotReported(warnings);
+        }
+    }
+
+    [Fact]
+    public void Mvc_Nested_Complex_Member_Is_Reported()
+    {
+        // ComplexObjectModelBinder recurses: ?Filter.Kind=... reaches the enum binder.
+        const string request = """
+            namespace Test;
+
+            public sealed record StreetFilter(StreetKind Kind);
+
+            public sealed record StreetRequest(StreetFilter Filter, string? Name);
+            """;
+
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Snake),
+            request,
+            MvcHandler("[FromQuery] StreetRequest request")
+        );
+
+        Assert.Contains("MVC parameter 'request.Filter.Kind'", AssertReported(warnings).Message);
+    }
+
+    [Fact]
+    public void Mvc_Self_Referencing_Complex_Member_Does_Not_Recurse_Forever()
+    {
+        const string request = """
+            namespace Test;
+
+            public sealed class StreetRequest
+            {
+                public StreetKind Kind { get; set; }
+
+                public StreetRequest? Parent { get; set; }
+            }
+            """;
+
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Snake),
+            request,
+            MvcHandler("[FromQuery] StreetRequest request")
+        );
+
+        Assert.Contains("MVC parameter 'request.Kind'", AssertReported(warnings).Message);
+    }
+
+    [Theory]
+    [InlineData(Camel, false)]
+    [InlineData(Snake, true)]
+    public void Minimal_Api_FromForm_Complex_Parameter_Members_Bind_Ignoring_Case(
+        string converter,
+        bool reported
+    )
+    {
+        // The minimal-API form mapper parses enums with Enum.TryParse(ignoreCase: true).
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(converter),
+            StreetRequest(),
+            MinimalHandler("[FromForm] StreetRequest request", verb: "Post")
+        );
+
+        if (reported)
+        {
+            Assert.Contains(
+                "minimal API parameter 'request.Kind'",
+                AssertReported(warnings).Message
+            );
+        }
+        else
+        {
+            AssertNotReported(warnings, "Create");
+        }
+    }
+
+    [Theory]
+    [InlineData(Camel, true)]
+    [InlineData(Builtin, true)]
+    [InlineData("", false)]
+    public void Functions_Handler_Binding_A_String_Enum_Is_Reported(string converter, bool reported)
+    {
+        // The worker fills 'kind' from the route values, and none of its input converters
+        // turns a string into an enum but JsonPocoConverter, which parses the raw text as
+        // JSON. No member name survives that, whatever its casing; an integer does.
         const string azure = """
             using System;
 
@@ -868,17 +1026,28 @@ public sealed class EnumParameterBindingCheckTests
 
             public sealed class StreetFunctions
             {
-                [Function("list-streets")]
+                [Function("get-street")]
                 public IActionResult Run(
-                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "streets")] object request,
-                    StreetKind kind
-                ) => StreetsContract.List.Success(new StreetDto("1")).ToActionResult();
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "streets/{kind}")] object request,
+                    StreetKind kind,
+                    System.Threading.CancellationToken cancellationToken
+                ) => StreetsContract.Get.Success(new StreetDto("1")).ToActionResult();
             }
             """;
 
-        var warnings = RunCheck(Contract, StreetKind(Camel), azure, function);
+        var warnings = RunCheck(Contract, StreetKind(converter), azure, function);
 
-        AssertNotReported(warnings);
+        if (reported)
+        {
+            var warning = AssertReported(warnings);
+            Assert.Equal("Get", warning.FieldName);
+            Assert.Contains("Azure Functions parameter 'kind'", warning.Message);
+            Assert.Contains("for member Unknown", warning.Message);
+        }
+        else
+        {
+            AssertNotReported(warnings, "Get");
+        }
     }
 
     [Fact]
@@ -901,11 +1070,14 @@ public sealed class EnumParameterBindingCheckTests
             [RivetType]
             public sealed record StreetDto(string Id);
 
+            [RivetType]
+            public sealed record StreetQuery(StreetKind Kind);
+
             [RivetContract]
             public static class StreetsContract
             {
-                public static readonly RouteDefinition<StreetDto> List =
-                    Define.Get<StreetDto>("/api/streets");
+                public static readonly RouteDefinition<StreetQuery, StreetDto> List =
+                    Define.Get<StreetQuery, StreetDto>("/api/streets");
             }
 
             [ApiController]
@@ -914,7 +1086,10 @@ public sealed class EnumParameterBindingCheckTests
             {
                 [HttpGet]
                 public IActionResult List([FromQuery] StreetKind kind)
-                    => StreetsContract.List.Success(new StreetDto("1")).ToActionResult();
+                    => StreetsContract
+                        .List.Bind(new StreetQuery(kind))
+                        .Success(new StreetDto("1"))
+                        .ToActionResult();
             }
             """
         );

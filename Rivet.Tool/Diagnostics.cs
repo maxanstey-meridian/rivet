@@ -2,7 +2,7 @@ namespace Rivet.Tool;
 
 /// <summary>
 /// Stable diagnostic IDs for warnings and fatal errors Rivet writes to stderr.
-/// Canonical formats are <c>warning RIV1001: &lt;message&gt;</c> and
+/// Canonical formats are <c>warning RIV1019: &lt;message&gt;</c> and
 /// <c>error RIV2002: &lt;message&gt;</c> (MSBuild-ish and machine-parseable).
 ///
 /// ID ranges by pipeline stage:
@@ -32,7 +32,10 @@ public static class Diagnostics
     public const string UnmappedTypedResult = "RIV1006";
     public const string TypeNameCollision = "RIV1007";
     public const string UnparseableRangeBound = "RIV1008";
-    public const string UnsupportedTimeSpan = "RIV1009";
+
+    // RIV1009 (UnsupportedTimeSpan) retired: TimeSpan now maps to the string
+    // System.Text.Json writes (the "c" format) with x-rivet-csharp-type. The number is
+    // never reused.
     public const string UnsupportedBigInteger = "RIV1010";
 
     // RIV1011 (UnsupportedChar) retired: char now maps to a length-1 string
@@ -66,6 +69,10 @@ public static class Diagnostics
     public const string ConflictingResponseDeclaration = "RIV1107";
     public const string DuplicateResponseHeader = "RIV1109";
     public const string UnbindableEnumParameter = "RIV1110";
+    public const string UnmodelledJsonConverter = "RIV1111";
+    public const string UnmodelledNumberHandling = "RIV1112";
+    public const string UnreadableContractEndpoint = "RIV1113";
+    public const string InvalidSecurityDeclaration = "RIV1114";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -83,10 +90,14 @@ public static class Diagnostics
     public const string DuplicateResponseStatusInIr = "RIV2010";
     public const string DuplicateSecuritySchemeDefinition = "RIV2011";
     public const string ConflictingOperations = "RIV2012";
+    public const string EquivalentPathTemplates = "RIV2013";
 
     // ----- RIV3xxx: import -----
     public const string ImportAliasCycleBroken = "RIV3001";
-    public const string ImportSecuritySchemesDropped = "RIV3002";
+
+    // RIV3002 (ImportSecuritySchemesDropped) retired: every security alternative, AND-group
+    // and scope imports into .Secure()/.AndSecure()/.OrAnonymous(). The number is never
+    // reused.
     public const string ImportOperationMethodDropped = "RIV3003";
 
     // RIV3004 (ImportAdditionalPropertiesDropped) retired: mixed named objects keep typed
@@ -111,6 +122,10 @@ public static class Diagnostics
     public const string ImportReservedAuthorizationHeaderDropped = "RIV3022";
     public const string ImportReservedAcceptHeaderDropped = "RIV3023";
     public const string ImportBodyForbiddenStatusContentDropped = "RIV3024";
+    public const string ImportSchemalessParameterDropped = "RIV3025";
+    public const string ImportCallbackDropped = "RIV3027";
+    public const string ImportPathItemOutsidePathsDropped = "RIV3028";
+    public const string ImportEquivalentPathTemplateMerged = "RIV3029";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -118,6 +133,7 @@ public static class Diagnostics
     public const string CoverageRouteMismatch = "RIV4003";
     public const string CoverageOrphanedBinding = "RIV4004";
     public const string CoverageUnbindableEnumParameter = "RIV4005";
+    public const string CoverageInputBindingMismatch = "RIV4006";
 
     /// <summary>
     /// Registry of every diagnostic ID with a one-line trigger description.
@@ -130,39 +146,37 @@ public static class Diagnostics
     >(StringComparer.Ordinal)
     {
         [EndpointFieldNotStaticReadonly] =
-            "Contract endpoint field is not 'static readonly' — it may not be read correctly at generation time.",
+            "Contract endpoint field is not 'static readonly' — the runtime could serve a different definition than the initializer the spec is read from; generation fails.",
         [ContractExampleUndeclaredStatus] =
-            "Response example targets a status code the contract endpoint does not declare — the example is ignored.",
+            "Response example targets a status code the contract endpoint does not declare — the spec has no response to carry it; generation fails.",
         [RouteBoundJsonPropertyNameIgnored] =
             "[JsonPropertyName] on a route-bound property is ignored for route interpolation — the contract param keeps the route name.",
         [ControllerExampleUndeclaredStatus] =
-            "Response example targets a status code the controller endpoint does not declare — the example is ignored.",
+            "Response example targets a status code the controller endpoint does not declare — the spec has no response to carry it; generation fails.",
         [UnmappedTypedResult] =
             "Unmapped typed result branch in Results<...> or an action with no declared success response — the contract is refused, not silently completed.",
         [TypeNameCollision] =
-            "Two walked types share a simple name — the later type is emitted under a disambiguated name.",
+            "Two walked types share a simple name (different namespaces, nesting or generic arity) — schema names are global, so generation fails until one is renamed.",
         [UnparseableRangeBound] =
             "[Range] bound could not be parsed — the range constraint is skipped.",
-        [UnsupportedTimeSpan] =
-            "TimeSpan has no schema mapping — emitted as an untyped (empty) schema.",
         [UnsupportedBigInteger] =
-            "BigInteger has no schema mapping — emitted as an untyped (empty) schema.",
+            "BigInteger has no System.Text.Json converter (it serializes its IsZero/Sign/... properties and cannot be read back) — generation fails; expose a string or a bounded number instead.",
         [DictionaryKeyTypeDropped] =
             "Dictionary key type has no contract representation (supported: string, enums, string-backed brands, string-serializable primitives) — keys are emitted as unconstrained strings.",
         [PolymorphicNonStringTag] =
-            "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; the base type falls back to plain property flattening.",
+            "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; generation fails until every registration has a string tag.",
         [PolymorphicNoDerivedTypes] =
             "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",
         [PolymorphicUnknownHandlingDropped] =
             "[JsonPolymorphic] UnknownDerivedTypeHandling has no spec representation — the emitted oneOf admits only the registered derived types.",
         [ResponseHeaderUndeclaredStatus] =
-            ".WithResponseHeader() targets a status code the contract endpoint does not declare — the header is ignored.",
+            ".WithResponseHeader() targets a status code the contract endpoint does not declare — the spec has no response to carry it; generation fails.",
         [RivetUnionNoVariants] =
-            "[RivetUnion] wrapper has no variant properties — there is no union to emit; the type falls back to plain property flattening.",
+            "[RivetUnion] wrapper has no variant properties — there is no union to emit; generation fails.",
         [RouteTokenWithoutInputProperty] =
             "Route token has no matching property on the endpoint's input type (after normalized matching: case-insensitive, '_'/'-' stripped) — emitted as an untyped string path param.",
         [InputTypeNotParamLowerable] =
-            "The input type on a bodyless method (GET/DELETE/.AcceptsBinary) is a dictionary, collection or scalar — it has no property surface to lower to query params, so the input is dropped (route tokens still emit as untyped path params).",
+            "The input type on a request with no JSON body (GET/DELETE/.AcceptsBinary) is a dictionary, collection or scalar — it has no properties to lower to route/query params; generation fails instead of dropping the input.",
         [DuplicateResponseHeader] =
             "A contract endpoint declares the same response header name (case-insensitively) more than once for one status; generation fails instead of emitting both spellings.",
         [DuplicateResponseStatus] =
@@ -189,33 +203,41 @@ public static class Diagnostics
             "An endpoint declares the same response status twice with different bodies ([ProducesResponseType]/.Returns vs a mapped Results<> branch) — one status carries exactly one shape; generation fails instead of silently letting the attribute win.",
         [UnbindableEnumParameter] =
             "A [RivetEndpoint]/[RivetClient] endpoint binds a string-wire enum from route, query, header or form, and the host's enum parser would refuse an advertised wire value — it ignores the JSON converter. An MVC action (instance method) refuses a value differing from its member name by more than case; a minimal-API handler (static method) refuses any difference; generation fails.",
+        [UnmodelledJsonConverter] =
+            "A [JsonConverter] Rivet cannot model sits on a walked type or member (anything but a supported enum converter, [RivetScalar] or [RivetUnion], and on a member not pinned by [RivetSchemaType]) — the wire is whatever the converter writes, so generation fails instead of emitting the declared CLR shape.",
+        [UnmodelledNumberHandling] =
+            "[JsonNumberHandling] with WriteAsString or AllowNamedFloatingPointLiterals on a walked type or member puts strings on the number's wire — generation fails unless [RivetSchemaType] pins the member's schema (AllowReadingFromString alone is accepted: it only widens what the host reads).",
+        [UnreadableContractEndpoint] =
+            "A contract endpoint field can't be read statically (no initializer, an initializer that isn't a Define.* builder chain, a call that isn't a Rivet builder method, or a non-constant route, security scheme or scope) — generation fails instead of dropping the operation or its security from the spec.",
+        [InvalidSecurityDeclaration] =
+            "A contract endpoint's security calls contradict each other (.Anonymous() alongside .Secure() or .OrAnonymous(), or .AndSecure() with no .Secure() alternative to join) — generation fails instead of guessing which one was meant.",
         [TaggedUnionComponentCollision] =
-            "Synthesized tagged-union variant component collides with an existing schema — the existing schema wins.",
+            "A tagged-union variant's producer-pinned component id is already used by a different schema — generation fails, because one id cannot $ref two shapes.",
         [UndefinedSecurityScheme] =
             "Endpoint references a security scheme with no definition — generation fails rather than inventing security semantics.",
         [DuplicateEndpoint] =
-            "Two endpoints share an HTTP method + path — the later definition wins.",
+            "Two endpoints share an HTTP method + path with equivalent declarations — one representative is emitted (incompatible ones fail with RIV2012).",
         [MultipartInputTypeMissing] =
             "Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params.",
         [UnknownTypeUntypedSchema] =
-            "'unknown' type (JsonElement/JsonNode or an unmapped C# type) in the OpenAPI schema — emitted as untyped.",
+            "A type with no schema mapping (an 'unknown' primitive whose csharpType is not object/JsonElement/JsonNode/JsonObject/JsonArray), or a $ref to a schema component nothing defines — generation fails instead of emitting an untyped stand-in.",
         [UnresolvedTypeParameter] =
-            "Unresolved generic type parameter in the OpenAPI schema — emitted as object.",
+            "A generic type parameter reaches the OpenAPI schema unbound — generation fails instead of emitting it as object.",
         [GenericTemplateMissing] =
-            "Generic template is absent from the contract's type definitions — a free-form object schema is emitted for the instantiation.",
+            "A generic instantiation's template is absent from the contract's type definitions — generation fails instead of emitting a free-form object.",
         [BrandConflictingUnderlyingTypes] =
-            "Brand declared with conflicting underlying types — the first declaration wins.",
+            "Contract JSON declares one brand name two different ways — generation fails instead of letting the first declaration win.",
         [ReservedHeaderParameterSkipped] =
             "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters; the parameter is omitted from the spec.",
         [DuplicateResponseStatusInIr] =
-            "External contract IR declares the same response status more than once; the duplicate is dropped and the first declaration is kept.",
+            "Controller metadata or contract JSON declares the same response status more than once — generation fails instead of keeping the first declaration.",
         [DuplicateSecuritySchemeDefinition] = "Two --security values define the same scheme name.",
         [ConflictingOperations] =
             "Two incompatible endpoints declare the same normalized HTTP method + route — generation fails instead of writing a lossy spec.",
+        [EquivalentPathTemplates] =
+            "Two routes differ only in parameter names — OpenAPI treats them as one path, so generation fails instead of writing an invalid document.",
         [ImportAliasCycleBroken] =
             "Alias schema is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.",
-        [ImportSecuritySchemesDropped] =
-            "Document declares multiple security schemes — only the first is imported; alternatives and scopes are not represented.",
         [ImportOperationMethodDropped] =
             "TRACE operation dropped — the HTTP method has no contract representation.",
         [ImportDiscriminatorDropped] =
@@ -244,18 +266,28 @@ public static class Diagnostics
             "Reserved Accept header parameter is dropped — response media types are represented by response content.",
         [ImportBodyForbiddenStatusContentDropped] =
             "Response content authored on a body-forbidden status (1xx/204/205/304) is dropped; HTTP forbids a message body there; the status and its description/headers are preserved.",
+        [ImportSchemalessParameterDropped] =
+            "Parameter declares content (or nothing) instead of a schema — Rivet parameters carry a schema, so the parameter is dropped.",
+        [ImportCallbackDropped] =
+            "Operation or component callback dropped — Rivet contracts describe calls the API receives, not calls it makes.",
+        [ImportPathItemOutsidePathsDropped] =
+            "Webhook or components.pathItems entry dropped — only path items under 'paths' become contract endpoints.",
+        [ImportEquivalentPathTemplateMerged] =
+            "Path repeats an earlier path's template under other parameter names, which OpenAPI forbids — its operations merge into the earlier path and adopt its path parameter names.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",
         [CoverageOrphanedBinding] =
             "Contract endpoint is bound in a route handler, but the handler neither returns a terminal built from that binding nor passes the binding to a helper whose answer it returns.",
         [CoverageUnbindableEnumParameter] =
-            "A handler binds a string-wire enum from route, query, header or form, and the host's enum parser (minimal API: exact member name; MVC: member name ignoring case) would refuse an advertised wire value.",
+            "A handler binds a string-wire enum from route, query, header or form, and the host's enum parser (minimal API: exact member name; MVC: member name ignoring case; Azure Functions: JSON, so no name at all) would refuse an advertised wire value.",
+        [CoverageInputBindingMismatch] =
+            "A handler's bound inputs disagree with its contract's: it binds an input the contract doesn't declare, never binds one it does, or binds one from a different source (route, query, header, body, form).",
     };
 
     /// <summary>
     /// Writes the canonical machine-parseable warning line to stderr:
-    /// <c>warning RIV1001: message</c>.
+    /// <c>warning RIV1019: message</c>.
     /// </summary>
     public static void Warn(string id, string message) =>
         Console.Error.WriteLine($"warning {id}: {message}");

@@ -22,6 +22,8 @@ parameters follow the model binder instead: a nullable parameter is optional.
 | `Uri` | `string`, `format: uri` |
 | `byte[]` | `string`, `contentEncoding: base64` (the OpenAPI 3.1 idiom — matches the System.Text.Json wire format), plus `x-rivet-csharp-type` |
 | `char` | `string` with `minLength: 1` and `maxLength: 1` (System.Text.Json writes a single-character JSON string), plus `x-rivet-csharp-type` so the import round-trip recovers `char` |
+| `TimeSpan` | `string` matching System.Text.Json's invariant `"c"` format (`[-][d.]hh:mm:ss[.fffffff]`), plus `x-rivet-csharp-type: TimeSpan` |
+| `BigInteger` | refused (`RIV1010`): System.Text.Json has no converter for it, so expose a string of digits or a bounded number |
 | `object` | untyped (empty) schema — "any JSON value", emitted deliberately and with no diagnostic. openapi-typescript consumers see `unknown`; cast at the boundary. |
 
 ## Composites
@@ -40,13 +42,12 @@ parameters follow the model binder instead: a nullable parameter is optional.
   construction (the same `JsonNamingPolicy` instance drives both). A per-member
   `[JsonStringEnumMemberName]` overrides the converter's casing. When the casing
   produces the same wire value for two members (`RIV1106`), generation fails — loudly, never with a wrong string union.
-  On the way in, the family refuses integers: a JSON `0` is a deserialization error, and so is a
-  numeric string `"0"` from .NET 9 on (.NET 8 still reads it; see
-  [Limitations](/misc/limitations#json-bodies-are-a-little-loose-too)). It isn't
-  an exact match on the spec's names, though. System.Text.Json also reads the C#
-  member name in any casing, so `"RestrictedByway2A"` and `"RESTRICTEDBYWAY2A"` get
-  through a camelCase converter too. The bare built-in `JsonStringEnumConverter<T>`
-  keeps STJ's default and quietly accepts integers its string spec never mentions.
+  On the way in, the family reads exactly the names it writes, case-sensitively, on
+  every runtime. Integers, numeric strings and the C# member name in any other
+  casing are a deserialization error (see
+  [Limitations](/misc/limitations#json-bodies-take-exactly-the-spec-s-names)). The
+  bare built-in `JsonStringEnumConverter<T>` keeps STJ's default and quietly
+  accepts integers its string spec never mentions.
   All of this is the JSON body only: route, query, header and form values are bound
   by ASP.NET, which never asks the converter. An enum parameter still gets the
   converter's names in the spec, so Rivet checks the host can bind them (`RIV4005`,
@@ -59,7 +60,7 @@ parameters follow the model binder instead: a nullable parameter is optional.
   `propertyNames` schema: enum keys `$ref` the enum schema (which is emitted —
   `Dictionary<Color, int>` registers `Color`), string-backed brand keys `$ref` the
   brand schema, and string-serializable primitive keys (`Guid`, `DateTime`/`DateOnly`/
-  `TimeOnly`, `Uri`, `char`, numerics) emit `type: string` with the original `format`
+  `TimeOnly`, `TimeSpan`, `Uri`, `char`, numerics) emit `type: string` with the original `format`
   (`char` keys carry the length-1 bounds instead) plus `x-rivet-csharp-type` where the
   format alone is ambiguous. Unsupported key types
   degrade to unconstrained string keys with diagnostic `RIV1013`.
@@ -73,13 +74,13 @@ parameters follow the model binder instead: a nullable parameter is optional.
   (the shape alone no longer decides).
 - **Polymorphic hierarchies** (`[JsonPolymorphic]`/`[JsonDerivedType]` on a base
   type) → `oneOf` + `discriminator` with a complete tag → `$ref` `mapping`, named
-  after the base. Each registration becomes a `{Base}_{Tag}` variant component:
+  after the base. Each registration becomes a `{Base}_{Tag}` variant component (with a numeric suffix if that name is already taken):
   the discriminator property first (default `$type`, single-value `enum`,
   required), then the derived type's full flattened property surface — matching
   System.Text.Json's wire output when serializing *as the base type*. A derived
   type referenced directly keeps its own untagged schema (STJ writes no
-  discriminator for it). Non-string tags (`RIV1014`) and registration-less
-  `[JsonPolymorphic]` (`RIV1015`) fall back to plain flattening, loudly;
+  discriminator for it). Int or missing tags stop generation (`RIV1014`);
+  registration-less `[JsonPolymorphic]` (`RIV1015`) falls back to plain flattening, loudly;
   `UnknownDerivedTypeHandling` has no spec representation (`RIV1016`).
 
 ## Constraint and metadata flow

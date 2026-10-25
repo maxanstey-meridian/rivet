@@ -59,9 +59,30 @@ public static class JsonContractReader
             throw new JsonException(exception.Message, exception);
         }
 
+        // Types and enums share one component namespace; a repeated name would let one
+        // declaration silently overwrite the other.
+        var repeatedName = contract
+            .Types.Select(type => type.Name)
+            .Concat(contract.Enums.Select(e => e.Name))
+            .GroupBy(name => name, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Skip(1).Any());
+        if (repeatedName is not null)
+        {
+            throw new JsonException(
+                $"'{repeatedName.Key}' is declared more than once across types and enums; give each declaration its own name"
+            );
+        }
+
         var enums = new Dictionary<string, TsType>();
         foreach (var e in contract.Enums)
         {
+            if ((e.Values is null) == (e.IntValues is null))
+            {
+                throw new JsonException(
+                    $"enum '{e.Name}' must carry exactly one of 'values' (string members) or 'intValues' (integer members)"
+                );
+            }
+
             enums[e.Name] = e.IntValues is not null
                 ? new TsType.IntUnion(
                     e.IntValues,
@@ -125,11 +146,23 @@ public static class JsonContractReader
             var brand in roots.SelectMany(root => root.SelfAndDescendants()).OfType<TsType.Brand>()
         )
         {
-            if (!brands.TryAdd(brand.Name, brand) && brands[brand.Name] != brand)
+            if (brands.TryAdd(brand.Name, brand))
             {
-                Diagnostics.Warn(
-                    Diagnostics.BrandConflictingUnderlyingTypes,
-                    $"brand '{brand.Name}' declared with conflicting underlying types — first declaration wins"
+                continue;
+            }
+
+            // Compared as wire JSON: TsType records hold lists, so record equality would
+            // call two identical declarations different.
+            var first = JsonSerializer.Serialize<TsType>(brands[brand.Name], Options);
+            var second = JsonSerializer.Serialize<TsType>(brand, Options);
+            if (first != second)
+            {
+                // One brand name is one component schema; picking either declaration
+                // would mistype every site that used the other.
+                throw new RivetUserException(
+                    $"error {Diagnostics.BrandConflictingUnderlyingTypes}: brand '{brand.Name}' is declared two different ways: "
+                        + $"{first} and {second}. Declare every use of the brand identically, "
+                        + "or give the second shape a brand name of its own"
                 );
             }
         }

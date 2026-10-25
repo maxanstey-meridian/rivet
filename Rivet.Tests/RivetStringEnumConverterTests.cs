@@ -111,6 +111,23 @@ public sealed class RivetStringEnumConverterTests
         var emitted = ((TsType.StringUnion)walker.Enums["StreetClassification"]).Members;
         var runtime = RuntimeWireValues(runtimeEnumType);
         Assert.Equal(runtime, emitted);
+
+        // The read side takes exactly the emitted names: each one in, and nothing else, not
+        // even the member name it came from.
+        foreach (var (name, value) in emitted.Zip(runtimeEnumType.GetEnumValues().Cast<object>()))
+        {
+            Assert.Equal(value, JsonSerializer.Deserialize($"\"{name}\"", runtimeEnumType));
+            Assert.Throws<JsonException>(() =>
+                JsonSerializer.Deserialize($"\"{name.ToUpperInvariant()}\"", runtimeEnumType)
+            );
+            Assert.Throws<JsonException>(() =>
+                JsonSerializer.Deserialize($"\"{Convert.ToInt32(value)}\"", runtimeEnumType)
+            );
+        }
+
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize("\"RestrictedByway2A\"", runtimeEnumType)
+        );
     }
 
     // ---------------------------------------------------------------

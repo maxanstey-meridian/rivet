@@ -120,6 +120,7 @@ public sealed class WellKnownTypes(Compilation c)
     public INamedTypeSymbol? JsonPolymorphic { get; } = Stj(c, "JsonPolymorphicAttribute");
     public INamedTypeSymbol? JsonDerivedType { get; } = Stj(c, "JsonDerivedTypeAttribute");
     public INamedTypeSymbol? JsonConverter { get; } = Stj(c, "JsonConverterAttribute");
+    public INamedTypeSymbol? JsonNumberHandling { get; } = Stj(c, "JsonNumberHandlingAttribute");
     public INamedTypeSymbol? JsonStringEnumMemberName { get; } =
         Stj(c, "JsonStringEnumMemberNameAttribute");
 

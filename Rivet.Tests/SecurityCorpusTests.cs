@@ -128,8 +128,27 @@ public sealed class SecurityCorpusTests
                   "post": {
                     "operationId": "createWidget",
                     "security": [
-                      { "oauth": ["widgets:write"], "apiKey": [] }
+                      { "oauth": ["widgets:write", "widgets:read"], "apiKey": [] },
+                      { "apiKey": [] }
                     ],
+                    "responses": { "204": { "description": "ok" } }
+                  }
+                },
+                "/widgets/{id}": {
+                  "get": {
+                    "operationId": "getWidget",
+                    "parameters": [
+                      { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                    ],
+                    "security": [{}],
+                    "responses": { "204": { "description": "ok" } }
+                  },
+                  "put": {
+                    "operationId": "putWidget",
+                    "parameters": [
+                      { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                    ],
+                    "security": [{ "oauth": ["widgets:write"] }, {}],
                     "responses": { "204": { "description": "ok" } }
                   }
                 },
@@ -207,20 +226,21 @@ public sealed class SecurityCorpusTests
             ),
             "Security scheme definitions changed."
         );
-        Assert.True(
-            JsonNode.DeepEquals(
-                original["paths"]!["/widgets"]!["post"]!["security"],
-                reemitted["paths"]!["/widgets"]!["post"]!["security"]
-            ),
-            "Operation security requirements changed."
-        );
-        Assert.True(
-            JsonNode.DeepEquals(
-                original["paths"]!["/health"]!["get"]!["security"],
-                reemitted["paths"]!["/health"]!["get"]!["security"]
-            ),
-            "Anonymous operation override changed."
-        );
+        // OR of AND-groups with scopes, optional auth ({}), anonymous ([]) and inheritance
+        // (no security key) all survive.
+        foreach (var (path, item) in original["paths"]!.AsObject())
+        {
+            foreach (var (method, operation) in item!.AsObject())
+            {
+                Assert.True(
+                    JsonNode.DeepEquals(
+                        operation!["security"],
+                        reemitted["paths"]![path]![method]!["security"]
+                    ),
+                    $"{method} {path} security requirements changed."
+                );
+            }
+        }
     }
 
     [Theory]

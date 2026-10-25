@@ -1,3 +1,4 @@
+using Rivet.Tool;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -443,7 +444,7 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
-    public void Controller_ResponseExampleAttribute_Without_Declared_Response_Is_Ignored()
+    public void Controller_ResponseExampleAttribute_Without_Declared_Response_Is_Refused()
     {
         var source = """
             using System;
@@ -467,20 +468,13 @@ public sealed class ControllerEndpointTests
             }
             """;
 
-        IReadOnlyList<TsEndpointDefinition> endpoints = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() => endpoints = WalkEndpoints(source));
+        var exception = Assert.Throws<RivetUserException>(() => WalkEndpoints(source));
 
-        var endpoint = Assert.Single(endpoints);
-        Assert.Single(endpoint.Responses);
-        Assert.Equal(200, endpoint.Responses[0].StatusCode);
-        Assert.Null(endpoint.Responses[0].Examples);
-        Assert.DoesNotContain(endpoint.Responses, response => response.StatusCode == 422);
-
-        // The silent drop must be loud: a warning naming the status and the endpoint.
-        Assert.Contains(
-            "warning RIV1004: ignoring response example for undeclared status 422 on controller endpoint 'get'",
-            stderr
+        Assert.StartsWith(
+            "error RIV1004: controller endpoint 'get' has a response example for status 422",
+            exception.Message
         );
+        Assert.Contains("[ProducesResponseType]", exception.Message);
     }
 
     [Fact]

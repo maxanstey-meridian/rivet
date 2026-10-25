@@ -100,7 +100,13 @@ public sealed class RequestBodyComponentRoundTripTests
                     "description": "Shared component",
                     "required": false,
                     "content": {
-                      "application/json": { "schema": { "$ref": "#/components/schemas/SharedPayload" } }
+                      "application/json": {
+                        "schema": { "$ref": "#/components/schemas/SharedPayload" },
+                        "examples": {
+                          "one": { "summary": "The smallest share", "value": { "value": 1 } },
+                          "later": { "description": "Filled in by the caller later." }
+                        }
+                      }
                     }
                   },
                   "Unused~Body": {
@@ -326,6 +332,19 @@ public sealed class RequestBodyComponentRoundTripTests
             requestBodies["Used/Body"]!["content"]!["application/json"]!["examples"]!["pet"]![
                 "$ref"
             ]!.GetValue<string>()
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse(
+                    """
+                    {
+                      "one": { "summary": "The smallest share", "value": { "value": 1 } },
+                      "later": { "description": "Filled in by the caller later." }
+                    }
+                    """
+                ),
+                requestBodies["Shared.Body"]!["content"]!["application/json"]!["examples"]
+            )
         );
 
         Assert.Equal(

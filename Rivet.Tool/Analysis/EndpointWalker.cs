@@ -163,7 +163,8 @@ public static class EndpointWalker
             responses,
             ExtractResponseExamples(wkt, method),
             Diagnostics.ControllerExampleUndeclaredStatus,
-            $"controller endpoint '{name}'"
+            $"controller endpoint '{name}'",
+            "declare the status on the action (e.g. [ProducesResponseType])"
         );
 
         var consumes = method.GetAttributes().Where(a => a.Is(wkt.Consumes)).ToArray();
@@ -458,13 +459,15 @@ public static class EndpointWalker
 
     /// <summary>
     /// Attaches response examples to the responses declaring their status, then sorts
-    /// by status. An example for an undeclared status is ignored with a warning.
+    /// by status. An example for an undeclared status fails generation: the spec has
+    /// no response to carry it.
     /// </summary>
     internal static void ApplyResponseExamples(
         List<TsResponseType> responses,
         IReadOnlyList<(string StatusKey, TsEndpointExample Example)> examples,
         string undeclaredStatusDiagnostic,
-        string endpointLabel
+        string endpointLabel,
+        string declareStatusHint
     )
     {
         if (examples.Count == 0)
@@ -484,11 +487,11 @@ public static class EndpointWalker
             );
             if (responseIndex < 0)
             {
-                Diagnostics.Warn(
-                    undeclaredStatusDiagnostic,
-                    $"ignoring response example for undeclared status {group.Key} on {endpointLabel}"
+                throw new RivetUserException(
+                    $"error {undeclaredStatusDiagnostic}: {endpointLabel} has a response example for status "
+                        + $"{group.Key}, which it does not declare, so the spec has nowhere to put it. "
+                        + $"To keep the example, {declareStatusHint}; otherwise fix or remove the example's status code."
                 );
-                continue;
             }
 
             var response = responses[responseIndex];
@@ -1316,7 +1319,7 @@ public static class EndpointWalker
 
         if (normalize)
         {
-            responses = ResponseStatusValidation.NormalizeIrKeepingFirst(
+            responses = ResponseStatusValidation.NormalizeIr(
                 responses,
                 Naming.ToCamelCase(method.Name)
             );

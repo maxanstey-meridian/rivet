@@ -3,7 +3,8 @@ using Rivet.Tool.Model;
 namespace Rivet.Tool.Analysis;
 
 /// <summary>
-/// Enforces authored-contract response invariants and normalizes external IR.
+/// Enforces authored-contract response invariants and normalizes external IR
+/// (controller metadata and <c>--from</c> contract JSON), refusing a repeated status in both.
 /// </summary>
 internal static class ResponseStatusValidation
 {
@@ -26,7 +27,7 @@ internal static class ResponseStatusValidation
         );
     }
 
-    internal static List<TsResponseType> NormalizeIrKeepingFirst(
+    internal static List<TsResponseType> NormalizeIr(
         IEnumerable<TsResponseType> responses,
         string endpointName
     )
@@ -36,19 +37,18 @@ internal static class ResponseStatusValidation
 
         foreach (var response in responses)
         {
-            if (seen.Add(response.EffectiveStatusKey))
+            if (!seen.Add(response.EffectiveStatusKey))
             {
-                normalized.Add(response);
-                continue;
+                // Keeping either declaration would silently drop the other's shape and metadata.
+                throw new RivetUserException(
+                    $"error {Diagnostics.DuplicateResponseStatusInIr}: endpoint '{endpointName}' declares response status "
+                        + $"{response.EffectiveStatusKey} more than once; a status carries a single response shape. "
+                        + "Remove the duplicate (often one declaration has the wrong status), or, if the status genuinely "
+                        + "returns different shapes, declare one union type ([RivetUnion] in C#) and declare it once"
+                );
             }
 
-            Diagnostics.Warn(
-                Diagnostics.DuplicateResponseStatusInIr,
-                $"endpoint '{endpointName}' declares response status {response.StatusCode} more than once — "
-                    + "a status carries a single response shape. If it genuinely returns different shapes, declare a "
-                    + "[RivetUnion] type and return that once; otherwise remove the duplicate (often one .Returns is mistyped). "
-                    + "Keeping the first declaration."
-            );
+            normalized.Add(response);
         }
 
         normalized.Sort(
@@ -65,7 +65,7 @@ internal static class ResponseStatusValidation
         TsType? returnType
     )
     {
-        var normalized = NormalizeIrKeepingFirst(responses, endpointName);
+        var normalized = NormalizeIr(responses, endpointName);
         // RIV1102 must run on every parse regardless of list state: authored
         // content always implies a non-empty list, so a post-early-return
         // placement would leave the guard inert for exactly its target cases.

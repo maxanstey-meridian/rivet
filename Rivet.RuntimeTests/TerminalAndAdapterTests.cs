@@ -733,17 +733,17 @@ public sealed class TerminalAndAdapterTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Resolver_configured_polymorphic_subtype_is_accepted(bool mvc)
+    public async Task Resolver_configured_polymorphism_is_refused(bool mvc)
     {
-        // BUG-11: polymorphism configured through the serializer's resolver, not attributes.
+        // The spec reads [JsonPolymorphic]; a resolver modifier would add a $type and members
+        // it never shows, so the host options are refused before anything is written.
         var result = Define.Get<Vehicle>("/vehicle").Success(new Car("v1", 4));
 
-        var response = await ExecuteAsync(result, mvc, services: RegisterCarPolymorphism);
-        var json = JsonDocument.Parse(response.Body).RootElement;
+        var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(result, mvc, services: RegisterCarPolymorphism)
+        );
 
-        Assert.Equal(200, response.StatusCode);
-        Assert.Equal("car", json.GetProperty("$type").GetString());
-        Assert.Equal(4, json.GetProperty("doors").GetInt32());
+        Assert.Contains("DefaultJsonTypeInfoResolver with modifiers", refusal.Message);
     }
 
     [Theory]
@@ -895,7 +895,7 @@ public sealed class TerminalAndAdapterTests
         Assert.Null(Assert.IsType<RivetActionResult>(writer).Value);
     }
 
-    private static Task<ResponseObservation> ExecuteAsync(
+    internal static Task<ResponseObservation> ExecuteAsync(
         RivetResult result,
         bool mvc,
         Action<HttpContext>? configure
@@ -912,7 +912,7 @@ public sealed class TerminalAndAdapterTests
                 }
         );
 
-    private static async Task<ResponseObservation> ExecuteAsync(
+    internal static async Task<ResponseObservation> ExecuteAsync(
         RivetResult result,
         bool mvc,
         Func<HttpContext, Task>? configure = null,
@@ -957,7 +957,12 @@ public sealed class TerminalAndAdapterTests
             context.Response.Headers.ETag.ToString(),
             context.Response.Headers.LastModified.ToString(),
             context.Response.Headers["X-Rivet-Test"].ToString(),
-            context.Response.Headers.SetCookie.ToString()
+            context.Response.Headers.SetCookie.ToString(),
+            context.Response.Headers.ToDictionary(
+                header => header.Key,
+                header => header.Value.ToString(),
+                StringComparer.OrdinalIgnoreCase
+            )
         );
     }
 
@@ -1013,7 +1018,7 @@ public sealed class TerminalAndAdapterTests
         );
     }
 
-    private sealed record ResponseObservation(
+    internal sealed record ResponseObservation(
         int StatusCode,
         byte[] Body,
         string? ContentType,
@@ -1024,15 +1029,16 @@ public sealed class TerminalAndAdapterTests
         string ETag,
         string LastModified,
         string CustomHeader,
-        string SetCookie
+        string SetCookie,
+        IReadOnlyDictionary<string, string> Headers
     );
 
-    private sealed class NonSeekableStream(byte[] content) : MemoryStream(content)
+    internal sealed class NonSeekableStream(byte[] content) : MemoryStream(content)
     {
         public override bool CanSeek => false;
     }
 
-    private sealed class TrackingStream(byte[] content) : MemoryStream(content)
+    internal sealed class TrackingStream(byte[] content) : MemoryStream(content)
     {
         public bool IsDisposed { get; private set; }
 
