@@ -17,18 +17,22 @@ public static class JsonContractReader
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         // Producers need not write "kind" first.
         AllowOutOfOrderMetadataProperties = true,
+        // A property the IR doesn't know is malformed contract JSON: ignoring it is how a
+        // retired shape (the old { isAnonymous, scheme } security) would silently drop what
+        // it carried. Required members are marked [JsonRequired], as the schema lists them.
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     internal sealed record RivetContract(
-        IReadOnlyList<TsTypeDefinition> Types,
-        IReadOnlyList<ContractEnum> Enums,
+        [property: JsonRequired] IReadOnlyList<TsTypeDefinition> Types,
+        [property: JsonRequired] IReadOnlyList<ContractEnum> Enums,
         IReadOnlyList<TsEndpointDefinition>? Endpoints = null
     );
 
     /// <summary>An enum declaration: string members in <c>values</c> or integer members in <c>intValues</c>.</summary>
     internal sealed record ContractEnum(
-        string Name,
+        [property: JsonRequired] string Name,
         IReadOnlyList<string>? Values = null,
         [property: JsonConverter(typeof(IntEnumValuesJsonConverter))]
             IReadOnlyList<string>? IntValues = null,
@@ -53,9 +57,28 @@ public static class JsonContractReader
                 JsonSerializer.Deserialize<RivetContract>(json, Options)
                 ?? throw new JsonException("Failed to deserialize contract JSON.");
         }
+        catch (JsonException exception)
+            when (exception.Path is not null && !exception.Message.Contains("Path: "))
+        {
+            // An unknown or missing member's message leaves out where it was; System.Text.Json
+            // only appends the location to the messages it words itself.
+            throw new JsonException(
+                $"{exception.Message} Path: {exception.Path} | LineNumber: {exception.LineNumber} | BytePositionInLine: {exception.BytePositionInLine}.",
+                exception.Path,
+                exception.LineNumber,
+                exception.BytePositionInLine,
+                exception
+            );
+        }
         catch (NotSupportedException exception)
         {
             // A TsType without "kind" can only bind to the abstract base.
+            throw new JsonException(exception.Message, exception);
+        }
+        catch (ArgumentException exception)
+        {
+            // A record constructor refusing a value (an example with both json and a
+            // componentExampleId) is malformed contract JSON, not a crash.
             throw new JsonException(exception.Message, exception);
         }
 

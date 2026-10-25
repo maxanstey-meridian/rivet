@@ -45,6 +45,7 @@ public static partial class OpenApiImporter
         var root = ParseJson(json);
         MergeEquivalentPathTemplates(root, warnings);
         DropExternalDiscriminatorMappings(root, warnings);
+        DropUnsatisfiableSecurity(root, options.SecurityScheme, warnings);
         var preservedFields = new List<OpenApiPreservedFieldProvenance>();
         UnrepresentedFieldReporter.Report(root, warnings, preservedFields);
 
@@ -573,6 +574,121 @@ public static partial class OpenApiImporter
     }
 
     /// <summary>
+    /// A security alternative naming a scheme the document never defines can't be satisfied
+    /// by anyone, so dropping it from the OR list changes who gets in not at all (Cloudflare's
+    /// <c>assets_jwt</c>). An operation left with no alternative can't be reached, and
+    /// importing it as <c>security: []</c> would read as "no credentials needed", so it is
+    /// dropped. So are the operations inheriting a document security with nothing left, unless
+    /// <c>--security</c> names a scheme for operations that declare none. This runs before
+    /// anything else reads the document, so nothing is recorded for an operation that's gone.
+    /// </summary>
+    private static void DropUnsatisfiableSecurity(
+        JsonObject root,
+        string? securitySchemeOverride,
+        List<string> warnings
+    )
+    {
+        var definitions = IsSwagger2(root)
+            ? root["securityDefinitions"]
+            : root["components"]?["securitySchemes"];
+        var defined = definitions is JsonObject schemes
+            ? schemes.Select(entry => entry.Key).ToHashSet(StringComparer.Ordinal)
+            : [];
+
+        var inheritedUnsatisfiable =
+            !PruneSecurity(root, "the document", defined, warnings)
+            && securitySchemeOverride is null;
+        if (root["paths"] is not JsonObject paths)
+        {
+            return;
+        }
+        foreach (var (route, node) in paths.ToList())
+        {
+            if (node is not JsonObject pathItem)
+            {
+                continue;
+            }
+            var dropped = false;
+            foreach (var method in OperationMethods)
+            {
+                if (pathItem[method] is not JsonObject operation)
+                {
+                    continue;
+                }
+                var operationName = $"{method.ToUpperInvariant()} {route}";
+                var declaresSecurity = operation.ContainsKey("security");
+                var reachable = declaresSecurity
+                    ? PruneSecurity(operation, operationName, defined, warnings)
+                    : !inheritedUnsatisfiable;
+                if (reachable)
+                {
+                    continue;
+                }
+                pathItem.Remove(method);
+                dropped = true;
+                warnings.Add(
+                    Diagnostics.Prefix(
+                        Diagnostics.ImportUnsatisfiableSecurity,
+                        $"Operation dropped: {operationName} — every security alternative it "
+                            + (declaresSecurity ? "declares" : "inherits from the document")
+                            + " names a scheme the document never defines, so no caller can satisfy it."
+                    )
+                );
+            }
+            if (dropped && !OperationMethods.Any(pathItem.ContainsKey))
+            {
+                paths.Remove(route);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes <paramref name="owner"/>'s security alternatives that name an undefined scheme.
+    /// False when alternatives were declared and none survives; the emptied list is removed
+    /// too, so nothing downstream reads it as "no credentials needed".
+    /// </summary>
+    private static bool PruneSecurity(
+        JsonObject owner,
+        string ownerName,
+        IReadOnlySet<string> defined,
+        List<string> warnings
+    )
+    {
+        if (owner["security"] is not JsonArray { Count: > 0 } alternatives)
+        {
+            return true;
+        }
+        foreach (var alternative in alternatives.ToList())
+        {
+            var undefined = alternative is JsonObject requirement
+                ? requirement
+                    .Select(entry => entry.Key)
+                    .Where(name => !defined.Contains(name))
+                    .ToList()
+                : [];
+            if (undefined.Count == 0)
+            {
+                continue;
+            }
+            alternatives.Remove(alternative);
+            warnings.Add(
+                Diagnostics.Prefix(
+                    Diagnostics.ImportUnsatisfiableSecurity,
+                    $"Security alternative dropped on {ownerName}: it names security scheme "
+                        + string.Join(", ", undefined.Select(name => $"'{name}'"))
+                        + ", which the document never defines, so no caller can satisfy it."
+                )
+            );
+        }
+        if (alternatives.Count > 0)
+        {
+            return true;
+        }
+        owner.Remove("security");
+        return false;
+    }
+
+    /// <summary>
     /// An enum is a set of allowed values, so a repeated member adds nothing; it would only
     /// give the C# enum two members with one wire value (vercel repeats 'preview').
     /// The first occurrence keeps its position.
@@ -684,7 +800,9 @@ public static partial class OpenApiImporter
                 entry => MapSecurityScheme(entry.Key, entry.Value),
                 StringComparer.Ordinal
             ),
-            doc.Security is { } security ? ContractBuilder.MapSecurityRequirements(security) : null
+            doc.Security is { } security
+                ? ContractBuilder.MapSecurityRequirements(security, "the document")
+                : null
         );
 
     private static SecuritySchemeDefinition MapSecurityScheme(

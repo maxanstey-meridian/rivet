@@ -376,8 +376,8 @@ public sealed class OpenApiEmitterTests
                 "name": "UpdateRoleInput",
                 "typeParameters": [],
                 "properties": [
-                  { "name": "id", "type": { "kind": "primitive", "type": "string" } },
-                  { "name": "role", "type": { "kind": "primitive", "type": "string" } }
+                  { "name": "id", "type": { "kind": "primitive", "type": "string" }, "optional": false },
+                  { "name": "role", "type": { "kind": "primitive", "type": "string" }, "optional": false }
                 ]
               }],
               "enums": [],

@@ -744,15 +744,15 @@ public sealed class OpenApiEmitter
                     break;
 
                 // OpenAPI 3.x: Accept/Content-Type/Authorization are not legal header
-                // parameters (they belong to content negotiation / securitySchemes) —
-                // diagnose and skip rather than emit an invalid spec.
+                // parameters (they belong to content negotiation / securitySchemes). Dropping
+                // one would ship a spec whose clients never send what the handler reads.
                 case ParamSource.Header when IsReservedHeaderName(param.Name):
-                    Diagnostics.Warn(
-                        Diagnostics.ReservedHeaderParameterSkipped,
-                        $"header param '{param.Name}' on endpoint '{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI "
-                            + "(Accept/Content-Type/Authorization are described by content/securitySchemes) — omitted from the spec"
+                    throw new RivetUserException(
+                        $"error {Diagnostics.ReservedHeaderParameter}: header param '{param.Name}' on endpoint "
+                            + $"'{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI — Accept and Content-Type "
+                            + "are described by media types and Authorization by a security scheme "
+                            + "(.Secure(...) or --security); use a custom header name for anything else"
                     );
-                    break;
 
                 default:
                     parameters.Add(

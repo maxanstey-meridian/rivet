@@ -435,7 +435,7 @@ public sealed class JsonContractReaderTests
             }
             """;
 
-        var error = Assert.Throws<ArgumentException>(() => JsonContractReader.Read(json));
+        var error = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
 
         Assert.Contains("Exactly one of json or componentExampleId", error.Message);
     }
@@ -470,7 +470,7 @@ public sealed class JsonContractReaderTests
             }
             """;
 
-        var error = Assert.Throws<ArgumentException>(() => JsonContractReader.Read(json));
+        var error = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
 
         Assert.Contains("Exactly one of json or componentExampleId", error.Message);
     }
@@ -1445,6 +1445,48 @@ public sealed class JsonContractReaderTests
         Assert.Contains("endpoint 'things.get' (GET /api/things)", stderr);
         Assert.Contains("security scheme 'oauth' more than once", stderr);
         Assert.DoesNotContain("ArgumentException", stderr);
+        Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
+    }
+
+    /// <summary>
+    /// A property the reader doesn't know is refused with its path, not skipped. The retired
+    /// security shapes used to read as "inherit the document's security", dropping what
+    /// they said.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }], "security": { "isAnonymous": false, "scheme": "admin" } }]""",
+        "",
+        "$.endpoints[0].security.isAnonymous"
+    )]
+    [InlineData(
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }], "securityRequirements": { "alternatives": [] } }]""",
+        "",
+        "$.endpoints[0].securityRequirements"
+    )]
+    [InlineData("[]", """, "brands": {}""", "$.brands")]
+    public void Cli_Refuses_Unknown_Properties_With_Their_Path(
+        string endpoints,
+        string extraTopLevel,
+        string path
+    )
+    {
+        using var workDirectory = new TempDir();
+        var contractPath = Path.Combine(workDirectory.FullName, "contract.json");
+        File.WriteAllText(
+            contractPath,
+            $$"""{ "types": [], "enums": [], "endpoints": {{endpoints}}{{extraTopLevel}} }"""
+        );
+        var outputDirectory = Path.Combine(workDirectory.FullName, "out");
+
+        var (exitCode, _, stderr) = CliRunner.RunCli(
+            workDirectory.FullName,
+            ["--from", contractPath, "--output", outputDirectory, "--security", "admin=bearer"]
+        );
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("error: invalid contract JSON", stderr);
+        Assert.Contains($"Path: {path}", stderr);
         Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
     }
 

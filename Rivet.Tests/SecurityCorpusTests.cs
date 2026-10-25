@@ -243,46 +243,262 @@ public sealed class SecurityCorpusTests
         }
     }
 
+    // An alternative naming a scheme the document never defines can't be satisfied, so
+    // dropping it changes nothing; an operation left with none is dropped rather than
+    // imported as open.
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void Emission_Rejects_Unresolved_Root_And_Operation_Requirement_Names(bool atRoot)
+    [InlineData("[{ \"missing\": [] }, { \"auth\": [] }]", "[{\"auth\":[]}]")]
+    [InlineData(
+        "[{ \"missing\": [], \"auth\": [] }, { \"auth\": [\"read\"] }]",
+        "[{\"auth\":[\"read\"]}]"
+    )]
+    [InlineData("[{ \"missing\": [] }]", null)]
+    [InlineData("[{ \"missing\": [], \"auth\": [] }]", null)]
+    public void Import_Drops_Security_Alternatives_Naming_Undefined_Schemes(
+        string operationSecurity,
+        string? expected
+    )
     {
-        var rootSecurity = atRoot ? "\"security\": [{ \"missing\": [] }]," : "";
-        var operationSecurity = atRoot ? "" : "\"security\": [{ \"missing\": [] }],";
         var spec = $$"""
             {
               "openapi": "3.1.0",
               "info": { "title": "Security", "version": "1.0.0" },
-              {{rootSecurity}}
               "paths": {
                 "/widgets": {
                   "get": {
-                    {{operationSecurity}}
+                    "security": {{operationSecurity}},
                     "responses": { "204": { "description": "ok" } }
                   }
+                },
+                "/health": {
+                  "get": { "security": [], "responses": { "204": { "description": "ok" } } }
+                }
+              },
+              "components": {
+                "securitySchemes": { "auth": { "type": "oauth2", "flows": { "clientCredentials": { "tokenUrl": "https://example.com/token", "scopes": { "read": "Read" } } } } }
+              }
+            }
+            """;
+
+        var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
+
+        Assert.Contains(
+            imported.Warnings,
+            warning =>
+                warning.Contains("RIV3030")
+                && warning.Contains("Security alternative dropped on GET /widgets")
+                && warning.Contains("'missing'")
+        );
+        using var emitted = Emit(imported);
+        var paths = JsonNode.Parse(emitted.RootElement.GetRawText())!["paths"]!;
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse("[]"), paths["/health"]!["get"]!["security"])
+        );
+        if (expected is null)
+        {
+            Assert.Contains(
+                imported.Warnings,
+                warning => warning.Contains("Operation dropped: GET /widgets")
+            );
+            Assert.Null(paths["/widgets"]);
+        }
+        else
+        {
+            Assert.True(
+                JsonNode.DeepEquals(
+                    JsonNode.Parse(expected),
+                    paths["/widgets"]!["get"]!["security"]
+                )
+            );
+        }
+    }
+
+    [Fact]
+    public void Import_Drops_Operations_Inheriting_Unsatisfiable_Document_Security()
+    {
+        var spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Security", "version": "1.0.0" },
+              "security": [{ "missing": [] }],
+              "paths": {
+                "/widgets": { "get": { "responses": { "204": { "description": "ok" } } } },
+                "/gadgets": {
+                  "get": { "security": [{ "auth": [] }], "responses": { "204": { "description": "ok" } } }
+                }
+              },
+              "components": { "securitySchemes": { "auth": { "type": "http", "scheme": "bearer" } } }
+            }
+            """;
+
+        var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
+
+        Assert.Contains(
+            imported.Warnings,
+            warning => warning.Contains("RIV3030") && warning.Contains("on the document")
+        );
+        Assert.Contains(
+            imported.Warnings,
+            warning =>
+                warning.Contains("RIV3030")
+                && warning.Contains("Operation dropped: GET /widgets")
+                && warning.Contains("inherits from the document")
+        );
+        using var emitted = Emit(imported);
+        var root = JsonNode.Parse(emitted.RootElement.GetRawText())!;
+        Assert.Null(root["paths"]!["/widgets"]);
+        Assert.Null(root["security"]);
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse("[{\"auth\":[]}]"),
+                root["paths"]!["/gadgets"]!["get"]!["security"]
+            )
+        );
+    }
+
+    // The drop happens before anything reads the document, so a dropped operation's
+    // preserved fields (externalDocs, a multipart encoding, a vendor extension) leave nothing
+    // behind for emission to attach.
+    [Fact]
+    public void Dropped_Operation_Leaves_No_Preserved_Fields_Behind()
+    {
+        var spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Security", "version": "1.0.0" },
+              "paths": {
+                "/uploads": {
+                  "summary": "Uploads",
+                  "post": {
+                    "security": [{ "missing": [], "other": [] }],
+                    "externalDocs": { "url": "https://example.com/docs" },
+                    "x-vendor": { "kept": false },
+                    "requestBody": {
+                      "content": {
+                        "multipart/form-data": {
+                          "schema": { "type": "object", "properties": { "file": { "type": "string", "format": "binary" } } },
+                          "encoding": { "file": { "contentType": "application/octet-stream" } }
+                        }
+                      }
+                    },
+                    "responses": { "204": { "description": "ok" } }
+                  }
+                },
+                "/health": { "get": { "security": [], "responses": { "204": { "description": "ok" } } } }
+              }
+            }
+            """;
+
+        var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
+
+        Assert.Contains(
+            imported.Warnings,
+            warning => warning.Contains("RIV3030") && warning.Contains("'missing', 'other'")
+        );
+        Assert.Contains(
+            imported.Warnings,
+            warning =>
+                warning.Contains("Operation dropped: POST /uploads")
+                && warning.Contains("it declares")
+        );
+        using var emitted = Emit(imported);
+        var paths = JsonNode.Parse(emitted.RootElement.GetRawText())!["paths"]!;
+        Assert.Null(paths["/uploads"]);
+        Assert.NotNull(paths["/health"]);
+    }
+
+    // --security names a scheme for operations that declare none, so they don't inherit the
+    // document's unsatisfiable security.
+    [Fact]
+    public void Import_Security_Option_Keeps_Operations_Whose_Document_Security_Is_Unsatisfiable()
+    {
+        var spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Security", "version": "1.0.0" },
+              "security": [{ "missing": [] }],
+              "paths": {
+                "/widgets": { "get": { "tags": ["Widgets"], "responses": { "204": { "description": "ok" } } } }
+              }
+            }
+            """;
+
+        var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated", "auth"));
+
+        Assert.DoesNotContain(imported.Warnings, warning => warning.Contains("Operation dropped"));
+        Assert.Contains(
+            ".Secure(\"auth\")",
+            CompilationHelper.FindFile(imported, "WidgetsContract.cs")
+        );
+    }
+
+    [Fact]
+    public void Partly_Satisfiable_Document_Security_Keeps_Its_Defined_Alternatives()
+    {
+        var spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Security", "version": "1.0.0" },
+              "security": [{ "missing": [] }, { "auth": [] }],
+              "paths": {
+                "/widgets": { "get": { "responses": { "204": { "description": "ok" } } } }
+              },
+              "components": { "securitySchemes": { "auth": { "type": "http", "scheme": "bearer" } } }
+            }
+            """;
+
+        var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
+
+        Assert.Contains(
+            imported.Warnings,
+            warning =>
+                warning.Contains("Security alternative dropped on the document")
+                && warning.Contains("'missing'")
+        );
+        using var emitted = Emit(imported);
+        var root = JsonNode.Parse(emitted.RootElement.GetRawText())!;
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("[{\"auth\":[]}]"), root["security"]));
+        Assert.NotNull(root["paths"]!["/widgets"]);
+    }
+
+    [Fact]
+    public void Swagger2_Security_Reads_Defined_Schemes_From_SecurityDefinitions()
+    {
+        var spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "Security", "version": "1.0.0" },
+              "securityDefinitions": { "auth": { "type": "apiKey", "name": "X-Key", "in": "header" } },
+              "paths": {
+                "/widgets": {
+                  "get": { "security": [{ "missing": [] }, { "auth": [] }], "responses": { "204": { "description": "ok" } } }
+                },
+                "/gadgets": {
+                  "get": { "security": [{ "missing": [] }], "responses": { "204": { "description": "ok" } } }
                 }
               }
             }
             """;
 
         var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var security = SecurityMetadataWalker.Walk(compilation);
 
-        var exception = Assert.Throws<RivetUserException>(() =>
-            OpenApiEmitter.Emit(
-                endpoints,
-                walker.Definitions,
-                walker.Brands,
-                walker.Enums,
-                security
+        Assert.Contains(
+            imported.Warnings,
+            warning => warning.Contains("Security alternative dropped on GET /widgets")
+        );
+        Assert.Contains(
+            imported.Warnings,
+            warning => warning.Contains("Operation dropped: GET /gadgets")
+        );
+        using var emitted = Emit(imported);
+        var paths = JsonNode.Parse(emitted.RootElement.GetRawText())!["paths"]!;
+        Assert.Null(paths["/gadgets"]);
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse("[{\"auth\":[]}]"),
+                paths["/widgets"]!["get"]!["security"]
             )
         );
-        Assert.Contains("RIV2002", exception.Message);
-        Assert.Contains("security scheme 'missing'", exception.Message);
     }
 
     [Fact]
@@ -339,6 +555,11 @@ public sealed class SecurityCorpusTests
     {
         var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
         Assert.Empty(imported.Warnings);
+        return Emit(imported);
+    }
+
+    private static System.Text.Json.JsonDocument Emit(ImportResult imported)
+    {
         var compilation = CompilationHelper.CompileImportResult(imported);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);

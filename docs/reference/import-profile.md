@@ -226,7 +226,6 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3009` | `unresolved-schema` | Schema could not be resolved to a C# type → `JsonElement`. |
 | `RIV3010` | `unsupported-schema-type` | Unhandled JSON Schema `type` → `JsonElement`. |
 | `RIV3011` | `array-missing-items` | Array schema without `items` → `List<JsonElement>`. |
-| `RIV3012` | `enum-constraint-dropped` | Enum that can't be a C# enum (single-value, mixed, out-of-range) degrades to a primitive. |
 | `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — dispatch semantics dropped. |
 | `RIV3001`, `RIV3006`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
 | `RIV3014` | `dictionary-key-dropped` | A `propertyNames` schema has no C# dictionary-key representation; keys degrade to `string`. |
@@ -311,7 +310,7 @@ Rivet gap with a known shape, waiting on a design decision rather than a shrug:
   importer inlines those and the reference identity is gone, which is nearly all
   of its ~10,000 findings.
 - **Cloudflare**: the largest of them, and the longest list: a security
-  requirement that names an undefined scheme (`assets_jwt`, `RIV2002` on emit),
-  207 enums that cannot become a C# enum (`RIV3012`), 15 unusable
+  requirement that names an undefined scheme (`assets_jwt`, dropped on import
+  with `RIV3030`), 15 unusable
   discriminators (`RIV3005`), 7 scalar compositions (`RIV3015`), 5 identity-only
   fallbacks (`RIV3010`), and 25 unreviewed extension families.

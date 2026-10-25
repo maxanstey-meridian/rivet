@@ -672,7 +672,7 @@ internal sealed class SchemaMapper
     )
     {
         scalar = null!;
-        if (schema.Type is not { } declared)
+        if ((schema.Type ?? LiteralEnumType(schema)) is not { } declared)
         {
             return false;
         }
@@ -719,7 +719,7 @@ internal sealed class SchemaMapper
         {
             WarnUnsupportedNamedScalar(
                 componentId,
-                "const or schema composition; only primitive leaves and flat string/Int32 enums are supported"
+                "const or schema composition; only primitive leaves and flat enums are supported"
             );
             return false;
         }
@@ -734,31 +734,18 @@ internal sealed class SchemaMapper
         }
 
         var metadata = BuildScalarMetadata(schema, declared.HasFlag(JsonSchemaType.Null));
-        var isEnum = false;
-        if (schema.Enum is { Count: > 0 } values)
+        var isEnum = SchemaClassifier.IsStringEnum(schema) || SchemaClassifier.IsIntEnum(schema);
+        if (
+            schema.Enum is { Count: > 0 } values
+            && !isEnum
+            && !values.All(value => IsEnumValueOfType(value, nonNull))
+        )
         {
-            if (SchemaClassifier.IsStringEnum(schema) || SchemaClassifier.IsIntEnum(schema))
-            {
-                isEnum = true;
-            }
-            else if (values.All(value => IsEnumValueOfType(value, nonNull)))
-            {
-                // No C# enum can hold these members, so the primitive carries them as metadata.
-                metadata = metadata with
-                {
-                    Enum = new JsonArray([
-                        .. values.Select(value => value?.DeepClone()),
-                    ]).ToJsonString(),
-                };
-            }
-            else
-            {
-                WarnUnsupportedNamedScalar(
-                    componentId,
-                    "a heterogeneous or unsupported enum; only flat string and Int32 integer enums are supported"
-                );
-                return false;
-            }
+            WarnUnsupportedNamedScalar(
+                componentId,
+                "an enum whose values contradict its declared type"
+            );
+            return false;
         }
 
         scalar = new GeneratedScalarSchema(
@@ -852,7 +839,8 @@ internal sealed class SchemaMapper
             || schema.OneOf is { Count: > 0 }
             || schema.AnyOf is { Count: > 0 }
             || schema.Const is not null
-            || schema.Enum is { Count: > 0 }
+            || SchemaClassifier.IsStringEnum(schema)
+            || SchemaClassifier.IsIntEnum(schema)
         )
         {
             return false;
@@ -902,14 +890,61 @@ internal sealed class SchemaMapper
                 ),
             Format: schema.Format,
             IsFormatSpecified: schema.Format is not null
-                || (schema.Type & ~JsonSchemaType.Null)
+                || ((schema.Type ?? LiteralEnumType(schema)) & ~JsonSchemaType.Null)
                     is JsonSchemaType.Integer
                         or JsonSchemaType.Number,
             Required: schema.Required is { Count: > 0 } ? schema.Required.ToList() : null,
-            EnumListsNull: schema.Extensions?.ContainsKey(
-                OpenApiImporter.ImportedEnumNullMemberExtension
-            ) == true
+            Enum: LiteralEnumJson(schema),
+            EnumListsNull: EnumListsNull(schema)
         );
+
+    private static bool EnumListsNull(IOpenApiSchema schema) =>
+        schema.Extensions?.ContainsKey(OpenApiImporter.ImportedEnumNullMemberExtension) == true;
+
+    private static string? LiteralEnumJson(IOpenApiSchema schema)
+    {
+        if (IsLiteralEnum(schema))
+        {
+            return new JsonArray([
+                .. schema.Enum!.Select(value => value?.DeepClone()),
+            ]).ToJsonString();
+        }
+        // The reader drops null members (EnumListsNull puts them back on emit), so a
+        // null-only enum arrives empty and only the marker says it was there.
+        return schema.Enum is not { Count: > 0 } && EnumListsNull(schema) ? "[null]" : null;
+    }
+
+    /// <summary>
+    /// An enum no generated C# enum carries (booleans, numbers outside the integer enums,
+    /// arrays, objects, null). The C# type follows the values and the values themselves
+    /// ride beside it as generated metadata.
+    /// </summary>
+    private static bool IsLiteralEnum(IOpenApiSchema schema) =>
+        schema.Enum is { Count: > 0 }
+        && !SchemaClassifier.IsStringEnum(schema)
+        && !SchemaClassifier.IsIntEnum(schema);
+
+    /// <summary>
+    /// The JSON type an untyped literal enum's values share: boolean, integer or number.
+    /// Null for arrays, objects, null and mixed values, which only JsonElement holds.
+    /// </summary>
+    private static JsonSchemaType? LiteralEnumType(IOpenApiSchema schema)
+    {
+        if (!IsLiteralEnum(schema))
+        {
+            return null;
+        }
+        JsonSchemaType[] candidates =
+        [
+            JsonSchemaType.Boolean,
+            JsonSchemaType.Integer,
+            JsonSchemaType.Number,
+        ];
+        return candidates
+            .Where(type => schema.Enum!.All(value => IsEnumValueOfType(value, type)))
+            .Cast<JsonSchemaType?>()
+            .FirstOrDefault();
+    }
 
     private static bool HasExplicitNullBranch(IOpenApiSchema schema) =>
         new[] { schema.OneOf, schema.AnyOf }.Any(branches =>
@@ -978,6 +1013,7 @@ internal sealed class SchemaMapper
         || metadata.Required is { Count: > 0 }
         || metadata.Constraints is { HasAny: true }
         || metadata.Xml is not null
+        || metadata.Enum is not null
         || metadata.EnumListsNull;
 
     private void WarnUnsupportedNamedScalar(string componentId, string reason)
@@ -1052,6 +1088,7 @@ internal sealed class SchemaMapper
             || (
                 !TryGetScalarAliasTarget(componentId, _componentSchemas, out _, out _)
                 && !TryMapNamedArray("_", componentId, target, out _)
+                && !TryMapNamedUntyped("_", componentId, target, out _)
             )
         )
         {
@@ -1784,8 +1821,9 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapEnum);
             }
 
-            WarnEnumConstraintDropped(schema, context, "string");
-            return "string";
+            return LiteralEnumType(schema) is { } inferred
+                ? ResolveSingleType(inferred, schema, context)
+                : QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
         }
 
         // Inline object with properties but no type field (JSON Schema: properties implies object)
@@ -1892,13 +1930,7 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapIntEnum);
             }
 
-            var integerType = SchemaClassifier.ResolveIntegerType(schema);
-            if (schema.Enum is { Count: > 0 })
-            {
-                WarnEnumConstraintDropped(schema, context, integerType);
-            }
-
-            return integerType;
+            return SchemaClassifier.ResolveIntegerType(schema);
         }
 
         if (type.HasFlag(JsonSchemaType.Number))
@@ -1931,27 +1963,6 @@ internal sealed class SchemaMapper
     {
         _ctx.Warnings.Add(Diagnostics.Prefix(diagnosticId, $"{reason} — mapped to 'JsonElement'."));
         return QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
-    }
-
-    /// <summary>
-    /// Named diagnostic: an enum constraint that cannot be represented as a C# enum
-    /// (single value, mixed/float values, out-of-int32-range values) degrades to a primitive.
-    /// Never silent — the values are dropped from the generated contract.
-    /// </summary>
-    private void WarnEnumConstraintDropped(
-        IOpenApiSchema schema,
-        string? context,
-        string degradedTo
-    )
-    {
-        var values = string.Join(", ", schema.Enum!.Select(v => v?.ToJsonString() ?? "null"));
-        var where = context is not null ? $" at '{context}'" : "";
-        _ctx.Warnings.Add(
-            Diagnostics.Prefix(
-                Diagnostics.ImportEnumConstraintDropped,
-                $"Enum constraint dropped{where}: values [{values}] degraded to '{degradedTo}'."
-            )
-        );
     }
 
     private string ResolveArrayType(IOpenApiSchema schema, string? context)

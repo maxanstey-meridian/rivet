@@ -652,6 +652,33 @@ public sealed class RoundTripDiffTests
     }
 
     [Theory]
+    [InlineData("[true]", "boolean", 0)]
+    [InlineData("[0.5, 1]", "number", 0)]
+    [InlineData("[[]]", "array", 0)]
+    [InlineData("[true]", "string", 1)]
+    [InlineData("[true, \"yes\"]", "boolean", 1)]
+    public void Untyped_Enum_Has_The_Type_Its_Members_Share(
+        string members,
+        string reemittedType,
+        int typeFindings
+    )
+    {
+        // The importer types `{enum: [true]}` as a C# bool, which emits `type: boolean`.
+        var original = Fixture.Json("roundtrip-probe.json");
+        original["components"]!["schemas"]!["Thing"]!["properties"]!["flag"] = new JsonObject
+        {
+            ["enum"] = JsonNode.Parse(members),
+        };
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["flag"]!["type"] =
+            reemittedType;
+
+        var result = RoundTripDiff.Run(original, reemitted);
+
+        Assert.Equal(typeFindings, FindingCount(result.SchemaFindings, "schema-type"));
+    }
+
+    [Theory]
     [InlineData("array-item", "schema-type")]
     [InlineData("array-constraint", "schema-constraints")]
     [InlineData("additional-properties", "schema-type")]

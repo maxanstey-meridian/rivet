@@ -259,7 +259,11 @@ internal static class ContractBuilder
             successStatusKey,
             successResponseDescription,
             errorResponses,
-            ResolveSecurity(operation, globalSecurityScheme),
+            ResolveSecurity(
+                operation,
+                $"{httpMethod.ToUpperInvariant()} {route}",
+                globalSecurityScheme
+            ),
             unsupported,
             fileContentType,
             isFormEncoded,
@@ -1879,24 +1883,33 @@ internal static class ContractBuilder
     /// </summary>
     private static SecurityRequirements? ResolveSecurity(
         OpenApiOperation operation,
+        string operationName,
         string? globalSecurityScheme
     ) =>
-        operation.Security is { } requirements ? MapSecurityRequirements(requirements)
+        operation.Security is { } requirements
+            ? MapSecurityRequirements(requirements, operationName)
         : globalSecurityScheme is null ? null
         : new SecurityRequirements([
             new SecurityRequirement([new SecurityRequirementScheme(globalSecurityScheme, [])]),
         ]);
 
+    /// <summary>
+    /// Every scheme named here is defined: <see cref="OpenApiImporter"/> drops alternatives
+    /// naming an undefined one before the document is read.
+    /// </summary>
     internal static SecurityRequirements MapSecurityRequirements(
-        IEnumerable<OpenApiSecurityRequirement> requirements
+        IEnumerable<OpenApiSecurityRequirement> requirements,
+        string owner
     ) =>
         new(
             requirements
                 .Select(requirement => new SecurityRequirement(
                     requirement
-                        .Where(entry => entry.Key.Reference?.Id is not null)
                         .Select(entry => new SecurityRequirementScheme(
-                            entry.Key.Reference!.Id!,
+                            entry.Key.Reference?.Id
+                                ?? throw OpenApiImporter.InvalidSpec(
+                                    $"a security requirement on {owner} names no security scheme."
+                                ),
                             entry.Value.ToList()
                         ))
                         .ToList()

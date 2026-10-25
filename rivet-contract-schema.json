@@ -235,7 +235,7 @@
         "format": { "type": "string" },
         "isFormatSpecified": { "type": "boolean" },
         "required": { "type": "array", "items": { "type": "string" } },
-        "enum": { "type": "string", "description": "A named scalar's enum the C# type cannot spell (booleans, non-Int32 numbers), as a JSON array." },
+        "enum": { "type": "string", "description": "An enum the C# type cannot spell (booleans, numbers, arrays, objects, null), as a JSON array." },
         "enumListsNull": { "type": "boolean" }
       },
       "additionalProperties": false
@@ -479,7 +479,7 @@
                     "allowedValues": { "type": "array", "items": { "type": "string" } },
                     "description": { "type": ["string", "null"] }
                   },
-                  "required": ["name", "defaultValue", "allowedValues", "description"],
+                  "required": ["name", "defaultValue", "allowedValues"],
                   "additionalProperties": false
                 }
               }
@@ -496,7 +496,6 @@
             "contract": { "type": ["string", "null"] },
             "endpoint": { "type": ["string", "null"] }
           },
-          "required": ["contract", "endpoint"],
           "additionalProperties": false
         },
         "parameterComponentReferences": {

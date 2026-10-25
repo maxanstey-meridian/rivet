@@ -229,15 +229,6 @@ internal static class OpenApiProvenanceReader
         {
             return true;
         }
-        if (
-            schema.TryGetProperty("enum", out _)
-            && schema.TryGetProperty("type", out var enumType)
-            && enumType.ValueKind == JsonValueKind.String
-            && enumType.GetString() is "number" or "boolean"
-        )
-        {
-            return true;
-        }
         if (!schema.TryGetProperty("type", out var type))
         {
             if (

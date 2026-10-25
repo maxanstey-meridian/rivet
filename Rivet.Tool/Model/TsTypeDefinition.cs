@@ -64,9 +64,12 @@ public sealed record TsTypeDefinition
             ScalarMetadata: ScalarMetadata
         ) { }
 
-    public string Name { get; }
+    // Required members need a setter System.Text.Json can see, even when the constructor binds them.
+    [JsonRequired, JsonInclude]
+    public string Name { get; private init; }
 
-    public IReadOnlyList<string> TypeParameters { get; }
+    [JsonRequired, JsonInclude]
+    public IReadOnlyList<string> TypeParameters { get; private init; }
 
     public IReadOnlyList<TsPropertyDefinition> Properties { get; }
 
@@ -88,7 +91,10 @@ public enum TsTypeProvenance
     Synthetic,
 }
 
-public sealed record TsTypeMetadata(string? ComponentId, TsTypeProvenance Provenance);
+public sealed record TsTypeMetadata(
+    string? ComponentId,
+    [property: JsonRequired] TsTypeProvenance Provenance
+);
 
 public sealed record TsScalarMetadata(
     string? Description = null,
@@ -110,7 +116,7 @@ public sealed record TsScalarMetadata(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool IsFormatSpecified = false,
     IReadOnlyList<string>? Required = null,
-    // A named scalar's enum the C# type cannot spell (booleans, non-Int32 numbers), as JSON.
+    // An enum the C# type cannot spell (booleans, numbers, arrays, objects, null), as JSON.
     string? Enum = null,
     // The authored enum lists null as a member (distinct from nullability itself).
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool EnumListsNull =
@@ -131,9 +137,9 @@ public sealed record TsSchemaXmlMetadata(
 /// A single property within a type definition.
 /// </summary>
 public sealed record TsPropertyDefinition(
-    string Name,
+    [property: JsonRequired] string Name,
     [property: JsonRequired] TsType Type,
-    [property: JsonPropertyName("optional")] bool IsOptional,
+    [property: JsonRequired, JsonPropertyName("optional")] bool IsOptional,
     [property:
         JsonPropertyName("deprecated"),
         JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)

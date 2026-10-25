@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rivet.Tool.Model;
 
 public sealed record OpenApiDocumentProvenance(
@@ -103,23 +105,23 @@ public sealed record OpenApiTagProvenance(
 public sealed record OpenApiExternalDocsProvenance(string Url, string? Description = null);
 
 public sealed record OpenApiServerProvenance(
-    string Url,
+    [property: JsonRequired] string Url,
     string? Description,
-    IReadOnlyList<OpenApiServerVariableProvenance> Variables
+    [property: JsonRequired] IReadOnlyList<OpenApiServerVariableProvenance> Variables
 );
 
 public sealed record OpenApiServerVariableProvenance(
-    string Name,
-    string DefaultValue,
-    IReadOnlyList<string> AllowedValues,
+    [property: JsonRequired] string Name,
+    [property: JsonRequired] string DefaultValue,
+    [property: JsonRequired] IReadOnlyList<string> AllowedValues,
     string? Description
 );
 
 public sealed record OpenApiOperationProvenance(
-    bool OperationIdPresent,
+    [property: JsonRequired] bool OperationIdPresent,
     string? OperationId,
-    IReadOnlyList<string> Tags,
-    bool Deprecated,
+    [property: JsonRequired] IReadOnlyList<string> Tags,
+    [property: JsonRequired] bool Deprecated,
     IReadOnlyList<OpenApiServerProvenance>? ServerOverride,
     string? RequestBodyDescription,
     OpenApiRivetIdentityProvenance? RivetIdentity,
@@ -131,33 +133,43 @@ public sealed record OpenApiOperationProvenance(
 );
 
 public sealed record OpenApiOperationSchemaProvenance(
-    IReadOnlyList<OpenApiParameterSchemaProvenance> Parameters,
-    IReadOnlyList<OpenApiRequestSchemaProvenance> Requests,
-    IReadOnlyList<OpenApiResponseSchemaProvenance> Responses
+    [property: JsonRequired] IReadOnlyList<OpenApiParameterSchemaProvenance> Parameters,
+    [property: JsonRequired] IReadOnlyList<OpenApiRequestSchemaProvenance> Requests,
+    [property: JsonRequired] IReadOnlyList<OpenApiResponseSchemaProvenance> Responses
 );
 
-public sealed record OpenApiParameterSchemaProvenance(string Name, string Location, string Json);
+public sealed record OpenApiParameterSchemaProvenance(
+    [property: JsonRequired] string Name,
+    [property: JsonRequired] string Location,
+    [property: JsonRequired] string Json
+);
 
-public sealed record OpenApiRequestSchemaProvenance(string MediaType, string Json);
+public sealed record OpenApiRequestSchemaProvenance(
+    [property: JsonRequired] string MediaType,
+    [property: JsonRequired] string Json
+);
 
 public sealed record OpenApiResponseSchemaProvenance(
-    string StatusKey,
-    string MediaType,
-    string Json
+    [property: JsonRequired] string StatusKey,
+    [property: JsonRequired] string MediaType,
+    [property: JsonRequired] string Json
 );
 
 public sealed record OpenApiParameterComponentReference(
-    string Name,
-    string Location,
-    string ComponentId
+    [property: JsonRequired] string Name,
+    [property: JsonRequired] string Location,
+    [property: JsonRequired] string ComponentId
 );
 
-public sealed record OpenApiResponseComponentReference(string StatusKey, string ComponentId);
+public sealed record OpenApiResponseComponentReference(
+    [property: JsonRequired] string StatusKey,
+    [property: JsonRequired] string ComponentId
+);
 
 public sealed record OpenApiResponseHeaderComponentReference(
-    string StatusKey,
-    string HeaderName,
-    string ComponentId
+    [property: JsonRequired] string StatusKey,
+    [property: JsonRequired] string HeaderName,
+    [property: JsonRequired] string ComponentId
 );
 
 public sealed record OpenApiRivetIdentityProvenance(string? Contract, string? Endpoint);

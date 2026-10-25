@@ -322,18 +322,19 @@ public sealed class HeaderSupportTests
         Assert.Equal("string", headerParam.GetProperty("schema").GetProperty("type").GetString());
     }
 
-    [Fact]
-    public void Emitter_Skips_Reserved_Header_Names_With_RIV2009()
+    [Theory]
+    [InlineData("Authorization")]
+    [InlineData("Accept")]
+    [InlineData("content-type")]
+    public void Emitter_Refuses_Reserved_Header_Names_With_RIV2009(string header)
     {
-        var source = """
+        var source = $$"""
             using Rivet;
 
             namespace Test;
 
             public sealed record ListInput(
-                [property: RivetHeader("Authorization")] string Auth,
-                [property: RivetHeader("Accept")] string Accept,
-                [property: RivetHeader("Content-Type")] string ContentType,
+                [property: RivetHeader("{{header}}")] string Reserved,
                 [property: RivetHeader("X-Fine")] string Fine);
 
             [RivetContract]
@@ -344,37 +345,12 @@ public sealed class HeaderSupportTests
             }
             """;
 
-        JsonDocument doc = null!;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-        {
-            doc = CompilationHelper.EmitOpenApi(source);
-        });
-
-        using (doc)
-        {
-            var parameters = doc
-                .RootElement.GetProperty("paths")
-                .GetProperty("/api/items")
-                .GetProperty("get")
-                .GetProperty("parameters");
-
-            var headerNames = parameters
-                .EnumerateArray()
-                .Where(p => p.GetProperty("in").GetString() == "header")
-                .Select(p => p.GetProperty("name").GetString())
-                .ToList();
-
-            // Per OpenAPI rules the three reserved names are not legal header params
-            Assert.Equal(["X-Fine"], headerNames);
-        }
-
-        Assert.Equal(
-            3,
-            System.Text.RegularExpressions.Regex.Matches(stderr, "warning RIV2009:").Count
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source).Dispose()
         );
-        Assert.Contains("'Authorization'", stderr);
-        Assert.Contains("'Accept'", stderr);
-        Assert.Contains("'Content-Type'", stderr);
+
+        Assert.Contains("error RIV2009:", exception.Message);
+        Assert.Contains($"'{header}'", exception.Message);
     }
 
     // ---------------------------------------------------------------

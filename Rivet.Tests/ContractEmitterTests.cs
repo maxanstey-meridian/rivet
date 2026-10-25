@@ -509,8 +509,11 @@ public sealed class ContractEmitterTests
     [Fact]
     public void Endpoint_Example_Properties_Are_Not_Publicly_Settable()
     {
-        Assert.Null(
-            typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.MediaType))!.SetMethod
+        // MediaType has a private init so the reader can enforce it as required.
+        Assert.False(
+            typeof(TsEndpointExample)
+                .GetProperty(nameof(TsEndpointExample.MediaType))!
+                .SetMethod!.IsPublic
         );
         Assert.Null(
             typeof(TsEndpointExample).GetProperty(nameof(TsEndpointExample.Json))!.SetMethod

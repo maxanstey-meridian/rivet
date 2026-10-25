@@ -577,6 +577,7 @@ public sealed class ResponseFidelityTests
                   "name": "deleteSession",
                   "httpMethod": "DELETE",
                   "routeTemplate": "/api/auth/session",
+                  "params": [],
                   "controllerName": "auth",
                   "responses": [
                     {

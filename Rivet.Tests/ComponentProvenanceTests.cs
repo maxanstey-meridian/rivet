@@ -634,6 +634,9 @@ public sealed class ComponentProvenanceTests
     [Theory]
     [InlineData("{ \"type\": \"boolean\", \"enum\": [false], \"title\": \"failure\" }")]
     [InlineData("{ \"type\": \"number\", \"enum\": [0.5, 1.5] }")]
+    [InlineData("{ \"enum\": [true] }")]
+    [InlineData("{ \"enum\": [[]] }")]
+    [InlineData("{ \"enum\": [null] }")]
     public void Named_scalar_enum_no_CSharp_enum_can_hold_keeps_its_members_and_its_refs(
         string schema
     )
@@ -687,6 +690,89 @@ public sealed class ComponentProvenanceTests
                 .GetProperty("$ref")
                 .GetString()
         );
+    }
+
+    [Theory]
+    [InlineData("{ \"type\": \"boolean\", \"enum\": [false] }", "bool")]
+    [InlineData("{ \"type\": \"number\", \"enum\": [1, 2.5] }", "double")]
+    [InlineData("{ \"type\": \"integer\", \"enum\": [-1, 18446744073709551615] }", "long")]
+    [InlineData("{ \"enum\": [true] }", "bool")]
+    [InlineData("{ \"enum\": [0.5, 1.5] }", "double")]
+    [InlineData("{ \"enum\": [[]] }", "System.Text.Json.JsonElement")]
+    [InlineData(
+        "{ \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/Item\" }, \"enum\": [[]] }",
+        "List<Item>"
+    )]
+    [InlineData("{ \"enum\": [true, \"yes\"] }", "System.Text.Json.JsonElement")]
+    [InlineData("{ \"enum\": [null] }", "System.Text.Json.JsonElement")]
+    [InlineData(
+        "{ \"type\": \"object\", \"nullable\": true, \"enum\": [null] }",
+        "Dictionary<string, System.Text.Json.JsonElement>?"
+    )]
+    public void Literal_enum_property_keeps_its_type_and_its_values_without_a_preserved_component(
+        string schema,
+        string csharpType
+    )
+    {
+        // Cloudflare's `success: { type: boolean, enum: [false] }`: no C# enum holds these
+        // values, so the C# type follows them and the values ride in generated metadata.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: $$"""
+            "Item": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "Envelope": {
+                "type": "object",
+                "properties": { "value": {{schema}} },
+                "required": ["value"]
+            }
+            """,
+            paths: """
+            "/envelope": {
+                "get": {
+                    "operationId": "getEnvelope",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec, "LiteralEnum");
+        Assert.Empty(imported.Warnings);
+        Assert.Contains(
+            $" {csharpType} Value",
+            CompilationHelper.FindFile(imported, "Envelope.cs")
+        );
+        Assert.DoesNotContain(
+            imported.Files,
+            file => file.Content.Contains("RivetDocumentSchema(")
+        );
+
+        var expected = JsonNode.Parse(schema)!["enum"]!.ToJsonString();
+        foreach (
+            var emitted in new[]
+            {
+                ImportCompileWalkAndEmit(spec),
+                ImportCompileWalkContractJsonAndEmit(spec),
+            }
+        )
+        {
+            using (emitted)
+            {
+                var value = emitted
+                    .RootElement.GetProperty("components")
+                    .GetProperty("schemas")
+                    .GetProperty("Envelope")
+                    .GetProperty("properties")
+                    .GetProperty("value");
+                Assert.Equal(expected, JsonNode.Parse(value.GetRawText())!["enum"]!.ToJsonString());
+            }
+        }
     }
 
     [Fact]

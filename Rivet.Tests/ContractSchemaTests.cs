@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using Json.Schema;
 using Rivet.Tool.Emit;
@@ -8,6 +9,11 @@ namespace Rivet.Tests;
 
 public sealed class ContractSchemaTests
 {
+    private static readonly string _schemaPath = Path.Combine(
+        AppContext.BaseDirectory,
+        "../../../../rivet-contract-schema.json"
+    );
+
     private static readonly JsonSchema _schema = LoadSchema();
 
     private static readonly JsonSerializerOptions _modelOptions = new(JsonContractReader.Options)
@@ -15,15 +21,7 @@ public sealed class ContractSchemaTests
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
 
-    private static JsonSchema LoadSchema()
-    {
-        var schemaPath = Path.Combine(
-            AppContext.BaseDirectory,
-            "../../../../rivet-contract-schema.json"
-        );
-        var schemaJson = File.ReadAllText(schemaPath);
-        return JsonSchema.FromText(schemaJson);
-    }
+    private static JsonSchema LoadSchema() => JsonSchema.FromText(File.ReadAllText(_schemaPath));
 
     private static EvaluationResults Validate(string json)
     {
@@ -437,6 +435,122 @@ public sealed class ContractSchemaTests
             """{"types":[],"enums":[],"endpoints":[{"name":"foo","routeTemplate":"/","params":[],"controllerName":"C","responses":[]}]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
+    }
+
+    /// <summary>
+    /// The reader's [JsonRequired] members are the schema's required ones, so neither side can
+    /// let a producer leave out what the other insists on. A member the schema requires but
+    /// lets be null stays optional in the reader, because writers omit nulls. The root and
+    /// contractEnum have their own checks (endpoints may be absent; exactly one of values or
+    /// intValues).
+    /// </summary>
+    [Theory]
+    [InlineData("$defs/typeDefinition", typeof(TsTypeDefinition))]
+    [InlineData("$defs/typeMetadata", typeof(TsTypeMetadata))]
+    [InlineData("$defs/scalarMetadata", typeof(TsScalarMetadata))]
+    [InlineData("$defs/schemaXmlMetadata", typeof(TsSchemaXmlMetadata))]
+    [InlineData("$defs/tsPropertyConstraints", typeof(TsPropertyConstraints))]
+    [InlineData("$defs/tsPropertyDefinition", typeof(TsPropertyDefinition))]
+    [InlineData("$defs/tsType/oneOf/0", typeof(TsType.Primitive))]
+    [InlineData("$defs/tsType/oneOf/1", typeof(TsType.Nullable))]
+    [InlineData("$defs/tsType/oneOf/2", typeof(TsType.Array))]
+    [InlineData("$defs/tsType/oneOf/3", typeof(TsType.Dictionary))]
+    [InlineData("$defs/tsType/oneOf/4", typeof(TsType.StringUnion))]
+    [InlineData("$defs/tsType/oneOf/5", typeof(TsType.TypeRef))]
+    [InlineData("$defs/tsType/oneOf/6", typeof(TsType.Generic))]
+    [InlineData("$defs/tsType/oneOf/7", typeof(TsType.TypeParam))]
+    [InlineData("$defs/tsType/oneOf/8", typeof(TsType.Brand))]
+    [InlineData("$defs/tsType/oneOf/9", typeof(TsType.IntUnion))]
+    [InlineData("$defs/tsType/oneOf/10", typeof(TsType.Literal))]
+    [InlineData("$defs/tsType/oneOf/11", typeof(TsType.InlineObject))]
+    [InlineData(
+        "$defs/tsType/oneOf/11/properties/properties/items",
+        typeof(TsType.InlineObjectField)
+    )]
+    [InlineData("$defs/tsType/oneOf/12", typeof(TsType.TaggedUnion))]
+    [InlineData(
+        "$defs/tsType/oneOf/12/properties/variants/items",
+        typeof(TsType.TaggedUnionVariant)
+    )]
+    [InlineData("$defs/tsType/oneOf/13", typeof(TsType.Union))]
+    [InlineData("$defs/endpointDefinition", typeof(TsEndpointDefinition))]
+    [InlineData("$defs/endpointParam", typeof(TsEndpointParam))]
+    [InlineData("$defs/endpointExample", typeof(TsEndpointExample))]
+    [InlineData("$defs/responseType", typeof(TsResponseType))]
+    [InlineData("$defs/responseHeader", typeof(TsResponseHeader))]
+    [InlineData("$defs/mediaTypeContent", typeof(TsMediaTypeContent))]
+    [InlineData("$defs/queryAuth", typeof(QueryAuthMetadata))]
+    [InlineData("$defs/securityRequirements", typeof(SecurityRequirements))]
+    [InlineData(
+        "$defs/securityRequirements/properties/alternatives/items",
+        typeof(SecurityRequirement)
+    )]
+    [InlineData(
+        "$defs/securityRequirements/properties/alternatives/items/properties/schemes/items",
+        typeof(SecurityRequirementScheme)
+    )]
+    [InlineData("$defs/operationProvenance", typeof(OpenApiOperationProvenance))]
+    [InlineData(
+        "$defs/operationProvenance/properties/serverOverride/items",
+        typeof(OpenApiServerProvenance)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/serverOverride/items/properties/variables/items",
+        typeof(OpenApiServerVariableProvenance)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/rivetIdentity",
+        typeof(OpenApiRivetIdentityProvenance)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/parameterComponentReferences/items",
+        typeof(OpenApiParameterComponentReference)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/responseComponentReferences/items",
+        typeof(OpenApiResponseComponentReference)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/responseHeaderComponentReferences/items",
+        typeof(OpenApiResponseHeaderComponentReference)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/schemas",
+        typeof(OpenApiOperationSchemaProvenance)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/schemas/properties/parameters/items",
+        typeof(OpenApiParameterSchemaProvenance)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/schemas/properties/requests/items",
+        typeof(OpenApiRequestSchemaProvenance)
+    )]
+    [InlineData(
+        "$defs/operationProvenance/properties/schemas/properties/responses/items",
+        typeof(OpenApiResponseSchemaProvenance)
+    )]
+    public void Reader_Requires_What_The_Schema_Requires(string pointer, Type type)
+    {
+        var node = pointer
+            .Split('/')
+            .Aggregate(
+                JsonNode.Parse(File.ReadAllText(_schemaPath))!,
+                (node, key) => (node is JsonArray items ? items[int.Parse(key)] : node[key])!
+            );
+        var properties = node["properties"]!;
+        var schemaRequired = (node["required"]?.AsArray() ?? [])
+            .Select(name => name!.GetValue<string>())
+            // "kind" is the polymorphic discriminator, not a member.
+            .Where(name => name != "kind" && !AdmitsNull(properties[name]!))
+            .Order();
+        var readerRequired = _modelOptions
+            .GetTypeInfo(type)
+            .Properties.Where(property => property.IsRequired)
+            .Select(property => property.Name)
+            .Order();
+
+        Assert.Equal(schemaRequired, readerRequired);
     }
 
     [Fact]
@@ -1242,6 +1356,10 @@ public sealed class ContractSchemaTests
             ),
             _ => true,
         };
+
+    private static bool AdmitsNull(JsonNode property) =>
+        property["type"] is JsonArray types
+        && types.Any(type => type!.GetValue<string>() == "null");
 
     private static string FormatErrors(EvaluationResults results) =>
         string.Join(

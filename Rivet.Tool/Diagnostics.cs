@@ -91,7 +91,7 @@ public static class Diagnostics
     public const string UnresolvedTypeParameter = "RIV2006";
     public const string GenericTemplateMissing = "RIV2007";
     public const string BrandConflictingUnderlyingTypes = "RIV2008";
-    public const string ReservedHeaderParameterSkipped = "RIV2009";
+    public const string ReservedHeaderParameter = "RIV2009";
     public const string DuplicateResponseStatusInIr = "RIV2010";
     public const string DuplicateSecuritySchemeDefinition = "RIV2011";
     public const string ConflictingOperations = "RIV2012";
@@ -116,7 +116,10 @@ public static class Diagnostics
     public const string ImportUnresolvedSchema = "RIV3009";
     public const string ImportUnsupportedSchemaType = "RIV3010";
     public const string ImportArrayMissingItems = "RIV3011";
-    public const string ImportEnumConstraintDropped = "RIV3012";
+
+    // RIV3012 (ImportEnumConstraintDropped) retired: every literal enum keeps its values
+    // in generated metadata, with its C# type taken from the values. The number is never
+    // reused.
 
     // RIV3013 (ImportDeclaredPropertiesDropped) retired: mixed inline objects keep typed
     // properties plus extension data. The number is never reused.
@@ -132,6 +135,7 @@ public static class Diagnostics
     public const string ImportCallbackDropped = "RIV3027";
     public const string ImportPathItemOutsidePathsDropped = "RIV3028";
     public const string ImportEquivalentPathTemplateMerged = "RIV3029";
+    public const string ImportUnsatisfiableSecurity = "RIV3030";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -235,8 +239,8 @@ public static class Diagnostics
             "A generic instantiation's template is absent from the contract's type definitions — generation fails instead of emitting a free-form object.",
         [BrandConflictingUnderlyingTypes] =
             "Contract JSON declares one brand name two different ways — generation fails instead of letting the first declaration win.",
-        [ReservedHeaderParameterSkipped] =
-            "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters; the parameter is omitted from the spec.",
+        [ReservedHeaderParameter] =
+            "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters, and omitting it would ship a spec whose clients never send it; generation fails.",
         [DuplicateResponseStatusInIr] =
             "Controller metadata or contract JSON declares the same response status more than once — generation fails instead of keeping the first declaration.",
         [DuplicateSecuritySchemeDefinition] = "Two --security values define the same scheme name.",
@@ -258,8 +262,6 @@ public static class Diagnostics
             "Schema could not be resolved to a C# type — mapped to JsonElement.",
         [ImportUnsupportedSchemaType] = "Unhandled JSON Schema 'type' — mapped to JsonElement.",
         [ImportArrayMissingItems] = "Array schema without 'items' — mapped to List<JsonElement>.",
-        [ImportEnumConstraintDropped] =
-            "Enum constraint that cannot become a C# enum (single-value, mixed/float, out-of-int32-range) — degraded to a primitive.",
         [ImportDictionaryKeyDropped] =
             "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [ImportNamedScalarAlgebraUnsupported] =
@@ -284,6 +286,8 @@ public static class Diagnostics
             "Webhook or components.pathItems entry dropped — only path items under 'paths' become contract endpoints.",
         [ImportEquivalentPathTemplateMerged] =
             "Path repeats an earlier path's template under other parameter names, which OpenAPI forbids — its operations merge into the earlier path and adopt its path parameter names.",
+        [ImportUnsatisfiableSecurity] =
+            "A security alternative names a scheme components.securitySchemes never defines, so no caller can satisfy it — the alternative is dropped, and an operation left with none is dropped too rather than imported as open.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

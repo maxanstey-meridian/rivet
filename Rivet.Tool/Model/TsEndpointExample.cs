@@ -45,7 +45,9 @@ public sealed record TsEndpointExample
         this.Description = Description;
     }
 
-    public string MediaType { get; }
+    // Required members need a setter System.Text.Json can see, even when the constructor binds them.
+    [JsonRequired, JsonInclude]
+    public string MediaType { get; private init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Name { get; }

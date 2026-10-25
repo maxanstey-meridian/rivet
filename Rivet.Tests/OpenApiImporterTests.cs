@@ -543,19 +543,25 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Secured_Endpoint()
     {
-        var spec = CompilationHelper.BuildSpec(
-            paths: """
-            "/api/admin": {
-                "delete": {
-                    "operationId": "admin_deleteAll",
-                    "tags": ["Admin"],
-                    "security": [{ "admin": [] }],
-                    "responses": { "204": { "description": "No Content" } }
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "API", "version": "1.0.0" },
+                "components": {
+                    "securitySchemes": { "admin": { "type": "http", "scheme": "bearer" } }
+                },
+                "paths": {
+                    "/api/admin": {
+                        "delete": {
+                            "operationId": "admin_deleteAll",
+                            "tags": ["Admin"],
+                            "security": [{ "admin": [] }],
+                            "responses": { "204": { "description": "No Content" } }
+                        }
+                    }
                 }
             }
-            """,
-            title: "API"
-        );
+            """;
 
         Assert.Contains(
             ".Secure(\"admin\")",
@@ -2791,6 +2797,29 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("[rivet:unsupported", content);
     }
 
+    private static List<string> EmittedComponentEnum(string spec, string componentName)
+    {
+        var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var emittedJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            security: null
+        );
+        return JsonSerializer
+            .Deserialize<JsonElement>(emittedJson)
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty(componentName)
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(value => value.GetRawText())
+            .ToList();
+    }
+
     private static void AssertProperty(TsTypeDefinition def, string name, string? expectedPrimitive)
     {
         var prop = def.Properties.FirstOrDefault(p => p.Name == name);
@@ -4069,7 +4098,6 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Value42 = 42", enumFile.Content);
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
         Assert.Contains("Constant Code", dtoContent);
-        Assert.DoesNotContain(result.Warnings, warning => warning.StartsWith("RIV3012:"));
         var compilation = CompilationHelper.CompileImportResult(result);
         var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var numericEnum = Assert.IsType<TsType.IntUnion>(walker.Enums["Constant"]);
@@ -4101,7 +4129,6 @@ public sealed class OpenApiImporterTests
         Assert.Contains("Value42 = 42", enumFile.Content);
         var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
         Assert.Contains("SingleVal Val", dtoContent);
-        Assert.DoesNotContain(result.Warnings, warning => warning.StartsWith("RIV3012:"));
     }
 
     [Fact]
@@ -4133,13 +4160,12 @@ public sealed class OpenApiImporterTests
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
         Assert.Contains("long Code", dtoContent);
 
-        // Never silently: the dropped enum constraint emits a named warning (I.A-15)
+        // 3.5 contradicts the declared integer type, so the component is refused loudly.
         Assert.Contains(
             result.Warnings,
             w =>
-                w.StartsWith("RIV3012: Enum constraint dropped")
-                && w.Contains("3.5")
-                && w.Contains("'long'")
+                w.Contains(Diagnostics.ImportNamedScalarAlgebraUnsupported)
+                && w.Contains("'MixedVals'")
         );
     }
 
@@ -4167,18 +4193,11 @@ public sealed class OpenApiImporterTests
         // No named enum file for FloatVals — WouldGenerateType returns false
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("FloatVals.cs"));
 
-        // Numeric wire values cannot be represented by a string-backed C# enum.
-        // Preserve compilability with the existing string fallback, loudly.
+        // The C# type follows the values and the values ride on the named scalar.
         var dtoContent = CompilationHelper.FindFile(result, "ItemDto.cs");
-        Assert.Contains("string Val", dtoContent);
-        Assert.DoesNotContain("long Val", dtoContent);
-        Assert.Contains(
-            result.Warnings,
-            warning =>
-                warning.StartsWith("RIV3012: Enum constraint dropped")
-                && warning.Contains("1.5")
-                && warning.Contains("'string'")
-        );
+        Assert.Contains("double Val", dtoContent);
+        Assert.Empty(result.Warnings);
+        Assert.Equal(["1.5", "2.5"], EmittedComponentEnum(spec, "FloatVals"));
     }
 
     [Fact]
@@ -4305,7 +4324,7 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
-    public void IntEnum_Mixing_Negative_And_Beyond_Int64_Values_Drops_The_Constraint()
+    public void IntEnum_Mixing_Negative_And_Beyond_Int64_Values_Keeps_Them_As_Metadata()
     {
         var spec = CompilationHelper.BuildSpec(
             schemas: """
@@ -4328,17 +4347,12 @@ public sealed class OpenApiImporterTests
 
         // No single C# underlying type can express both constants (a negative beside
         // a value above long.MaxValue) — the schema is not classified as an integer
-        // enum, so the constraint drops through the existing warning instead of
-        // generating uncompilable generated C# (enum : ulong with a negative member).
+        // enum, so it stays the integer primitive and the values ride as metadata
+        // instead of generating uncompilable C# (enum : ulong with a negative member).
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("ImpossibleVals.cs"));
         Assert.Contains("long Code", CompilationHelper.FindFile(result, "OrderDto.cs"));
-        Assert.Contains(
-            result.Warnings,
-            w =>
-                w.StartsWith("RIV3012: Enum constraint dropped")
-                && w.Contains("18446744073709551615")
-                && w.Contains("'long'")
-        );
+        Assert.Empty(result.Warnings);
+        Assert.Equal(["-1", "18446744073709551615"], EmittedComponentEnum(spec, "ImpossibleVals"));
     }
 
     [Fact]

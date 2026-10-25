@@ -1122,7 +1122,10 @@ public sealed class TypeWalker
                 attribute.ConstructorArguments[index].Value is double value && !double.IsNaN(value)
                     ? value
                     : null;
-            string? StringAt(int index) => attribute.ConstructorArguments[index].Value as string;
+            string? StringAt(int index) =>
+                index < attribute.ConstructorArguments.Length
+                    ? attribute.ConstructorArguments[index].Value as string
+                    : null;
             bool BoolAt(int index) =>
                 index < attribute.ConstructorArguments.Length
                 && attribute.ConstructorArguments[index].Value is true;
@@ -1173,6 +1176,7 @@ public sealed class TypeWalker
                 Required: StringAt(28) is { } requiredJson
                     ? JsonSerializer.Deserialize<List<string>>(requiredJson)
                     : null,
+                Enum: StringAt(32),
                 EnumListsNull: BoolAt(31)
             );
         }

@@ -313,6 +313,52 @@ public sealed class MetadataAttributeTests
         Assert.Equal("jane@example.com", examples[0].GetString());
     }
 
+    // ========== [RivetGeneratedSchemaMetadata] enumJson ==========
+
+    [Fact]
+    public void Generated_Schema_Metadata_EnumJson_Emits_The_Values_At_Its_Pointer()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            [RivetType]
+            public sealed record ResultDto(
+                [property: RivetGeneratedSchemaMetadata("", null, null, null, null, null, -1, -1, null, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, -1, -1, false, null, null, null, false, false, null, false, false, false, false, false, null, enumJson: "[false]")]
+                bool Success,
+                [property: RivetGeneratedSchemaMetadata("/items", null, null, null, null, null, -1, -1, null, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, -1, -1, false, null, null, null, false, false, null, false, false, false, false, false, null, enumJson: "[0.5,1.5]")]
+                List<double> Ratios);
+
+            [RivetContract]
+            public static class ResultContract
+            {
+                public static readonly RouteDefinition<ResultDto> Get = Define.Get<ResultDto>("/api/result");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var props = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ResultDto")
+            .GetProperty("properties");
+
+        Assert.False(
+            Assert
+                .Single(props.GetProperty("success").GetProperty("enum").EnumerateArray())
+                .GetBoolean()
+        );
+        Assert.Equal(
+            [0.5, 1.5],
+            props
+                .GetProperty("ratios")
+                .GetProperty("items")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(value => value.GetDouble())
+        );
+    }
+
     // ========== [RivetReadOnly] / [RivetWriteOnly] ==========
 
     [Fact]

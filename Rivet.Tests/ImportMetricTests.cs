@@ -52,9 +52,6 @@ public sealed class ImportMetricTests
             Diagnostics.ImportUnresolvedSchema => "unresolved-schema",
             Diagnostics.ImportUnsupportedSchemaType => "unsupported-schema-type",
             Diagnostics.ImportArrayMissingItems => "array-missing-items",
-            // Added with I.A-15: enum constraints that can't become a C# enum (single-value,
-            // mixed/float, out-of-int32-range) degrade to a primitive WITH a named warning.
-            Diagnostics.ImportEnumConstraintDropped => "enum-constraint-dropped",
             // Added with I.A-17: discriminator on a plain object record — dispatch semantics dropped.
             Diagnostics.ImportDiscriminatorDropped => "discriminator-dropped",
             // Added with WP-1.2 I1: component $ref aliases that cannot resolve (cycle or
@@ -212,15 +209,11 @@ public sealed class ImportMetricTests
             $"Expected ≤200 body caveats (ratchet), got {BodyCaveats(r)}"
         );
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
-        // "enum-constraint-dropped" added deliberately with I.A-15: Stripe's `object:
-        // {"enum": ["account"]}` discriminator constants are single-value enums that degrade
-        // to string — previously silent, now each emits a named warning.
         AssertWarningCategoriesSubsetOf(
             r,
             "unresolved-schema",
             "unsupported-schema-type",
-            "array-missing-items",
-            "enum-constraint-dropped"
+            "array-missing-items"
         );
     }
 
@@ -249,9 +242,6 @@ public sealed class ImportMetricTests
             $"Expected ≤60 body caveats (ratchet), got {BodyCaveats(r)}"
         );
         // Ratchet: warnings allowed but must be categorized — unexpected categories fail.
-        // "enum-constraint-dropped" added deliberately with I.A-15: GitHub's single-value
-        // permission enums ({"enum": ["read"]} etc.) degrade to string — previously silent,
-        // now each emits a named warning.
         // "equivalent-path-template-merged" added deliberately: GitHub's attestation DELETE
         // and GET author one template under two parameter names, which OpenAPI forbids.
         AssertWarningCategoriesSubsetOf(
@@ -259,7 +249,6 @@ public sealed class ImportMetricTests
             "unresolved-schema",
             "unsupported-schema-type",
             "array-missing-items",
-            "enum-constraint-dropped",
             "equivalent-path-template-merged"
         );
     }

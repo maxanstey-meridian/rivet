@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Rivet.Tool.Model;
 
 public sealed record ContractSecurityMetadata(
@@ -46,11 +48,18 @@ public sealed record OAuth2Flow(
 /// alternatives is the explicit <c>security: []</c>; an alternative with no schemes (<c>{}</c>)
 /// makes credentials optional.
 /// </summary>
-public sealed record SecurityRequirements(IReadOnlyList<SecurityRequirement> Alternatives);
+public sealed record SecurityRequirements(
+    [property: JsonRequired] IReadOnlyList<SecurityRequirement> Alternatives
+);
 
-public sealed record SecurityRequirement(IReadOnlyList<SecurityRequirementScheme> Schemes);
+public sealed record SecurityRequirement(
+    [property: JsonRequired] IReadOnlyList<SecurityRequirementScheme> Schemes
+);
 
-public sealed record SecurityRequirementScheme(string Name, IReadOnlyList<string> Scopes);
+public sealed record SecurityRequirementScheme(
+    [property: JsonRequired] string Name,
+    [property: JsonRequired] IReadOnlyList<string> Scopes
+);
 
 public enum SecurityApiKeyLocation
 {

@@ -1665,7 +1665,26 @@ class Comparator:
             return non_null[0] if len(non_null) == 1 else tuple(non_null)
         if declared_type is None and "properties" in schema:
             return "object"
+        if declared_type is None and isinstance(schema.get("enum"), list):
+            # An untyped enum's members already fix its type: `{enum: [true]}` is a boolean.
+            kinds = {Comparator.json_type(value) for value in schema["enum"]}
+            if kinds == {"integer", "number"}:
+                return "number"
+            if len(kinds) == 1:
+                return kinds.pop()
         return declared_type
+
+    @staticmethod
+    def json_type(value):
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, (int, float)):
+            return "integer" if isinstance(value, int) or value.is_integer() else "number"
+        if isinstance(value, str):
+            return "string"
+        return "array" if isinstance(value, list) else "object"
 
     @staticmethod
     def enum_projection(value):

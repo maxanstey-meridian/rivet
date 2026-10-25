@@ -7,13 +7,13 @@ namespace Rivet.Tool.Model;
 /// One operation: its route, parameters, request body and responses.
 /// </summary>
 public sealed record TsEndpointDefinition(
-    string Name,
-    string HttpMethod,
-    string RouteTemplate,
-    IReadOnlyList<TsEndpointParam> Params,
+    [property: JsonRequired] string Name,
+    [property: JsonRequired] string HttpMethod,
+    [property: JsonRequired] string RouteTemplate,
+    [property: JsonRequired] IReadOnlyList<TsEndpointParam> Params,
     TsType? ReturnType,
-    string ControllerName,
-    IReadOnlyList<TsResponseType> Responses,
+    [property: JsonRequired] string ControllerName,
+    [property: JsonRequired] IReadOnlyList<TsResponseType> Responses,
     string? Summary = null,
     string? Description = null,
     // null inherits the document's security; no alternatives is `security: []`.
@@ -153,7 +153,7 @@ public sealed record TsResponseType(
 }
 
 public sealed record TsMediaTypeContent(
-    string MediaType,
+    [property: JsonRequired] string MediaType,
     TsType? Schema,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool IsBinary = false,
@@ -171,7 +171,7 @@ public sealed record TsMediaTypeContent(
 /// promise the adapters check, refusing a response that leaves the header out.
 /// </summary>
 public sealed record TsResponseHeader(
-    string Name,
+    [property: JsonRequired] string Name,
     [property: JsonRequired] TsType Type,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? Description = null,
@@ -200,9 +200,9 @@ public sealed record TsResponseHeader(
 /// A parameter to a client function.
 /// </summary>
 public sealed record TsEndpointParam(
-    string Name,
+    [property: JsonRequired] string Name,
     [property: JsonRequired] TsType Type,
-    ParamSource Source,
+    [property: JsonRequired] ParamSource Source,
     bool IsOptional = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? BodyPropertyName = null,
@@ -249,4 +249,4 @@ public enum ParamSource
 /// Query-based auth metadata: the auth token is passed as a query parameter
 /// instead of a header, for clients (media players) that cannot set headers.
 /// </summary>
-public sealed record QueryAuthMetadata(string ParameterName);
+public sealed record QueryAuthMetadata([property: JsonRequired] string ParameterName);

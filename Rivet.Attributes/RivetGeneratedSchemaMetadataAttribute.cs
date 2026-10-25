@@ -43,7 +43,8 @@ public sealed class RivetGeneratedSchemaMetadataAttribute : Attribute
         string? requiredJson,
         int minProperties = -1,
         int maxProperties = -1,
-        bool enumListsNull = false
+        bool enumListsNull = false,
+        string? enumJson = null
     )
     {
         Pointer = pointer;
@@ -78,6 +79,7 @@ public sealed class RivetGeneratedSchemaMetadataAttribute : Attribute
         MinProperties = minProperties;
         MaxProperties = maxProperties;
         EnumListsNull = enumListsNull;
+        EnumJson = enumJson;
     }
 
     public string Pointer { get; }
@@ -112,4 +114,5 @@ public sealed class RivetGeneratedSchemaMetadataAttribute : Attribute
     public int MinProperties { get; }
     public int MaxProperties { get; }
     public bool EnumListsNull { get; }
+    public string? EnumJson { get; }
 }

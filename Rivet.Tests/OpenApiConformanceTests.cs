@@ -84,7 +84,8 @@ public sealed class OpenApiConformanceTests : IDisposable
             ),
             "php-golden-contract-json" => CompilationHelper.EmitOpenApiFromJson(
                 Fixture.Text("php-golden-contract.json"),
-                _fixtureDocumentInfo
+                _fixtureDocumentInfo,
+                SecurityParser.ParseMany(["bearer"])
             ),
             // TS-lowerer-shaped contract JSON: brands appear only as inline kind:"brand"
             // nodes, and multipart inputs are decomposed into params with an inputTypeName
