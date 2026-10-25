@@ -413,6 +413,16 @@ public sealed class ExplicitContractTests
         "RIV1112",
         "type 'Wrapper<T>'"
     )]
+    [InlineData(
+        "public sealed record Inner<T>([property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] T Value); public sealed record Outer<T>(Inner<T> Item); [RivetType] public sealed record Holder(Outer<IReadOnlyList<long>> Inner);",
+        "RIV1112",
+        "'Inner<System.Collections.Generic.IReadOnlyList<long>>'"
+    )]
+    [InlineData(
+        "[RivetType] public sealed class Holder { [JsonConstructor] public Holder(string name) => Name = name; [JsonConstructor] public Holder(string name, int count) => Name = name; public string Name { get; } }",
+        "RIV1116",
+        "2 [JsonConstructor] constructors"
+    )]
     public void Unmodelled_Serializer_Settings_Refuse(string declarations, string id, string named)
     {
         var compilation = CompilationHelper.CreateCompilation(SerializerFixtures + declarations);
@@ -445,6 +455,12 @@ public sealed class ExplicitContractTests
     )]
     [InlineData(
         "[RivetUnion] public sealed record Either(string? Text, int? Number); [RivetType] public sealed record Holder(Either Value);"
+    )]
+    [InlineData(
+        "[JsonNumberHandling(JsonNumberHandling.WriteAsString)] public sealed record Wrapper<T>(T Value); [RivetType] public sealed record Holder(Wrapper<string> Inner);"
+    )]
+    [InlineData(
+        "public sealed record Item(string Name); public sealed record Wrapper<T>([property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] T Value) where T : class; [RivetType] public sealed record Holder(Wrapper<Item> Inner);"
     )]
     public void Modelled_Serializer_Settings_Are_Accepted(string declarations)
     {

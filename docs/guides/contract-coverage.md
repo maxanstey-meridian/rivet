@@ -111,13 +111,15 @@ client sends. Minimal APIs read a `StringValues` like a `string[]`, from the que
 and never consult a `[TypeConverter]`, so a type that only has one is a service or a body
 there. And because every MVC answer depends on whether `[ApiController]` infers binding
 sources, a `SuppressInferBindingSourcesForParameters` set to anything but a constant stops
-the check with `RIV4007` instead of letting it guess.
+the check with `RIV1115` instead of letting it guess. Members MVC reads under a prefix keep
+it when renamed (`?f.q=`), and header members never take one.
 
 A handler that can read the request itself is trusted to pick inputs out by hand: an
 `HttpContext` or `HttpRequest` parameter, a `BindAsync` type, a custom model binder, or a
-handler body that reaches the request through a property, such as a controller's
-`Request`, `HttpContext` or `ControllerContext.HttpContext`, or an `IHttpContextAccessor`'s
-`HttpContext`, whether it arrives as a parameter or through the constructor. Helpers it
+handler body that reads the request or route data through a property: a controller's
+`Request` or `RouteData`, `ControllerContext.HttpContext.Request`, an
+`IHttpContextAccessor`'s `HttpContext.Request`, or `HttpContext.GetRouteValue`. Touching
+only `HttpContext.User`, `Response` or `RequestAborted` doesn't count. Helpers it
 calls aren't followed. Such a handler is never told an input is unbound, though what it
 does bind is still checked. That's also the only way to read a cookie the contract
 declares: ASP.NET has no attribute that binds one, so `--check` reports a declared cookie
@@ -125,7 +127,8 @@ unless the handler can read `Request.Cookies`. An unattributed complex parameter
 could be a service counts as the body when the contract has one and as a service when it
 doesn't. The `Authorization` header, a `.QueryAuth()` token and the header or query
 parameter of an apiKey scheme the endpoint's security names (its own `.Secure(...)`, or
-the document's global security) belong to the contract's security, not its inputs.
+the document's global security, from attributes or `--security`) belong to the contract's
+security, not its inputs; `--check` takes the same `--security` values as generation.
 Azure Functions handlers aren't compared: they read the query, headers and
 body from `HttpRequest` by hand, so only their route values are bound at all.
 

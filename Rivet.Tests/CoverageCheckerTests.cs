@@ -3058,6 +3058,11 @@ public sealed class CoverageCheckerTests
             [property: JsonPropertyName("note_body")] string? Body
         );
 
+        [RivetType]
+        public sealed record NoteFormFields(string Title, string? Mood);
+
+        public sealed record NoteFormEnvelope(NoteFormFields Fields);
+
         [RivetContract]
         public static class NotesContract
         {
@@ -3078,6 +3083,10 @@ public sealed class CoverageCheckerTests
 
             public static readonly RouteDefinition<NoteForm, NoteDto> Submit =
                 Define.Post<NoteForm, NoteDto>("/api/notes/form").FormEncoded();
+
+            [RivetRequestBody(typeof(NoteFormFields))]
+            public static readonly RouteDefinition<NoteFormEnvelope, NoteDto> SubmitWrapped =
+                Define.Post<NoteFormEnvelope, NoteDto>("/api/notes/wrapped").FormEncoded();
 
             public static readonly RouteDefinition<NoteDto> Stream =
                 Define.Get<NoteDto>("/api/notes/stream").QueryAuth();
@@ -3301,6 +3310,52 @@ public sealed class CoverageCheckerTests
         );
     }
 
+    [Fact]
+    public void Mvc_member_names_combine_with_the_prefix_except_for_headers()
+    {
+        // ComplexObjectModelBinder reads a renamed member under the prefix (?f.q=);
+        // HeaderModelBinder reads the member's own name, renamed or not, never prefixed.
+        const string binding = """
+            using Microsoft.AspNetCore.Mvc;
+
+            namespace Test;
+
+            public sealed class NoteSearchBinding
+            {
+                [FromQuery(Name = "q")]
+                public string? Text { get; set; }
+
+                [FromHeader(Name = "X-Tenant")]
+                public string? Tenant { get; set; }
+
+                [FromHeader]
+                public string? Trace { get; set; }
+            }
+            """;
+        var handler = MvcNotes(
+            "Get",
+            "",
+            "[FromQuery(Name = \"f\")] NoteSearchBinding filter",
+            "NotesContract.Search.Bind(new NoteSearch(null, filter.Text, filter.Tenant))"
+                + ".Success(new NoteDto(\"1\"))"
+        );
+
+        var mismatches = InputMismatches(RunCheck(InputContract, binding, handler), "Search");
+
+        Assert.Contains(
+            mismatches,
+            warning => warning is { Expected: "(not declared)", Actual: "query parameter 'f.q'" }
+        );
+        Assert.Contains(
+            mismatches,
+            warning => warning is { Expected: "(not declared)", Actual: "header 'Trace'" }
+        );
+        Assert.DoesNotContain(
+            mismatches,
+            warning => (warning.Expected + warning.Actual).Contains("X-Tenant")
+        );
+    }
+
     [Theory]
     [InlineData("Microsoft.Extensions.Primitives.StringValues tags")]
     [InlineData("Microsoft.Extensions.Primitives.StringValues? tags")]
@@ -3429,6 +3484,12 @@ public sealed class CoverageCheckerTests
     [Theory]
     [InlineData("mvc", "", "var id = Request.RouteValues[\"id\"];")]
     [InlineData("mvc", "", "var id = ControllerContext.HttpContext.Request.RouteValues[\"id\"];")]
+    [InlineData("mvc", "", "var id = RouteData.Values[\"id\"];")]
+    [InlineData(
+        "mvc",
+        "",
+        "var id = Microsoft.AspNetCore.Routing.RoutingHttpContextExtensions.GetRouteValue(HttpContext, \"id\");"
+    )]
     [InlineData(
         "minimal",
         "IHttpContextAccessor accessor",
@@ -3447,6 +3508,34 @@ public sealed class CoverageCheckerTests
                 : MinimalNotes("Get", "/api/notes/{id}", parameters, terminal, body);
 
         Assert.Empty(InputMismatches(RunCheck(InputContract, handler), "Get"));
+    }
+
+    // The HttpContext's User, RequestAborted and Response carry no input, so touching them
+    // doesn't excuse an input the handler never binds.
+    [Theory]
+    [InlineData("mvc", "", "var status = HttpContext.Response.StatusCode;")]
+    [InlineData("mvc", "", "var aborted = ControllerContext.HttpContext.RequestAborted;")]
+    [InlineData(
+        "minimal",
+        "IHttpContextAccessor accessor",
+        "var trace = accessor.HttpContext!.TraceIdentifier;"
+    )]
+    public void Handler_touching_only_the_context_is_told_an_input_is_unbound(
+        string host,
+        string parameters,
+        string body
+    )
+    {
+        const string terminal = "NotesContract.Get.Success(new NoteDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Get", "{id}", parameters, terminal, body: body)
+                : MinimalNotes("Get", "/api/notes/{id}", parameters, terminal, body);
+
+        var mismatch = Assert.Single(InputMismatches(RunCheck(InputContract, handler), "Get"));
+
+        Assert.Equal("route value 'id'", mismatch.Expected);
+        Assert.Equal("(not bound)", mismatch.Actual);
     }
 
     [Theory]
@@ -3708,6 +3797,25 @@ public sealed class CoverageCheckerTests
             mismatches,
             warning => warning is { Expected: "form field 'note_body'", Actual: "(not bound)" }
         );
+    }
+
+    // [RivetRequestBody] makes NoteFormFields the form body, so its fields are the form
+    // fields, not the envelope's one property.
+    [Theory]
+    [InlineData("minimal")]
+    [InlineData("mvc")]
+    public void Form_encoded_body_declared_by_RivetRequestBody_has_that_types_fields(string host)
+    {
+        const string parameters = "[FromForm] string title, [FromForm] string? mood";
+        const string terminal =
+            "NotesContract.SubmitWrapped.Bind(new NoteFormEnvelope(new NoteFormFields(title, mood)))"
+            + ".Success(new NoteDto(\"1\"))";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Post", "wrapped", parameters, terminal)
+                : MinimalNotes("Post", "/api/notes/wrapped", parameters, terminal);
+
+        Assert.Empty(InputMismatches(RunCheck(InputContract, handler), "SubmitWrapped"));
     }
 
     [Fact]

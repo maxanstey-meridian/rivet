@@ -53,7 +53,7 @@ public static partial class OpenApiImporter
         // they must be broken before the library sees the document.
         BreakAliasCycles(root, warnings);
         CollapseRepeatedEnumMembers(root);
-        NormalizeMappedVendorExtensions(root, root["swagger"] is not null, exampleObject: false);
+        NormalizeMappedVendorExtensions(root);
         var provenance = OpenApiProvenanceReader.Read(
             JsonSerializer.SerializeToElement(root),
             warnings
@@ -358,76 +358,48 @@ public static partial class OpenApiImporter
         }
     }
 
-    private static void NormalizeMappedVendorExtensions(
-        JsonNode node,
-        bool swagger2,
-        bool exampleObject
-    )
-    {
-        if (node is JsonArray array)
-        {
-            foreach (var child in array)
+    private static readonly string[] _descriptionExtensions =
+    [
+        "x-Description",
+        "x-desc",
+        "x-public-description",
+    ];
+
+    private static void NormalizeMappedVendorExtensions(JsonObject root) =>
+        OpenApiStructure.VisitObjects(
+            root,
+            IsSwagger2(root),
+            (obj, _) =>
             {
-                if (child is not null)
+                if (
+                    obj["deprecated"] is null
+                    && obj["x-is-deprecated"]?.GetValueKind() is JsonValueKind.True
+                )
                 {
-                    NormalizeMappedVendorExtensions(child, swagger2, exampleObject: false);
+                    obj["deprecated"] = true;
+                }
+                if (
+                    obj["readOnly"] is null
+                    && obj["x-read-only"]?.GetValueKind() is JsonValueKind.True
+                )
+                {
+                    obj["readOnly"] = true;
+                }
+                if (
+                    obj["description"] is null
+                    && _descriptionExtensions
+                        .Select(extension => StringValue(obj[extension]))
+                        .FirstOrDefault(description => description is not null)
+                        is { } description
+                )
+                {
+                    obj["description"] = description;
                 }
             }
-            return;
-        }
+        );
 
-        if (node is not JsonObject obj)
-        {
-            return;
-        }
-
-        if (
-            obj["deprecated"] is null
-            && obj["x-is-deprecated"]?.GetValueKind() is JsonValueKind.True
-        )
-        {
-            obj["deprecated"] = true;
-        }
-        if (obj["readOnly"] is null && obj["x-read-only"]?.GetValueKind() is JsonValueKind.True)
-        {
-            obj["readOnly"] = true;
-        }
-        if (obj["description"] is null)
-        {
-            foreach (
-                var extensionName in new[] { "x-Description", "x-desc", "x-public-description" }
-            )
-            {
-                if (obj[extensionName] is JsonValue extension)
-                {
-                    obj["description"] = extension.GetValue<string>();
-                    break;
-                }
-            }
-        }
-
-        foreach (var child in obj.ToList())
-        {
-            if (!swagger2 && child.Key == "examples" && child.Value is JsonObject examples)
-            {
-                foreach (var example in examples.Select(entry => entry.Value))
-                {
-                    if (example is not null)
-                    {
-                        NormalizeMappedVendorExtensions(example, swagger2, exampleObject: true);
-                    }
-                }
-            }
-            else if (
-                child.Value is not null
-                && !(exampleObject && child.Key == "value")
-                && !IsOpaqueOpenApiValue(child.Key)
-            )
-            {
-                NormalizeMappedVendorExtensions(child.Value, swagger2, exampleObject: false);
-            }
-        }
-    }
+    private static bool IsSwagger2(JsonObject root) =>
+        StringValue(root["swagger"])?.StartsWith("2.", StringComparison.Ordinal) == true;
 
     /// <summary>
     /// OpenAPI forbids two paths that differ only in their parameter names
@@ -557,16 +529,15 @@ public static partial class OpenApiImporter
     /// </summary>
     private static void DropExternalDiscriminatorMappings(JsonObject root, List<string> warnings)
     {
-        var schemaNames = (
-            root["swagger"] is null ? root["components"]?["schemas"] : root["definitions"]
-        )
-            is JsonObject schemas
+        // Swagger 2's discriminator is a property name, not an object with a mapping, so only
+        // OpenAPI 3 schema components can be named.
+        var schemaNames = root["components"]?["schemas"] is JsonObject schemas
             ? schemas.Select(entry => entry.Key).ToHashSet(StringComparer.Ordinal)
             : [];
 
-        VisitStructuralObjects(
+        OpenApiStructure.VisitObjects(
             root,
-            "#",
+            IsSwagger2(root),
             (obj, pointer) =>
             {
                 if (
@@ -607,9 +578,9 @@ public static partial class OpenApiImporter
     /// The first occurrence keeps its position.
     /// </summary>
     private static void CollapseRepeatedEnumMembers(JsonObject root) =>
-        VisitStructuralObjects(
+        OpenApiStructure.VisitObjects(
             root,
-            "#",
+            IsSwagger2(root),
             (obj, _) =>
             {
                 if (obj["enum"] is not JsonArray members)
@@ -628,9 +599,9 @@ public static partial class OpenApiImporter
         );
 
     private static void MarkEnumNullMembers(JsonObject root) =>
-        VisitStructuralObjects(
+        OpenApiStructure.VisitObjects(
             root,
-            "#",
+            IsSwagger2(root),
             (obj, _) =>
             {
                 if (obj["enum"] is JsonArray members && members.Any(member => member is null))
@@ -640,99 +611,19 @@ public static partial class OpenApiImporter
             }
         );
 
-    internal static bool IsOpaqueOpenApiValue(string name) =>
-        name is "const" or "default" or "enum" or "example" or "examples"
-        || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// The fields whose object value maps names to OpenAPI objects or schemas. Their keys are
-    /// names, so a response named <c>default</c> or a property named <c>example</c> is
-    /// structure, not an opaque value.
-    /// </summary>
-    private static readonly HashSet<string> _nameMapFields = new(StringComparer.Ordinal)
-    {
-        "$defs",
-        "callbacks",
-        "content",
-        "definitions",
-        "dependentSchemas",
-        "encoding",
-        "headers",
-        "links",
-        "parameters",
-        "pathItems",
-        "paths",
-        "patternProperties",
-        "properties",
-        "requestBodies",
-        "responses",
-        "schemas",
-        "securityDefinitions",
-        "securitySchemes",
-        "variables",
-        "webhooks",
-    };
-
-    /// <summary>
-    /// Visits every OpenAPI or schema object under <paramref name="node"/>, parent before
-    /// children, with its JSON pointer. Opaque values (examples, defaults, enums, consts and
-    /// extensions) are data, so nothing inside them is visited, and name maps are crossed
-    /// without being visited themselves. tools/roundtrip_diff.py mirrors this walk.
-    /// </summary>
-    private static void VisitStructuralObjects(
-        JsonNode node,
-        string pointer,
-        Action<JsonObject, string> visit,
-        bool nameMap = false
-    )
-    {
-        if (node is JsonArray array)
-        {
-            for (var index = 0; index < array.Count; index++)
-            {
-                if (array[index] is { } item)
-                {
-                    VisitStructuralObjects(item, $"{pointer}/{index}", visit);
-                }
-            }
-            return;
-        }
-
-        if (node is not JsonObject obj)
-        {
-            return;
-        }
-
-        if (!nameMap)
-        {
-            visit(obj, pointer);
-        }
-        foreach (var (key, child) in obj.ToList())
-        {
-            if (child is not null && (nameMap || !IsOpaqueOpenApiValue(key)))
-            {
-                VisitStructuralObjects(
-                    child,
-                    $"{pointer}/{JsonPointer.Escape(key)}",
-                    visit,
-                    nameMap: !nameMap && _nameMapFields.Contains(key)
-                );
-            }
-        }
-    }
-
     /// <summary>
     /// A schema <c>$ref</c> with metadata siblings becomes <c>allOf: [{$ref}]</c> beside them,
     /// the form the OpenAPI reader keeps the siblings on.
     /// </summary>
     private static void NormalizeSchemaReferenceMetadataSiblings(JsonObject root) =>
-        VisitStructuralObjects(
+        OpenApiStructure.VisitObjects(
             root,
-            "#",
+            IsSwagger2(root),
             (obj, _) =>
             {
                 if (
                     StringValue(obj["$ref"]) is not { } reference
+                    || !IsSchemaReference(reference)
                     || obj.ContainsKey("allOf")
                     || !_schemaReferenceMetadataKeywords.Any(obj.ContainsKey)
                 )
@@ -744,6 +635,18 @@ public static partial class OpenApiImporter
                 obj["allOf"] = new JsonArray(new JsonObject { ["$ref"] = reference });
             }
         );
+
+    /// <summary>
+    /// A reference to a response, parameter, example or other non-schema component is a
+    /// Reference object, whose summary and description siblings OpenAPI 3.1 allows as they are.
+    /// </summary>
+    private static bool IsSchemaReference(string reference) =>
+        JsonPointer.FromUriFragment(reference) switch
+        {
+            ["components", var kind, ..] => kind == "schemas",
+            ["parameters" or "responses" or "securityDefinitions", ..] => false,
+            _ => true,
+        };
 
     private static readonly string[] _schemaReferenceMetadataKeywords =
     [
@@ -847,12 +750,7 @@ public static partial class OpenApiImporter
         string Status
     )> ReadSwaggerSchemaLessResponses(JsonObject root)
     {
-        if (
-            root["swagger"] is not JsonValue version
-            || !version.TryGetValue<string>(out var versionText)
-            || !versionText.StartsWith("2.", StringComparison.Ordinal)
-            || root["paths"] is not JsonObject paths
-        )
+        if (!IsSwagger2(root) || root["paths"] is not JsonObject paths)
         {
             return [];
         }
@@ -1205,8 +1103,8 @@ public static partial class OpenApiImporter
     {
         if (
             parameter is JsonObject obj
-            && obj["name"]?.GetValue<string>() is { } name
-            && obj["in"]?.GetValue<string>() is { } location
+            && StringValue(obj["name"]) is { } name
+            && StringValue(obj["in"]) is { } location
         )
         {
             return (name, location);

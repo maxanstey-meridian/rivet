@@ -142,7 +142,13 @@ public static class CompilationHelper
         var (discovered, walker) = DiscoverAndWalk(compilation);
         var wkt = new WellKnownTypes(compilation);
         var contracts = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
-        return CoverageChecker.Check(compilation, wkt, contracts, functionsRoutePrefix);
+        return CoverageChecker.Check(
+            compilation,
+            wkt,
+            contracts,
+            SecurityMetadataWalker.Walk(compilation),
+            functionsRoutePrefix
+        );
     }
 
     // --- Canonical walk/emit helpers (survive the Phase 3 pivot) ---

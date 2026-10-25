@@ -175,7 +175,7 @@ public static class RivetResultExtensions
             RivetBodyResult body => body.HasBody
                 && (
                     Is(name, HeaderNames.ContentType)
-                    || Is(name, HeaderNames.ContentLength) && !body.IsJson && body.Value is not null
+                    || Is(name, HeaderNames.ContentLength) && !body.IsJson
                 ),
             RivetFileResult file => Is(name, HeaderNames.ContentType)
                 || Is(name, HeaderNames.ETag) && file.EntityTag is not null

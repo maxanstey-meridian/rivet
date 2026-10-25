@@ -109,8 +109,8 @@ with, or the comparison will (correctly) flag the metadata difference.
 
 ## Diagnostics
 
-Every warning and error the tool writes to stderr carries a stable `RIV`-prefixed ID
-in the canonical format `warning RIV1019: <message>` or `error RIV2002: <message>` —
+Every warning the tool writes to stderr, and every error in the reference, carries a stable
+`RIV`-prefixed ID in the canonical format `warning RIV1019: <message>` or `error RIV2002: <message>` —
 grep or baseline by ID, never by message text. See the [Diagnostics Reference](/reference/diagnostics)
 for the full table of IDs, triggers, and remediations.
 

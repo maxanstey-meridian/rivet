@@ -611,11 +611,16 @@ public sealed class ContractEndpointTests
     }
 
     // .ResponseContent(...) declares its status on its own, so an example or a header may
-    // target a status declared no other way.
-    [Fact]
-    public void Examples_And_Headers_Reach_A_Status_Declared_Only_By_ResponseContent()
+    // target a status declared no other way. Without a mediaType the example takes the
+    // status's one declared media type rather than application/json.
+    [Theory]
+    [InlineData(", mediaType: \"application/problem+json\"")]
+    [InlineData("")]
+    public void Examples_And_Headers_Reach_A_Status_Declared_Only_By_ResponseContent(
+        string mediaTypeArgument
+    )
     {
-        var source = """
+        var source = $$"""
             using Rivet;
 
             namespace Test;
@@ -632,7 +637,7 @@ public sealed class ContractEndpointTests
                 public static readonly RouteDefinition<TaskDto> GetTask =
                     Define.Get<TaskDto>("/api/tasks/{id}")
                         .ResponseContent<Problem>(404, "application/problem+json")
-                        .ResponseExampleJson(404, "{\"title\":\"Not found\"}", mediaType: "application/problem+json")
+                        .ResponseExampleJson(404, "{\"title\":\"Not found\"}"{{mediaTypeArgument}})
                         .WithResponseHeader(404, "X-Trace-Id");
             }
             """;
@@ -642,8 +647,84 @@ public sealed class ContractEndpointTests
             response => response.StatusCode == 404
         );
         Assert.Equal("application/problem+json", Assert.Single(notFound.Contents!).MediaType);
-        Assert.Equal("{\"title\":\"Not found\"}", Assert.Single(notFound.Examples!).Json);
+        var example = Assert.Single(notFound.Examples!);
+        Assert.Equal("{\"title\":\"Not found\"}", example.Json);
+        Assert.Equal("application/problem+json", example.MediaType);
         Assert.Equal("X-Trace-Id", Assert.Single(notFound.Headers!).Name);
+    }
+
+    [Fact]
+    public void Success_Example_Defaults_To_The_ProducesContentType_Media_Type()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Problem(string Title);
+
+            [RivetContract]
+            public static class PagesContract
+            {
+                public static readonly RouteDefinition<string> GetPage =
+                    Define.Get<string>("/api/page")
+                        .ProducesContentType("text/html")
+                        .Returns<Problem>(422)
+                        .ResponseExampleJson(200, "\"<p>hi</p>\"")
+                        .ResponseExampleJson(422, "{\"title\":\"Bad\"}");
+            }
+            """;
+
+        var responses = Assert.Single(Generate(source)).Responses;
+
+        var ok = responses.Single(response => response.StatusCode == 200);
+        Assert.Equal("text/html", Assert.Single(ok.Examples!).MediaType);
+        var problem = responses.Single(response => response.StatusCode == 422);
+        Assert.Equal("application/json", Assert.Single(problem.Examples!).MediaType);
+    }
+
+    // An example under a media type its status doesn't declare would add an undeclared
+    // content entry; several declared media types leave a bare example ambiguous.
+    [Theory]
+    [InlineData("", ", mediaType: \"application/json\"", "which that status does not declare")]
+    [InlineData(
+        ".ResponseContent<Problem>(404, \"application/xml\")",
+        "",
+        "without a media type, and that status declares several"
+    )]
+    public void Response_Example_Must_Name_A_Media_Type_Its_ResponseContent_Status_Declares(
+        string extraContent,
+        string mediaTypeArgument,
+        string expected
+    )
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetType]
+            public sealed record Problem(string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .ResponseContent<Problem>(404, "application/problem+json")
+                        {{extraContent}}
+                        .ResponseExampleJson(404, "{\"title\":\"Not found\"}"{{mediaTypeArgument}});
+            }
+            """;
+
+        var message = Assert.Throws<RivetUserException>(() => Generate(source)).Message;
+
+        Assert.StartsWith("error RIV1002: contract endpoint 'getTask'", message);
+        Assert.Contains(expected, message);
     }
 
     [Theory]
@@ -1969,10 +2050,20 @@ public sealed class ContractEndpointTests
         Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
     }
 
-    [Fact]
-    public void AbstractContract_Method_Without_Route_Is_Refused()
+    [Theory]
+    [InlineData("", "[HttpGet]", "has no route template")]
+    [InlineData(
+        "[Route(\"api/tasks\")]",
+        "",
+        "is an abstract method on a [RivetContract] class but has no [HttpGet]"
+    )]
+    public void AbstractContract_Method_Without_Route_Or_Verb_Is_Refused(
+        string classRoute,
+        string verb,
+        string expected
+    )
     {
-        var source = """
+        var source = $$"""
             using System.Threading.Tasks;
             using Microsoft.AspNetCore.Mvc;
             using Rivet;
@@ -1983,9 +2074,12 @@ public sealed class ContractEndpointTests
             public sealed record TaskDto(string Id);
 
             [RivetContract]
+            {{classRoute}}
             public abstract class TasksContract : ControllerBase
             {
-                [HttpGet]
+                public abstract string Area { get; }
+
+                {{verb}}
                 [ProducesResponseType(typeof(TaskDto), 200)]
                 public abstract Task<IActionResult> List();
             }
@@ -1994,7 +2088,7 @@ public sealed class ContractEndpointTests
         var message = Assert.Throws<RivetUserException>(() => Generate(source)).Message;
 
         Assert.StartsWith("error RIV1100: contract endpoint 'TasksContract.List'", message);
-        Assert.Contains("has no route template", message);
+        Assert.Contains(expected, message);
     }
 
     [Fact]

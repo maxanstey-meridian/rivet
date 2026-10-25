@@ -871,6 +871,10 @@ public sealed class EnumParameterBindingCheckTests
     [Theory]
     [InlineData("options.SuppressInferBindingSourcesForParameters = true;", true)]
     [InlineData("options.SuppressInferBindingSourcesForParameters = false;", false)]
+    [InlineData(
+        "const bool suppress = true; options.SuppressInferBindingSourcesForParameters = suppress;",
+        true
+    )]
     [InlineData("", false)]
     public void Mvc_Suppressed_Inference_Binds_An_Unattributed_Complex_Parameter_From_Values(
         string configuration,
@@ -920,7 +924,38 @@ public sealed class EnumParameterBindingCheckTests
     {
         // Every MVC binding answer turns on this value, so a guess would make RIV4005 and
         // RIV4006 errors up; the check stops and names the assignment instead.
-        var startup = $$"""
+        var exception = Assert.Throws<RivetUserException>(() =>
+            RunCheck(
+                Contract,
+                StreetKind(Snake),
+                StreetRequest(),
+                NonConstantSuppression(configuration),
+                MvcHandler("StreetRequest request")
+            )
+        );
+
+        Assert.StartsWith("error RIV1115: (9,9): ", exception.Message);
+        Assert.Contains("isn't a compile-time constant", exception.Message);
+    }
+
+    [Fact]
+    public void Mvc_Suppressed_Inference_That_Is_Not_A_Constant_Is_Not_Read_Without_ApiController()
+    {
+        // A plain controller infers no binding sources whatever the setting says, so its
+        // value doesn't matter and the check carries on.
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(Snake),
+            StreetRequest(),
+            NonConstantSuppression("options.SuppressInferBindingSourcesForParameters = suppress;"),
+            MvcHandler("StreetRequest request", apiController: false)
+        );
+
+        Assert.Contains("MVC parameter 'request.Kind'", AssertReported(warnings).Message);
+    }
+
+    private static string NonConstantSuppression(string configuration) =>
+        $$"""
             using Microsoft.AspNetCore.Mvc;
 
             namespace Test;
@@ -933,20 +968,6 @@ public sealed class EnumParameterBindingCheckTests
                 }
             }
             """;
-
-        var exception = Assert.Throws<RivetUserException>(() =>
-            RunCheck(
-                Contract,
-                StreetKind(Snake),
-                StreetRequest(),
-                startup,
-                MvcHandler("StreetRequest request")
-            )
-        );
-
-        Assert.StartsWith("error RIV4007: (9,9): ", exception.Message);
-        Assert.Contains("isn't a compile-time constant", exception.Message);
-    }
 
     [Fact]
     public void Mvc_Nested_Complex_Member_Is_Reported()
@@ -1212,6 +1233,26 @@ public sealed class EnumParameterBindingCheckTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         CompilationHelper.WalkEndpoints(compilation, discovered, walker);
+    }
+
+    // Generation reads the setting too: RIV1110 on an [ApiController] action turns on it.
+    [Fact]
+    public void Annotated_ApiController_Action_Stops_Generation_On_Non_Constant_Suppression()
+    {
+        var action = AnnotatedAction(Snake)
+            .Replace("[Route(\"api/streets\")]", "[ApiController]\n[Route(\"api/streets\")]");
+        var compilation = CompilationHelper.CreateCompilationFromMultiple([
+            action,
+            NonConstantSuppression("options.SuppressInferBindingSourcesForParameters = suppress;"),
+        ]);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkEndpoints(compilation, discovered, walker)
+        );
+
+        Assert.StartsWith($"error {Diagnostics.BindingInferenceUnreadable}: ", exception.Message);
+        Assert.Equal("RIV1115", Diagnostics.BindingInferenceUnreadable);
     }
 
     [Fact]

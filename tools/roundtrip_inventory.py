@@ -189,7 +189,7 @@ class Walker:
         if mode == "components":
             for name, item in sorted(value.items()):
                 child_pointer = f"{pointer}/{pointer_token(name)}"
-                if name.lower().startswith("x-"):
+                if name.startswith("x-"):
                     self._extension(name, item, child_pointer)
                 elif name not in COMPONENT_NAMESPACES:
                     self.unknown.append(child_pointer)
@@ -204,7 +204,7 @@ class Walker:
 
         for name, item in sorted(value.items()):
             child_pointer = f"{pointer}/{pointer_token(name)}"
-            if name.lower().startswith("x-"):
+            if name.startswith("x-"):
                 self._extension(name, item, child_pointer)
                 continue
             # An Example Object's value is its payload; nowhere else is 'value' a keyword.
@@ -370,7 +370,7 @@ class CarrierWalker:
         self._inspect(value, pointer, schema_context, direct_all_of_branch)
         for name, item in sorted(value.items()):
             child_pointer = f"{pointer}/{pointer_token(name)}"
-            if name.lower().startswith("x-") or name in OPAQUE_KEYS:
+            if name.startswith("x-") or name in OPAQUE_KEYS:
                 continue
             if name == "examples":
                 self._walk_examples(item, child_pointer)

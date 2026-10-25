@@ -43,12 +43,16 @@ public static class ContractWalker
             {
                 foreach (var member in type.GetMembers())
                 {
-                    if (member is not IMethodSymbol method || !method.IsAbstract)
-                    {
-                        continue;
-                    }
-
-                    if (!EndpointWalker.HasHttpMethodAttribute(wkt, method))
+                    // Ordinary methods only: an abstract property's or event's accessors
+                    // are abstract methods too, but never operations.
+                    if (
+                        member
+                        is not IMethodSymbol
+                        {
+                            MethodKind: MethodKind.Ordinary,
+                            IsAbstract: true
+                        } method
+                    )
                     {
                         continue;
                     }
@@ -459,7 +463,7 @@ public static class ContractWalker
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
 
         var declaredRequestBody = ReadDeclaredRequestBody(field, wkt);
-        var (builtParameters, inputTypeName) = BuildParams(
+        var (builtParameters, inputTypeName, bodyFieldNames) = BuildParams(
             wkt,
             httpMethod,
             route,
@@ -548,9 +552,12 @@ public static class ContractWalker
                         call.StatusKey!,
                         ToEndpointExample(
                             call,
-                            DefaultResponseExampleMediaType(
-                                ParseStatusCode(call.StatusKey!),
-                                fileContentType
+                            ResponseExampleMediaType(
+                                responses,
+                                call,
+                                fileContentType,
+                                responseContentTypeOverride,
+                                name
                             )
                         )
                     )
@@ -601,6 +608,7 @@ public static class ContractWalker
             inputTypeName,
             isFormEncoded,
             RequestExamples: requestExamples,
+            FormFieldNames: isFormEncoded ? bodyFieldNames : null,
             IsFileEndpoint: isFileEndpoint,
             QueryAuth: queryAuth,
             BinaryRequestContentType: binaryRequestContentType,
@@ -661,14 +669,72 @@ public static class ContractWalker
         return candidate[(wireName.Length + 1)..].All(char.IsDigit);
     }
 
-    private static string DefaultResponseExampleMediaType(int statusCode, string? fileContentType)
+    /// <summary>
+    /// The media type a response example lands under. A status declared with
+    /// .ResponseContent(...) carries exactly those media types, so its example defaults to
+    /// the single declared one and must name one of them (RIV1002); anything else would
+    /// add a media type the response never declared. Other statuses default to where the
+    /// spec puts their body: a success under the file format or .ProducesContentType(...),
+    /// anything else under application/json.
+    /// </summary>
+    private static string ResponseExampleMediaType(
+        IReadOnlyList<TsResponseType> responses,
+        PendingEndpointExampleCall call,
+        string? fileContentType,
+        string? successContentType,
+        string endpointName
+    )
     {
-        if (fileContentType is not null && statusCode is >= 200 and < 300)
+        var statusKey = call.StatusKey!;
+        var contents = responses
+            .FirstOrDefault(response =>
+                response.EffectiveStatusKey.Equals(statusKey, StringComparison.OrdinalIgnoreCase)
+            )
+            ?.Contents;
+        if (contents is not { Count: > 0 })
         {
-            return fileContentType;
+            if (call.MediaType is not null)
+            {
+                return call.MediaType;
+            }
+
+            return ParseStatusCode(statusKey) is >= 200 and < 300
+                ? fileContentType ?? successContentType ?? "application/json"
+                : "application/json";
         }
 
-        return "application/json";
+        var declared = string.Join(", ", contents.Select(content => $"'{content.MediaType}'"));
+        if (call.MediaType is null)
+        {
+            if (contents.Count == 1)
+            {
+                return contents[0].MediaType;
+            }
+
+            throw new RivetUserException(
+                $"error {Diagnostics.ContractExampleUndeclaredStatus}: contract endpoint '{endpointName}' "
+                    + $"has a response example for status {statusKey} without a media type, and that status "
+                    + $"declares several ({declared}), so Rivet can't tell which one the example shows. "
+                    + "Pass the example's mediaType."
+            );
+        }
+
+        if (
+            !contents.Any(content =>
+                string.Equals(content.MediaType, call.MediaType, StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            throw new RivetUserException(
+                $"error {Diagnostics.ContractExampleUndeclaredStatus}: contract endpoint '{endpointName}' "
+                    + $"has a response example for status {statusKey} under '{call.MediaType}', which that "
+                    + $"status does not declare (it declares {declared}), so the spec would gain a media type "
+                    + "the response never serves. Use one of the declared media types, or declare this one "
+                    + "with .ResponseContent(...)."
+            );
+        }
+
+        return call.MediaType;
     }
 
     private static TsEndpointExample ToEndpointExample(
@@ -768,7 +834,16 @@ public static class ContractWalker
         }
     }
 
-    private static (IReadOnlyList<TsEndpointParam> Params, string? InputTypeName) BuildParams(
+    /// <summary>
+    /// Lowers the input type into route, query, header and body params. BodyFieldNames are
+    /// the JSON body's member names as the spec sends them (route-bound and read-only members
+    /// dropped): the fields of the body when it is form-encoded.
+    /// </summary>
+    private static (
+        IReadOnlyList<TsEndpointParam> Params,
+        string? InputTypeName,
+        IReadOnlyList<string>? BodyFieldNames
+    ) BuildParams(
         WellKnownTypes wkt,
         string httpMethod,
         string route,
@@ -803,6 +878,7 @@ public static class ContractWalker
         // route/query params exactly like a GET/DELETE input.
         var lowersBody = hasBody && binaryContentType is null && !hasOnlyBinaryRequestBody;
         string? inputTypeName = null;
+        IReadOnlyList<string>? bodyFieldNames = null;
 
         // [RivetHeader] properties are header params on every HTTP method —
         // classified BEFORE the route/query/body split so a header never leaks into the
@@ -999,6 +1075,21 @@ public static class ContractWalker
                         // Normal body param
                         var tsType = requestBodyType ?? typeWalker.MapType(tInput);
                         parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
+                        // The emitter drops route-bound members only from TInput itself
+                        // (a [RivetRequestBody] type carries none) and read-only ones.
+                        bodyFieldNames = typeWalker
+                            .GetRequestProperties(declaredRequestBody?.BodyType ?? tInput)
+                            .Where(property =>
+                                (
+                                    requestBodyType is not null
+                                    || !routeMatchedProps.Contains(property.Name)
+                                ) && !property.HasAttribute(wkt.RivetReadOnly)
+                            )
+                            .Select(property =>
+                                typeWalker.GetJsonMemberName(property)
+                                ?? Naming.ToCamelCase(property.Name)
+                            )
+                            .ToList();
                     }
                 }
             }
@@ -1153,7 +1244,7 @@ public static class ContractWalker
             }
         }
 
-        return (parameters, inputTypeName);
+        return (parameters, inputTypeName, bodyFieldNames);
     }
 
     private static TsEndpointParam ToDeclaredParameter(

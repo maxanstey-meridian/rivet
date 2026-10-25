@@ -248,6 +248,74 @@ public sealed class CliExitCodeTests
         );
     }
 
+    // --security replaces the source's security for --check as it does for emission: the
+    // apiKey header it names is the credential, not an undeclared input.
+    [Fact]
+    public async Task Check_Reads_Security_From_The_Command_Line()
+    {
+        const string source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<ItemDto> GetItems =
+                    Define.Get<ItemDto>("/api/items");
+            }
+
+            [ApiController]
+            [Route("api")]
+            public sealed class ItemsController : ControllerBase
+            {
+                [HttpGet("items")]
+                public IActionResult Get([FromHeader(Name = "X-Api-Key")] string key)
+                    => ItemsContract.GetItems.Success(new ItemDto(key)).ToActionResult();
+            }
+            """;
+        using var work = new TempDir();
+        var sourcePath = await WriteSourceAsync(work, "Api.cs", source);
+
+        var withoutSecurity = CliRunner.RunCli(work.FullName, [sourcePath, "--check"]);
+        Assert.Equal(1, withoutSecurity.ExitCode);
+        Assert.Contains("error RIV4006:", withoutSecurity.StdErr);
+
+        var withSecurity = CliRunner.RunCli(
+            work.FullName,
+            [sourcePath, "--check", "--security", "apikey:header:X-Api-Key"]
+        );
+        Assert.Equal(0, withSecurity.ExitCode);
+        Assert.Contains("All OK.", withSecurity.StdErr);
+    }
+
+    [Theory]
+    [InlineData("oauth2", "invalid --security value")]
+    [InlineData("admin=bearer,admin=cookie:sid", "duplicate --security scheme name")]
+    public async Task Invalid_Security_Exits_1_Without_Stack_Trace(
+        string securitySchemes,
+        string expectedError
+    )
+    {
+        using var work = new TempDir();
+        var sourcePath = await WriteSourceAsync(work, "Api.cs", CoveredSource);
+        var result = CliRunner.RunCli(
+            work.FullName,
+            [
+                sourcePath,
+                .. securitySchemes.Split(',').SelectMany(scheme => new[] { "--security", scheme }),
+            ]
+        );
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(expectedError, result.StdErr);
+        Assert.DoesNotContain("   at ", result.StdErr);
+    }
+
     [Fact]
     public async Task Valid_Check_With_Routes_Prints_Routes_And_Exits_Zero()
     {

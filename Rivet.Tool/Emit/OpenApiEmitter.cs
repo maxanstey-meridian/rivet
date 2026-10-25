@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Rivet.Tool.Analysis;
@@ -44,6 +45,9 @@ public sealed class OpenApiEmitter
 
     /// <summary>Component schemas the producer preserved verbatim (generated document provenance).</summary>
     private readonly HashSet<string> _preservedSchemaNames = new(StringComparer.Ordinal);
+
+    /// <summary>Built on first use by <see cref="ComponentSources"/>.</summary>
+    private Dictionary<string, (ComponentSourceKind Kind, string Name)>? _componentSources;
 
     private OpenApiEmitter(
         IReadOnlyDictionary<string, TsTypeDefinition> definitions,
@@ -293,9 +297,23 @@ public sealed class OpenApiEmitter
     private static void RejectDanglingSchemaReferences(JsonObject document)
     {
         var schemas = (document["components"] as JsonObject)?["schemas"] as JsonObject;
-        // Component id → JSON path of its first reference, so the error names a site.
+        // Component id → JSON pointer of its first reference, so the error names a site.
         var referenced = new Dictionary<string, string>(StringComparer.Ordinal);
-        CollectSchemaReferences(document, JsonKeys.Keywords, referenced);
+        OpenApiStructure.VisitObjects(
+            document,
+            swagger2: false,
+            (obj, pointer) =>
+            {
+                if (
+                    obj["$ref"] is JsonValue value
+                    && value.TryGetValue<string>(out var reference)
+                    && JsonPointer.TryGetComponentName(reference, "schemas", out var name)
+                )
+                {
+                    referenced.TryAdd(name, $"{pointer}/$ref");
+                }
+            }
+        );
         foreach (
             var (componentId, site) in referenced.OrderBy(pair => pair.Key, StringComparer.Ordinal)
         )
@@ -311,133 +329,6 @@ public sealed class OpenApiEmitter
                     + $"Add a definition named '{componentId}' to the contract's types (a --from producer must ship every type it references), "
                     + "or point the reference at a type that exists"
             );
-        }
-    }
-
-    /// <summary>
-    /// What an object's keys are, so the reference walk tells a keyword from a name the
-    /// author chose: a property called "default" holds a schema, the keyword holds a value.
-    /// </summary>
-    private enum JsonKeys
-    {
-        /// <summary>OpenAPI or JSON Schema keywords, plus x- extensions.</summary>
-        Keywords,
-
-        /// <summary>Author-chosen names (properties, headers, media types…).</summary>
-        Names,
-
-        /// <summary>Names that can't start with x-, so x- is still an extension: paths, responses, a callback.</summary>
-        ExtensibleNames,
-
-        /// <summary>The components object: maps of names, plus x- extensions.</summary>
-        Components,
-
-        /// <summary>A callbacks map: names whose values are callback objects.</summary>
-        Callbacks,
-    }
-
-    /// <summary>Keywords whose values are literal JSON, where a "$ref" key is data, not a reference.</summary>
-    private static readonly HashSet<string> _literalKeywords = new(StringComparer.Ordinal)
-    {
-        "example",
-        "examples",
-        "value",
-        "default",
-        "const",
-        "enum",
-    };
-
-    /// <summary>Keywords whose value is a map keyed by author-chosen names.</summary>
-    private static readonly HashSet<string> _nameMapKeywords = new(StringComparer.Ordinal)
-    {
-        "properties",
-        "patternProperties",
-        "$defs",
-        "dependentSchemas",
-        "headers",
-        "content",
-        "encoding",
-        "links",
-        "webhooks",
-        "variables",
-        "mapping",
-    };
-
-    private static void CollectSchemaReferences(
-        JsonNode? node,
-        JsonKeys keys,
-        Dictionary<string, string> referenced
-    )
-    {
-        switch (node)
-        {
-            case JsonObject obj:
-                foreach (var (name, child) in obj)
-                {
-                    if (IsLiteral(keys, name))
-                    {
-                        continue;
-                    }
-
-                    if (
-                        keys is JsonKeys.Keywords
-                        && name == "$ref"
-                        && child is JsonValue value
-                        && value.TryGetValue<string>(out var reference)
-                    )
-                    {
-                        AddSchemaReference(reference, value.GetPath(), referenced);
-                    }
-                    else
-                    {
-                        CollectSchemaReferences(child, ChildKeys(keys, name), referenced);
-                    }
-                }
-                break;
-            case JsonArray array:
-                foreach (var child in array)
-                {
-                    CollectSchemaReferences(child, JsonKeys.Keywords, referenced);
-                }
-                break;
-        }
-    }
-
-    private static bool IsLiteral(JsonKeys keys, string name) =>
-        keys switch
-        {
-            JsonKeys.Keywords => _literalKeywords.Contains(name) || IsExtension(name),
-            JsonKeys.ExtensibleNames or JsonKeys.Components => IsExtension(name),
-            _ => false,
-        };
-
-    private static bool IsExtension(string name) => name.StartsWith("x-", StringComparison.Ordinal);
-
-    private static JsonKeys ChildKeys(JsonKeys keys, string name) =>
-        keys switch
-        {
-            JsonKeys.Keywords => name switch
-            {
-                "components" => JsonKeys.Components,
-                "paths" or "responses" => JsonKeys.ExtensibleNames,
-                "callbacks" => JsonKeys.Callbacks,
-                _ when _nameMapKeywords.Contains(name) => JsonKeys.Names,
-                _ => JsonKeys.Keywords,
-            },
-            JsonKeys.Components => name == "callbacks" ? JsonKeys.Callbacks : JsonKeys.Names,
-            JsonKeys.Callbacks => JsonKeys.ExtensibleNames,
-            _ => JsonKeys.Keywords,
-        };
-
-    private static void AddSchemaReference(
-        string reference,
-        string site,
-        Dictionary<string, string> referenced
-    )
-    {
-        if (JsonPointer.TryGetComponentName(reference, "schemas", out var name))
-        {
-            referenced.TryAdd(name, site);
         }
     }
 
@@ -2372,19 +2263,7 @@ public sealed class OpenApiEmitter
             // (no csharpType), object, JsonElement, JsonDocument and the JsonNode family all
             // map to it silently. Any other csharpType names a type with no schema mapping at all,
             // and an untyped stand-in would advertise "anything goes" for a fixed wire shape.
-            if (
-                p.CSharpType
-                is not (
-                    null
-                    or "object"
-                    or "JsonElement"
-                    or "JsonDocument"
-                    or "JsonNode"
-                    or "JsonObject"
-                    or "JsonArray"
-                    or "JsonValue"
-                )
-            )
+            if (!IsAnyJsonCSharpType(p.CSharpType))
             {
                 throw new RivetUserException(
                     $"error {Diagnostics.UnknownTypeUntypedSchema}: type '{p.CSharpType}'{AtContext(context)} has no schema mapping. "
@@ -2486,9 +2365,13 @@ public sealed class OpenApiEmitter
     {
         var inner = MapTsTypeToJsonSchema(n.Inner, context);
 
-        // A component that already admits null needs no null alternative: a oneOf of it
-        // and {type: null} would match null twice, which oneOf rejects.
-        if (ComponentAdmitsNull(n.Inner))
+        // A schema that already admits null needs no null alternative: a oneOf of a component
+        // and {type: null} would match null twice, which oneOf rejects. A primitive spells its
+        // nullability below, where an untyped one's null branch is how import reads JsonNode?.
+        if (
+            n.Inner is not TsType.Primitive
+            && AdmitsNull(n.Inner, new HashSet<string>(StringComparer.Ordinal))
+        )
         {
             return inner;
         }
@@ -2535,45 +2418,143 @@ public sealed class OpenApiEmitter
     }
 
     /// <summary>
-    /// Whether the schema <paramref name="inner"/> maps to already admits null, resolved the
-    /// way <see cref="MapTypeReference"/> and <see cref="MapBrandReference"/> resolve it and
-    /// matching how <see cref="BuildSchemas"/> builds the component it points at.
+    /// "Any JSON value" CLR types, which all map to the empty schema (JsonNode adds only its
+    /// x-rivet-csharp-type). Any other csharpType on an unknown primitive has no schema.
     /// </summary>
-    private bool ComponentAdmitsNull(TsType inner)
-    {
-        if (inner is TsType.TypeRef { Name: var name })
-        {
-            if (_definitions.TryGetValue(name, out var definition))
-            {
-                return definition.ScalarMetadata?.IsNullable == true
-                    || definition.Type is { } aliased && ScalarAdmitsNull(aliased);
-            }
-            if (_enums.TryGetValue(name, out var enumType))
-            {
-                return ScalarAdmitsNull(enumType);
-            }
-            if (!_brands.TryGetValue(name, out var referencedBrand))
-            {
-                return false;
-            }
-            inner = referencedBrand;
-        }
+    private static bool IsAnyJsonCSharpType(string? csharpType) =>
+        csharpType
+            is null
+                or "object"
+                or "JsonElement"
+                or "JsonDocument"
+                or "JsonNode"
+                or "JsonObject"
+                or "JsonArray"
+                or "JsonValue";
 
-        // A synthetic brand is inlined, so its scalar definition's metadata never applies.
-        return inner is TsType.Brand brand
-            && (
-                ScalarAdmitsNull(brand.Inner)
-                || brand.Metadata?.Provenance != TsTypeProvenance.Synthetic
-                    && _definitions.TryGetValue(brand.Name, out var scalarDefinition)
-                    && scalarDefinition.ScalarMetadata?.IsNullable == true
-            );
+    /// <summary>
+    /// Whether the schema <paramref name="type"/> maps to admits null. References resolve the
+    /// way <see cref="MapTypeReference"/> and <see cref="MapBrandReference"/> resolve them, to
+    /// the component <see cref="BuildSchemas"/> actually writes at the referenced id.
+    /// <paramref name="visited"/> stops an alias cycle.
+    /// </summary>
+    private bool AdmitsNull(TsType type, HashSet<string> visited) =>
+        type switch
+        {
+            TsType.Nullable => true,
+            TsType.Primitive { Name: "unknown", CSharpType: var csharpType } => IsAnyJsonCSharpType(
+                csharpType
+            ),
+            TsType.StringUnion stringUnion => stringUnion.ScalarMetadata?.IsNullable == true,
+            TsType.IntUnion intUnion => intUnion.ScalarMetadata?.IsNullable == true,
+            TsType.TypeRef reference => TypeReferenceAdmitsNull(reference.Name, visited),
+            TsType.Brand brand => BrandAdmitsNull(brand, visited),
+            TsType.Union union => union.Variants.Any(variant => AdmitsNull(variant, visited)),
+            _ => false,
+        };
+
+    private bool TypeReferenceAdmitsNull(string name, HashSet<string> visited)
+    {
+        if (_definitions.TryGetValue(name, out var definition))
+        {
+            return definition.Metadata?.Provenance == TsTypeProvenance.Synthetic
+                ? visited.Add($"inline:{name}") && DefinitionAdmitsNull(definition, visited)
+                : ComponentAdmitsNull(definition.Metadata?.ComponentId ?? name, visited);
+        }
+        if (_enums.TryGetValue(name, out var enumType))
+        {
+            var metadata = GetMetadata(enumType);
+            return metadata?.Provenance == TsTypeProvenance.Synthetic
+                ? AdmitsNull(enumType, visited)
+                : ComponentAdmitsNull(metadata?.ComponentId ?? name, visited);
+        }
+        return _brands.TryGetValue(name, out var brand)
+            ? BrandAdmitsNull(brand, visited)
+            : ComponentAdmitsNull(name, visited);
     }
 
-    private static bool ScalarAdmitsNull(TsType type) =>
-        type
-            is TsType.Nullable
-                or TsType.StringUnion { ScalarMetadata.IsNullable: true }
-                or TsType.IntUnion { ScalarMetadata.IsNullable: true };
+    // A synthetic brand is inlined, so its scalar definition's metadata never applies.
+    private bool BrandAdmitsNull(TsType.Brand brand, HashSet<string> visited) =>
+        brand.Metadata?.Provenance == TsTypeProvenance.Synthetic
+            ? AdmitsNull(brand.Inner, visited)
+            : ComponentAdmitsNull(brand.Metadata?.ComponentId ?? brand.Name, visited);
+
+    private bool DefinitionAdmitsNull(TsTypeDefinition definition, HashSet<string> visited) =>
+        definition.ScalarMetadata?.IsNullable == true
+        || definition.Type is { } aliased && AdmitsNull(aliased, visited);
+
+    /// <summary>Whether the component schema at <paramref name="componentId"/> admits null, read from what builds it.</summary>
+    private bool ComponentAdmitsNull(string componentId, HashSet<string> visited)
+    {
+        if (
+            !visited.Add($"component:{componentId}")
+            || !ComponentSources.TryGetValue(componentId, out var source)
+        )
+        {
+            return false;
+        }
+
+        _definitions.TryGetValue(source.Name, out var scalarDefinition);
+        return source.Kind switch
+        {
+            ComponentSourceKind.Definition => DefinitionAdmitsNull(scalarDefinition!, visited),
+            ComponentSourceKind.Brand => AdmitsNull(_brands[source.Name].Inner, visited)
+                || scalarDefinition?.ScalarMetadata?.IsNullable == true,
+            ComponentSourceKind.Enum => AdmitsNull(_enums[source.Name], visited)
+                || scalarDefinition?.Type is TsType.Nullable
+                || scalarDefinition?.ScalarMetadata?.IsNullable == true,
+            _ => throw new UnreachableException($"Unknown component source {source.Kind}."),
+        };
+    }
+
+    private enum ComponentSourceKind
+    {
+        Definition,
+        Brand,
+        Enum,
+    }
+
+    /// <summary>
+    /// The contract entry whose schema <see cref="BuildSchemas"/> leaves at each component id.
+    /// It writes definitions, then brands, then enums, so a later kind replaces an earlier
+    /// one at the same id; this reads them in the same order.
+    /// </summary>
+    private Dictionary<string, (ComponentSourceKind Kind, string Name)> ComponentSources =>
+        _componentSources ??= BuildComponentSources();
+
+    private Dictionary<string, (ComponentSourceKind Kind, string Name)> BuildComponentSources()
+    {
+        var sources = new Dictionary<string, (ComponentSourceKind, string)>(StringComparer.Ordinal);
+        foreach (var (name, definition) in _definitions)
+        {
+            if (
+                definition.TypeParameters.Count == 0
+                && definition.Metadata?.Provenance != TsTypeProvenance.Synthetic
+            )
+            {
+                sources[definition.Metadata?.ComponentId ?? name] = (
+                    ComponentSourceKind.Definition,
+                    name
+                );
+            }
+        }
+        foreach (var (name, brand) in _brands)
+        {
+            if (brand.Metadata?.Provenance != TsTypeProvenance.Synthetic)
+            {
+                sources[brand.Metadata?.ComponentId ?? name] = (ComponentSourceKind.Brand, name);
+            }
+        }
+        foreach (var (name, enumType) in _enums)
+        {
+            var metadata = GetMetadata(enumType);
+            if (metadata?.Provenance != TsTypeProvenance.Synthetic)
+            {
+                sources[metadata?.ComponentId ?? name] = (ComponentSourceKind.Enum, name);
+            }
+        }
+        return sources;
+    }
 
     private static RivetUserException UnresolvedTypeParam(
         TsType.TypeParam tp,

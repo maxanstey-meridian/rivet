@@ -6337,6 +6337,35 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Description_Extensions_Reach_Keyword_Named_Properties_And_Skip_Non_Strings()
+    {
+        // A property named 'default' or 'examples' is a schema, not a default value or an
+        // Example map, so its x-desc becomes its description. A non-string x-desc is not a
+        // description, so the next description extension is used instead of the import failing.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Settings": {
+                "type": "object",
+                "x-desc": { "text": "not a string" },
+                "x-public-description": "Settings for a run",
+                "properties": {
+                    "default": { "type": "string", "x-desc": "The default mode" },
+                    "examples": { "type": "string", "x-desc": "Worked examples" }
+                },
+                "required": ["default", "examples"]
+            }
+            """,
+            title: "API"
+        );
+
+        var content = CompilationHelper.FindFile(CompilationHelper.Import(spec), "Settings.cs");
+
+        Assert.Contains("[RivetDescription(\"Settings for a run\")]", content);
+        Assert.Contains("The default mode", content);
+        Assert.Contains("Worked examples", content);
+    }
+
+    [Fact]
     public void Discriminator_Mapping_Into_Another_File_Is_Dropped_Loudly()
     {
         // DigitalOcean maps action types into unbundled models/*.yml files. Carried through,
@@ -7158,6 +7187,8 @@ public sealed class OpenApiImporterTests
     [Fact]
     public void Component_Refs_With_Escaped_Slash_And_Tilde_Resolve()
     {
+        // The description beside a response or example reference is a Reference object's own
+        // field, so it stays beside the reference rather than becoming a schema allOf.
         const string spec = """
             {
               "openapi": "3.1.0",
@@ -7167,13 +7198,13 @@ public sealed class OpenApiImporterTests
                   "get": {
                     "operationId": "getItem",
                     "responses": {
-                      "200": { "$ref": "#/components/responses/item~1ok" },
+                      "200": { "$ref": "#/components/responses/item~1ok", "description": "the item" },
                       "201": {
                         "description": "created",
                         "content": {
                           "application/json": {
                             "schema": { "$ref": "#/components/schemas/Item" },
-                            "examples": { "default": { "$ref": "#/components/examples/ex~1one~0two" } }
+                            "examples": { "default": { "$ref": "#/components/examples/ex~1one~0two", "description": "Shared" } }
                           }
                         }
                       }

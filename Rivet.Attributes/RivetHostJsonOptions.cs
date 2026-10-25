@@ -28,8 +28,8 @@ internal static class RivetHostJsonOptions
 
     /// <summary>
     /// The host resolves these options from <c>IOptions</c> once every <c>Configure</c> has run,
-    /// and freezes them on its first write anyway. Freezing them here, before comparing, means
-    /// the verdict can't go stale, so each instance is compared once.
+    /// so they're final by the time a result is written. Freezing them here, before comparing,
+    /// means the verdict can't go stale, so each instance is compared once.
     /// </summary>
     internal static void Ensure(JsonSerializerOptions options, string registration)
     {

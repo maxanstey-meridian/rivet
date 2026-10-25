@@ -47,7 +47,10 @@ public sealed record TsEndpointDefinition(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool RequestBodyPresent = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        OpenApiOperationProvenance? Provenance = null
+        OpenApiOperationProvenance? Provenance = null,
+    // A form-encoded body's field names as ContractWalker lowers them, for --check to match
+    // handler form bindings against. Analysis only: never written to contract JSON.
+    [property: JsonIgnore] IReadOnlyList<string>? FormFieldNames = null
 )
 {
     /// <summary>

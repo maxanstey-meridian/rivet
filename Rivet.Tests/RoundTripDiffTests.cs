@@ -1040,25 +1040,31 @@ public sealed class RoundTripDiffTests
             """
             {
               "oneOf": [{ "$ref": "#/components/schemas/Shape" }],
-              "discriminator": { "propertyName": "kind", "mapping": { "self": "Shape", "far": "models/far.yml#/Far", "cat": "Cat.yaml" } }
+              "discriminator": { "propertyName": "kind", "mapping": { "self": "Shape", "far": "models/far.yml#/Far", "cat": "Cat.yaml" } },
+              "properties": {
+                "default": { "discriminator": { "propertyName": "kind", "mapping": { "far": "models/far.yml#/Far" } } }
+              },
+              "x-meta": { "discriminator": { "propertyName": "kind", "mapping": { "far": "models/far.yml#/Far" } } }
             }
             """
         );
         var dropped = original.DeepClone().AsObject();
-        var mapping = dropped["components"]!["schemas"]!["Shape"]!["discriminator"]![
-            "mapping"
-        ]!.AsObject();
+        var shape = dropped["components"]!["schemas"]!["Shape"]!;
+        var mapping = shape["discriminator"]!["mapping"]!.AsObject();
         mapping.Remove("far");
         mapping.Remove("cat");
+        shape["properties"]!["default"]!["discriminator"]!.AsObject().Remove("mapping");
 
         var result = RoundTripDiff.Run(original, dropped);
 
         Assert.Equal(0, result.ExitCode);
         // 'Shape' names a schema component; 'Cat.yaml' names none, so it is a reference.
+        // A property named 'default' is a schema; an extension is data.
         Assert.Equal(
             [
                 "#/components/schemas/Shape/discriminator/mapping/far",
                 "#/components/schemas/Shape/discriminator/mapping/cat",
+                "#/components/schemas/Shape/properties/default/discriminator/mapping/far",
             ],
             result
                 .Details.GetProperty("sourceDefects")

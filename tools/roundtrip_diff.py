@@ -558,66 +558,112 @@ def merge_equivalent_path_templates(document):
     return document, defects
 
 
-OPAQUE_VALUE_KEYS = ("const", "default", "enum", "example", "examples")
-# Fields whose object value maps names to OpenAPI objects or schemas: their keys are names,
-# so a response named "default" is structure, not an opaque value.
-NAME_MAP_FIELDS = (
-    "$defs", "callbacks", "content", "definitions", "dependentSchemas", "encoding", "headers",
-    "links", "parameters", "pathItems", "paths", "patternProperties", "properties",
-    "requestBodies", "responses", "schemas", "securityDefinitions", "securitySchemes",
-    "variables", "webhooks",
+# The structure rules of Rivet.Tool/OpenApiStructure.cs, which this mirrors: which objects in
+# a raw document are OpenAPI or JSON Schema objects, which are maps of author-chosen names,
+# and which values are data. Extensions are the case-sensitive "^x-" patterned fields.
+LITERAL_FIELDS = ("example", "default", "const", "enum")
+OBJECT_MAP_FIELDS = (
+    "$defs", "content", "definitions", "dependentSchemas", "encoding", "headers", "mapping",
+    "parameters", "pathItems", "patternProperties", "properties", "requestBodies", "schemas",
+    "securityDefinitions", "securitySchemes", "variables", "webhooks",
 )
+STRUCTURAL_SHAPES = ("object", "example", "link")
+
+
+def is_extension(name):
+    return name.startswith("x-")
+
+
+def child_shape(owner, key, value, swagger2):
+    """The shape of value under key in an object of shape owner, or None for data."""
+    if owner in STRUCTURAL_SHAPES:
+        if (
+            is_extension(key)
+            or key in LITERAL_FIELDS
+            or (owner == "example" and key == "value")
+            or (owner == "link" and key in ("requestBody", "parameters"))
+        ):
+            return None
+        if key == "examples":
+            return "example_map" if not swagger2 and isinstance(value, dict) else None
+        if key == "components":
+            return "components"
+        if key in ("paths", "responses"):
+            return "extensible_object_map"
+        if key == "callbacks":
+            return "callback_map"
+        if key == "links":
+            return "link_map"
+        return "object_map" if key in OBJECT_MAP_FIELDS else "object"
+    if owner == "components":
+        if is_extension(key):
+            return None
+        return {"examples": "example_map", "links": "link_map", "callbacks": "callback_map"}.get(
+            key, "object_map"
+        )
+    if owner == "extensible_object_map":
+        return None if is_extension(key) else "object"
+    return {
+        "object_map": "object",
+        "example_map": "example",
+        "link_map": "link",
+        "callback_map": "extensible_object_map",
+    }[owner]
+
+
+def structural_objects(document):
+    """Yield (object, pointer) for every OpenAPI or JSON Schema object, parent first, as
+    OpenApiStructure.VisitObjects does. The caller may change an object it is handed."""
+    version = document.get("swagger")
+    swagger2 = isinstance(version, str) and version.startswith("2.")
+
+    def walk(value, pointer, shape):
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                yield from walk(item, f"{pointer}/{index}", "object")
+            return
+        if not isinstance(value, dict):
+            return
+        if shape in STRUCTURAL_SHAPES:
+            yield value, pointer
+        for key, child in list(value.items()):
+            shape_of_child = child_shape(shape, key, child, swagger2)
+            if child is not None and shape_of_child is not None:
+                yield from walk(child, f"{pointer}/{pointer_token(key)}", shape_of_child)
+
+    yield from walk(document, "#", "object")
 
 
 def drop_external_discriminator_mappings(document):
     """Mirror the import's drop of discriminator mapping entries that point outside the
     document. A value is a schema name only when it names a schema component (OpenAPI
-    3.1.1); anything else is a reference, kept when local. Returns the stripped copy and
-    one source defect per dropped entry, in document order."""
+    3.1.1); anything else is a reference, kept when local. Swagger 2's discriminator is a
+    property name with no mapping. Returns the stripped copy and one source defect per
+    dropped entry, in document order."""
     document = json.loads(json.dumps(document))
     defects = []
-    schemas = (
-        document.get("definitions")
-        if "swagger" in document
-        else (document.get("components") or {}).get("schemas")
-    )
+    schemas = (document.get("components") or {}).get("schemas")
     schema_names = set(schemas) if isinstance(schemas, dict) else set()
 
-    def visit(value, pointer, name_map=False):
-        if isinstance(value, list):
-            for index, item in enumerate(value):
-                visit(item, f"{pointer}/{index}")
-            return
-        if not isinstance(value, dict):
-            return
-        if name_map:
-            for key, child in value.items():
-                visit(child, f"{pointer}/{pointer_token(key)}")
-            return
+    for value, pointer in structural_objects(document):
         discriminator = value.get("discriminator")
-        if isinstance(discriminator, dict) and isinstance(discriminator.get("mapping"), dict):
-            mapping = discriminator["mapping"]
-            for tag, target in list(mapping.items()):
-                if (
-                    isinstance(target, str)
-                    and not target.startswith("#")
-                    and target not in schema_names
-                ):
-                    del mapping[tag]
-                    defects.append(
-                        {
-                            "path": f"{pointer}/discriminator/mapping/{pointer_token(tag)}",
-                            "reason": "discriminator mapping references a document outside the source; the import drops the entry",
-                        }
-                    )
-            if not mapping:
-                del discriminator["mapping"]
-        for key, child in value.items():
-            if key in OPAQUE_VALUE_KEYS or key.lower().startswith("x-"):
-                continue
-            visit(child, f"{pointer}/{pointer_token(key)}", key in NAME_MAP_FIELDS)
+        if not isinstance(discriminator, dict) or not isinstance(
+            discriminator.get("mapping"), dict
+        ):
+            continue
+        mapping = discriminator["mapping"]
+        for tag, target in list(mapping.items()):
+            if isinstance(target, str) and not target.startswith("#") and target not in schema_names:
+                del mapping[tag]
+                defects.append(
+                    {
+                        "path": f"{pointer}/discriminator/mapping/{pointer_token(tag)}",
+                        "reason": "discriminator mapping references a document outside the source; the import drops the entry",
+                    }
+                )
+        if not mapping:
+            del discriminator["mapping"]
 
-    visit(document, "#")
     return document, defects
 
 

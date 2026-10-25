@@ -308,7 +308,7 @@ internal static class OpenApiProvenanceWalker
                     RequiredString(args[2], "preserved-field JSON value")
                 );
                 if (
-                    !field.Name.StartsWith("x-", StringComparison.OrdinalIgnoreCase)
+                    !field.Name.StartsWith("x-", StringComparison.Ordinal)
                     && !_preservableDocumentationFields.Contains(field.Name)
                 )
                 {

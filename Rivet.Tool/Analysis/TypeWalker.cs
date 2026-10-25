@@ -69,6 +69,12 @@ public sealed class TypeWalker
     private readonly INamedTypeSymbol? _listType;
     private readonly ImmutableHashSet<INamedTypeSymbol> _dictionaryTypes;
 
+    // Closed generic instantiations already judged for number handling through their
+    // type arguments (RIV1112).
+    private readonly HashSet<ITypeSymbol> _numberHandlingCheckedInstantiations = new(
+        SymbolEqualityComparer.Default
+    );
+
     private readonly WellKnownTypes _types;
 
     private TypeWalker(Compilation compilation, WellKnownTypes types)
@@ -570,6 +576,7 @@ public sealed class TypeWalker
     /// </summary>
     private IMethodSymbol? GetDeserializationConstructor(INamedTypeSymbol type)
     {
+        RefuseAmbiguousJsonConstructor(type);
         var attributed = type.InstanceConstructors.FirstOrDefault(constructor =>
             constructor.HasAttribute(_types.JsonConstructor)
         );
@@ -585,6 +592,27 @@ public sealed class TypeWalker
             .ToList();
         return publicConstructors.FirstOrDefault(constructor => constructor.Parameters.Length == 0)
             ?? (publicConstructors is [var lone] ? lone : null);
+    }
+
+    /// <summary>
+    /// Refuses a type with more than one [JsonConstructor] constructor (RIV1116):
+    /// System.Text.Json throws on it at runtime, so there is no constructor choice for the
+    /// spec to follow.
+    /// </summary>
+    private void RefuseAmbiguousJsonConstructor(INamedTypeSymbol type)
+    {
+        var attributed = type.InstanceConstructors.Count(constructor =>
+            constructor.HasAttribute(_types.JsonConstructor)
+        );
+        if (attributed > 1)
+        {
+            throw new RivetUserException(
+                $"error {Diagnostics.AmbiguousJsonConstructor}: type '{type.ToDisplayString()}' has "
+                    + $"{attributed} [JsonConstructor] constructors. System.Text.Json refuses such a type at "
+                    + "runtime, so there is no constructor whose parameters the spec can follow. Keep "
+                    + "[JsonConstructor] on one constructor."
+            );
+        }
     }
 
     // A record's primary constructor shares the record's parameter list: its parameters
@@ -784,6 +812,7 @@ public sealed class TypeWalker
         }
 
         RefuseUnmodelledTypeConverter(definition);
+        RefuseAmbiguousJsonConstructor(definition);
 
         _visiting.Add(name);
 
@@ -1315,6 +1344,7 @@ public sealed class TypeWalker
         foreach (var (derivedType, tag) in registrations)
         {
             RefuseUnmodelledTypeConverter(derivedType);
+            RefuseAmbiguousJsonConstructor(derivedType);
 
             // Synthesized discriminator property first — a single-member StringUnion,
             // required (non-Nullable), mirroring the TS lowerer's variant shape —
@@ -1648,6 +1678,7 @@ public sealed class TypeWalker
                 // Closed generic (e.g. PagedResult<MessageDto>) → Generic node
                 if (namedType.IsGenericType && !namedType.IsUnboundGenericType)
                 {
+                    RefuseNumberHandlingThroughTypeArguments(namedType, context);
                     var tsArgs = namedType
                         .TypeArguments.Select(a => MapTypeCore(a, context))
                         .ToList();
@@ -2072,6 +2103,96 @@ public sealed class TypeWalker
         }
     }
 
+    /// <summary>
+    /// RIV1112 for generics. The open definition is one schema with T where the value goes,
+    /// so wire-changing [JsonNumberHandling] on a T-typed member only puts strings on the
+    /// wire once an instantiation binds T to a number (Wrapper&lt;int&gt;, not
+    /// Wrapper&lt;string&gt;). Each closed instantiation the walker maps is judged on its
+    /// substituted member types, following the substitution into nested generics
+    /// (Outer&lt;int&gt; holding Inner&lt;int&gt;) and collections.
+    /// </summary>
+    private void RefuseNumberHandlingThroughTypeArguments(ITypeSymbol type, string? context)
+    {
+        switch (type)
+        {
+            case INamedTypeSymbol
+            {
+                OriginalDefinition.SpecialType: SpecialType.System_Nullable_T
+            } nullable:
+                RefuseNumberHandlingThroughTypeArguments(nullable.TypeArguments[0], context);
+                return;
+            case IArrayTypeSymbol array:
+                RefuseNumberHandlingThroughTypeArguments(array.ElementType, context);
+                return;
+            case INamedTypeSymbol { TypeArguments.Length: 1 } collection
+                when IsCollectionType(collection):
+                RefuseNumberHandlingThroughTypeArguments(collection.TypeArguments[0], context);
+                return;
+            case INamedTypeSymbol { TypeArguments.Length: 2 } dictionary
+                when IsDictionaryType(dictionary):
+                RefuseNumberHandlingThroughTypeArguments(dictionary.TypeArguments[1], context);
+                return;
+            case INamedTypeSymbol { IsGenericType: true, IsUnboundGenericType: false } closed
+                when _numberHandlingCheckedInstantiations.Add(closed):
+                break;
+            default:
+                return;
+        }
+
+        var instantiation = (INamedTypeSymbol)type;
+        var definition = instantiation.OriginalDefinition;
+        foreach (var member in GetEffectiveProperties(instantiation))
+        {
+            var declared = member.OriginalDefinition;
+            var memberType = GetMemberType(member);
+            // A member the type arguments don't reach was judged on the open definition.
+            if (SymbolEqualityComparer.Default.Equals(memberType, GetMemberType(declared)))
+            {
+                continue;
+            }
+
+            var surface = declared switch
+            {
+                IPropertySymbol property => GetJsonPropertySurface(property, definition),
+                IFieldSymbol field => GetJsonFieldSurface(field),
+                _ => JsonPropertySurface.Excluded,
+            };
+            if (
+                surface == JsonPropertySurface.Excluded
+                || IsJsonIgnored(declared)
+                || declared is IPropertySymbol header && GetHeaderName(header) is not null
+            )
+            {
+                continue;
+            }
+
+            var (handling, source) =
+                ReadNumberHandling(declared) is { } own ? (own, "the member")
+                : ReadNumberHandling(definition) is { } inherited
+                    ? (inherited, $"type '{definition.ToDisplayString()}'")
+                : ((JsonNumberHandling?)null, "");
+            if (
+                handling is { } wire
+                && (wire & WireChangingNumberHandling) != 0
+                && IsNumberOrNumberCollection(memberType)
+            )
+            {
+                var site = context is null ? "" : $"'{context}' uses ";
+                throw new RivetUserException(
+                    $"error {Diagnostics.UnmodelledNumberHandling}: {site}'{instantiation.ToDisplayString()}', "
+                        + $"which binds '{definition.ToDisplayString()}.{declared.Name}' to "
+                        + $"'{memberType.ToDisplayString()}'. That member is serialized with "
+                        + $"JsonNumberHandling.{wire} (from [JsonNumberHandling] on {source}), which puts "
+                        + "strings on the wire where the spec says number. Remove it (AllowReadingFromString "
+                        + "alone is fine: it only widens what the host reads), or instantiate the type with "
+                        + "a non-number type argument."
+                );
+            }
+
+            RefuseNumberHandlingThroughTypeArguments(memberType, context);
+        }
+    }
+
     private JsonNumberHandling? ReadNumberHandling(ISymbol symbol) =>
         symbol.GetAttribute(_types.JsonNumberHandling)?.ConstructorArguments is [{ Value: int raw }]
             ? (JsonNumberHandling)raw
@@ -2085,9 +2206,9 @@ public sealed class TypeWalker
     /// <summary>
     /// The shapes System.Text.Json applies number handling to: a number (Int128, UInt128
     /// and Half included), or a collection/dictionary whose values are numbers (through
-    /// Nullable). byte[] is a base64 string and is excluded. A type parameter counts: the
-    /// open definition is one schema for every instantiation, and Wrapper&lt;int&gt; puts
-    /// strings on the wire where the spec says number.
+    /// Nullable). byte[] is a base64 string and is excluded. A type parameter is not a
+    /// number: each closed instantiation is judged on what it binds T to
+    /// (<see cref="RefuseNumberHandlingThroughTypeArguments"/>).
     /// </summary>
     private bool IsNumberOrNumberCollection(ITypeSymbol type) =>
         type switch
@@ -2102,7 +2223,6 @@ public sealed class TypeWalker
                 IsNumberOrNumberCollection(named.TypeArguments[0]),
             INamedTypeSymbol { TypeArguments.Length: 2 } named when IsDictionaryType(named) =>
                 IsNumberOrNumberCollection(named.TypeArguments[1]),
-            ITypeParameterSymbol => true,
             _ => type.SpecialType is >= SpecialType.System_SByte and <= SpecialType.System_Double
                 || type is INamedTypeSymbol named && _extraNumberTypes.Contains(named),
         };

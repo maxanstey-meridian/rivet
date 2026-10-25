@@ -42,6 +42,7 @@ public static class CoverageChecker
         Compilation compilation,
         WellKnownTypes wkt,
         IReadOnlyList<ContractEndpoint> contractEndpoints,
+        ContractSecurityMetadata? security,
         string functionsRoutePrefix
     )
     {
@@ -134,15 +135,7 @@ public static class CoverageChecker
             }
         }
 
-        return BuildWarnings(
-            wkt,
-            TypeWalker.Create(compilation, wkt, []),
-            SecurityMetadataWalker.Walk(compilation),
-            fieldMap,
-            implementations,
-            bindings,
-            consumedBindings
-        );
+        return BuildWarnings(wkt, security, fieldMap, implementations, bindings, consumedBindings);
     }
 
     // Matched on the receiver's type, not the method's declaring type: Error and File are
@@ -323,7 +316,6 @@ public static class CoverageChecker
 
     private static IReadOnlyList<CoverageWarning> BuildWarnings(
         WellKnownTypes wkt,
-        TypeWalker walker,
         ContractSecurityMetadata? security,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
         IReadOnlyDictionary<IFieldSymbol, List<TerminalImplementation>> implementations,
@@ -369,9 +361,7 @@ public static class CoverageChecker
                         ContractInputBinding
                             .Compare(
                                 wkt,
-                                walker,
                                 security,
-                                field,
                                 endpoint,
                                 handler,
                                 host,

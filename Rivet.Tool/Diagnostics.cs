@@ -76,6 +76,8 @@ public static class Diagnostics
     public const string UnmodelledNumberHandling = "RIV1112";
     public const string UnreadableContractEndpoint = "RIV1113";
     public const string InvalidSecurityDeclaration = "RIV1114";
+    public const string BindingInferenceUnreadable = "RIV1115";
+    public const string AmbiguousJsonConstructor = "RIV1116";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -138,7 +140,6 @@ public static class Diagnostics
     public const string CoverageOrphanedBinding = "RIV4004";
     public const string CoverageUnbindableEnumParameter = "RIV4005";
     public const string CoverageInputBindingMismatch = "RIV4006";
-    public const string CoverageBindingInferenceUnreadable = "RIV4007";
 
     /// <summary>
     /// Registry of every diagnostic ID with a one-line trigger description.
@@ -191,7 +192,7 @@ public static class Diagnostics
         [ImportedSchemaProvenanceConflict] =
             "Imported generated C# changed while raw schema provenance still targets its original typed shape — extraction fails instead of emitting stale OpenAPI.",
         [UnresolvedBindingSource] =
-            "A parameter's binding source cannot be established from explicit declarations or the retained narrow conventions — the contract is refused, not silently completed.",
+            "A parameter's binding source cannot be established from explicit declarations or the retained narrow conventions, or a [RivetEndpoint] method or abstract [RivetContract] method has no HTTP verb or no route template — the contract is refused, not silently completed.",
         [BodyForbiddenStatusExample] =
             "A response example or content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body there; generation fails instead of emitting body content the host cannot send.",
         [InvalidRivetScalarShape] =
@@ -214,6 +215,10 @@ public static class Diagnostics
             "A contract endpoint can't be read statically: a field with no initializer or one that isn't a Define.* builder chain, an endpoint declared as a property, a call that isn't a Rivet builder method, an example with nothing in it, or any string, int or bool builder argument (route, status, summary, media type, scheme, scope...) that isn't a compile-time constant — generation fails instead of dropping the operation or quietly defaulting the value; use a literal or a const.",
         [InvalidSecurityDeclaration] =
             "A contract endpoint's security calls contradict each other (.Anonymous() alongside .Secure() or .OrAnonymous(), or .AndSecure() with no .Secure() alternative to join) — generation fails instead of guessing which one was meant.",
+        [BindingInferenceUnreadable] =
+            "ApiBehaviorOptions.SuppressInferBindingSourcesForParameters is assigned a value that isn't a compile-time constant, so whether MVC infers binding sources can't be read; generation and --check stop. Read only when the project has an [ApiController] controller.",
+        [AmbiguousJsonConstructor] =
+            "A walked type has more than one [JsonConstructor] constructor — System.Text.Json refuses it at runtime, so there is no constructor choice for the spec to follow; generation fails.",
         [TaggedUnionComponentCollision] =
             "A tagged-union variant's producer-pinned component id is already used by a different schema — generation fails, because one id cannot $ref two shapes.",
         [UndefinedSecurityScheme] =
@@ -288,8 +293,6 @@ public static class Diagnostics
             "A handler binds a string-wire enum from route, query, header or form, and the host's enum parser (minimal API: exact member name; MVC: member name ignoring case; Azure Functions: JSON, so no name at all) would refuse an advertised wire value.",
         [CoverageInputBindingMismatch] =
             "A handler's bound inputs disagree with its contract's: it binds an input the contract doesn't declare, never binds one it does, or binds one from a different source (route, query, header, body, form).",
-        [CoverageBindingInferenceUnreadable] =
-            "ApiBehaviorOptions.SuppressInferBindingSourcesForParameters is assigned a value that isn't a compile-time constant, so whether MVC infers binding sources can't be read; the run stops.",
     };
 
     /// <summary>

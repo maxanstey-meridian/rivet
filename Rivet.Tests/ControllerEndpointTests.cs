@@ -353,6 +353,43 @@ public sealed class ControllerEndpointTests
         Assert.Null(responseExample.ResolvedJson);
     }
 
+    // A success example without a media type lands under the media type the success body is
+    // served as ([Produces]), not an undeclared application/json beside it.
+    [Fact]
+    public void Controller_Success_Example_Defaults_To_The_Produces_Media_Type()
+    {
+        var source = """
+            using System;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ProblemDto(string Title);
+
+            [Route("api/notes")]
+            public sealed class NotesController
+            {
+                [RivetEndpoint]
+                [HttpGet("")]
+                [Produces("text/markdown")]
+                [ProducesResponseType(typeof(string), 200)]
+                [ProducesResponseType(typeof(ProblemDto), 422)]
+                [RivetResponseExample(200, "\"# Notes\"")]
+                [RivetResponseExample(422, "{\"title\":\"Bad\"}")]
+                public string List() => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoint = Assert.Single(WalkEndpoints(source));
+
+        var ok = endpoint.Responses.Single(r => r.StatusCode == 200);
+        Assert.Equal("text/markdown", Assert.Single(ok.Examples!).MediaType);
+        var problem = endpoint.Responses.Single(r => r.StatusCode == 422);
+        Assert.Equal("application/json", Assert.Single(problem.Examples!).MediaType);
+    }
+
     [Fact]
     public void Controller_RequestExampleAttribute_Preserves_Ref_Metadata_Name_And_MediaType_Override()
     {

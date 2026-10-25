@@ -8,6 +8,8 @@ namespace Rivet.Tool.Emit;
 /// </summary>
 internal static class EmitPipeline
 {
+    /// <param name="Security">The document's security, already resolved: the --security
+    /// schemes when given, else the source's.</param>
     internal sealed record EmitInput(
         IReadOnlyDictionary<string, TsType> Enums,
         IReadOnlyList<TsEndpointDefinition> Endpoints,
@@ -46,7 +48,7 @@ internal static class EmitPipeline
             definitionsByName,
             input.BrandsByName,
             input.Enums,
-            SecurityParser.ParseMany(options.SecuritySchemes ?? []) ?? input.Security,
+            input.Security,
             documentInfo
         );
 

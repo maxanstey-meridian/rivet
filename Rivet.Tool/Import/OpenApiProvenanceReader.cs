@@ -32,7 +32,8 @@ internal static class OpenApiProvenanceReader
     {
         var swagger2 =
             root.TryGetProperty("swagger", out var swagger)
-            && swagger.GetString()?.StartsWith("2.", StringComparison.Ordinal) == true;
+            && swagger.ValueKind == JsonValueKind.String
+            && swagger.GetString()!.StartsWith("2.", StringComparison.Ordinal);
         var info = ReadInfo(root.GetProperty("info"));
         var tags = root.TryGetProperty("tags", out var tagArray)
             ? tagArray.EnumerateArray().Select(ReadTag).ToList()
@@ -185,9 +186,7 @@ internal static class OpenApiProvenanceReader
             .EnumerateObject()
             .Select(requestBody => new OpenApiComponentRequestBodyProvenance(
                 requestBody.Name,
-                requestBody.Value.TryGetProperty("description", out var description)
-                    ? description.GetString()
-                    : null,
+                ReadOptionalString(requestBody.Value, "description"),
                 requestBody.Value.TryGetProperty("required", out var required)
                     && required.ValueKind == JsonValueKind.True,
                 requestBody.Value.TryGetProperty("content", out var content)
@@ -356,18 +355,16 @@ internal static class OpenApiProvenanceReader
             foreach (var parameter in sourceParameters.EnumerateArray())
             {
                 if (
-                    parameter.TryGetProperty("$ref", out _)
-                    || !parameter.TryGetProperty("name", out var name)
-                    || !parameter.TryGetProperty("in", out var location)
+                    !TryReadParameterIdentity(parameter, out var name, out var location)
+                    || parameter.TryGetProperty("$ref", out _)
                     || !parameter.TryGetProperty("schema", out var schema)
                 )
                 {
                     continue;
                 }
-                var key = (name.GetString() ?? "", location.GetString() ?? "");
-                parameters[key] = new OpenApiParameterSchemaProvenance(
-                    key.Item1,
-                    key.Item2,
+                parameters[(name, location)] = new OpenApiParameterSchemaProvenance(
+                    name,
+                    location,
                     JsonSerializer.Serialize(schema)
                 );
             }
@@ -559,20 +556,24 @@ internal static class OpenApiProvenanceReader
         ReadVendorExtensions(
             root,
             "#",
+            OpenApiShape.Object,
             swagger2,
             opaqueSchemaPointers,
-            exampleObject: false,
             result
         );
         return result;
     }
 
+    /// <summary>
+    /// The preserved extensions on every OpenAPI or schema object, walked by
+    /// <see cref="OpenApiStructure"/>'s rules so names and literal data are never read as owners.
+    /// </summary>
     private static void ReadVendorExtensions(
         JsonElement value,
         string pointer,
+        OpenApiShape shape,
         bool swagger2,
         IReadOnlySet<string> opaqueSchemaPointers,
-        bool exampleObject,
         List<OpenApiPreservedFieldProvenance> result
     )
     {
@@ -588,9 +589,9 @@ internal static class OpenApiProvenanceReader
                 ReadVendorExtensions(
                     item,
                     $"{pointer}/{index++}",
+                    OpenApiStructure.ArrayItem,
                     swagger2,
                     opaqueSchemaPointers,
-                    exampleObject: false,
                     result
                 );
             }
@@ -601,9 +602,10 @@ internal static class OpenApiProvenanceReader
             return;
         }
 
+        var structural = OpenApiStructure.IsStructuralObject(shape);
         foreach (var property in value.EnumerateObject())
         {
-            if (_preservedVendorExtensions.Contains(property.Name))
+            if (structural && _preservedVendorExtensions.Contains(property.Name))
             {
                 result.Add(
                     new OpenApiPreservedFieldProvenance(
@@ -614,34 +616,21 @@ internal static class OpenApiProvenanceReader
                 );
             }
             else if (
-                !swagger2
-                && property.Name == "examples"
-                && property.Value.ValueKind == JsonValueKind.Object
-            )
-            {
-                foreach (var example in property.Value.EnumerateObject())
-                {
-                    ReadVendorExtensions(
-                        example.Value,
-                        $"{pointer}/examples/{JsonPointer.Escape(example.Name)}",
-                        swagger2,
-                        opaqueSchemaPointers,
-                        exampleObject: true,
-                        result
-                    );
-                }
-            }
-            else if (
-                !(exampleObject && property.Name == "value")
-                && !OpenApiImporter.IsOpaqueOpenApiValue(property.Name)
+                OpenApiStructure.ChildShape(
+                    shape,
+                    property.Name,
+                    property.Value.ValueKind == JsonValueKind.Object,
+                    swagger2
+                ) is
+                { } childShape
             )
             {
                 ReadVendorExtensions(
                     property.Value,
                     $"{pointer}/{JsonPointer.Escape(property.Name)}",
+                    childShape,
                     swagger2,
                     opaqueSchemaPointers,
-                    exampleObject: false,
                     result
                 );
             }

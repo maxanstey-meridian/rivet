@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
@@ -374,6 +375,15 @@ public sealed class MetadataAttributeTests
         "public sealed class ItemDto { public ItemDto(string name) => Name = name; public ItemDto(string name, int n) => Name = name; public string Name { get; } }",
         true
     )]
+    // [RivetType] can't sit on a struct: it marks a stand-in and the contract reaches the struct.
+    [InlineData(
+        "public sealed class Marker; public readonly struct ItemDto { public ItemDto(string name) => Name = name; public string Name { get; } }",
+        true
+    )]
+    [InlineData(
+        "public abstract class BaseDto { protected BaseDto(string name) => Name = name; public string Name { get; } } public sealed class ItemDto : BaseDto { public ItemDto(string name) : base(name) { } }",
+        false
+    )]
     public void GetOnly_Property_Is_ReadOnly_Unless_The_Deserialization_Constructor_Binds_It(
         string declaration,
         bool readOnly
@@ -418,6 +428,52 @@ public sealed class MetadataAttributeTests
             JsonSerializerOptions.Web
         );
         Assert.Equal("default", parameterless!.Name);
+
+        var structured = JsonSerializer.Deserialize<StructConstructorProbe>(
+            """{"name":"wire"}""",
+            JsonSerializerOptions.Web
+        );
+        Assert.Null(structured.Name);
+
+        var inherited = JsonSerializer.Deserialize<DerivedConstructorProbe>(
+            """{"name":"wire"}""",
+            JsonSerializerOptions.Web
+        );
+        Assert.Equal("wire", inherited!.Name);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            JsonSerializer.Deserialize<TwoJsonConstructorsProbe>(
+                """{"name":"wire"}""",
+                JsonSerializerOptions.Web
+            )
+        );
+    }
+
+    private readonly struct StructConstructorProbe
+    {
+        public StructConstructorProbe(string name) => Name = name;
+
+        public string Name { get; }
+    }
+
+    private abstract class BaseConstructorProbe
+    {
+        protected BaseConstructorProbe(string name) => Name = name;
+
+        public string Name { get; }
+    }
+
+    private sealed class DerivedConstructorProbe(string name) : BaseConstructorProbe(name);
+
+    private sealed class TwoJsonConstructorsProbe
+    {
+        [JsonConstructor]
+        public TwoJsonConstructorsProbe(string name) => Name = name;
+
+        [JsonConstructor]
+        public TwoJsonConstructorsProbe(string name, int count) => Name = name + count;
+
+        public string Name { get; }
     }
 
     private sealed class LoneConstructorProbe(string name)

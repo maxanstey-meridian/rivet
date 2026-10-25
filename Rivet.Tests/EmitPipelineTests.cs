@@ -252,28 +252,6 @@ public sealed class EmitPipelineTests : IDisposable
         );
     }
 
-    [Theory]
-    [InlineData(new[] { "bearer", "oauth2" }, "invalid --security value")]
-    [InlineData(new[] { "apikey:path:X-API-Key" }, "invalid --security value")]
-    [InlineData(new[] { "bad name=bearer" }, "invalid --security value")]
-    [InlineData(new[] { "a/b=bearer" }, "invalid --security value")]
-    [InlineData(new[] { "admin=bearer", "admin=cookie:sid" }, "duplicate --security scheme name")]
-    public async Task Invalid_Security_Refuses_As_User_Error(
-        string[] securitySchemes,
-        string expectedError
-    )
-    {
-        var input = BuildEmitInput(DuplicateInlineEndpoints());
-        var exception = await Assert.ThrowsAsync<RivetUserException>(() =>
-            EmitPipeline.RunAsync(
-                input,
-                new RivetOptions(_output.FullName, [], SecuritySchemes: securitySchemes)
-            )
-        );
-
-        Assert.Contains(expectedError, exception.Message);
-    }
-
     [Fact]
     public async Task OpenApiOverride_Is_Sole_Writer_When_Both_Given()
     {

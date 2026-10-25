@@ -2049,52 +2049,118 @@ public sealed class OpenApiEmitterTests
         );
     }
 
+    private const string BareValueRef = """{"$ref":"#/components/schemas/Value"}""";
+
     /// <summary>
     /// A component that already admits null is referenced bare from a nullable site: a
     /// oneOf of it and {type: null} would match null on both branches, which oneOf rejects.
+    /// The component is the one actually written at the name, followed through aliases.
+    /// A synthetic brand is inlined, so a same-name scalar definition's nullability is not
+    /// its own and the site still adds null.
     /// </summary>
     [Theory]
-    [InlineData("definition")]
-    [InlineData("stringEnum")]
-    [InlineData("intEnum")]
-    [InlineData("brand")]
-    public void Nullable_Use_Of_A_Component_That_Admits_Null_Is_A_Bare_Ref(string component)
+    [InlineData("definition", BareValueRef)]
+    [InlineData("stringEnum", BareValueRef)]
+    [InlineData("intEnum", BareValueRef)]
+    [InlineData("brand", BareValueRef)]
+    [InlineData("aliasOfUnknown", BareValueRef)]
+    [InlineData("aliasOfNullableEnum", BareValueRef)]
+    [InlineData("aliasOfNullableBrand", BareValueRef)]
+    [InlineData("nullableOfNullable", BareValueRef)]
+    [InlineData("brandOnlyInBrands", BareValueRef)]
+    [InlineData("enumOverDefinition", BareValueRef)]
+    [InlineData("syntheticBrand", """{"type":["string","null"]}""")]
+    public void Nullable_Use_Of_A_Component_That_Admits_Null_Is_A_Bare_Ref(
+        string component,
+        string expected
+    )
     {
         var nullable = new TsScalarMetadata(IsNullable: true);
+        var nullableString = new TsTypeDefinition(
+            "Value",
+            [],
+            new TsType.Primitive("string"),
+            ScalarMetadata: nullable
+        );
         var definitions = new Dictionary<string, TsTypeDefinition>();
         var brands = new Dictionary<string, TsType.Brand>();
         var enums = new Dictionary<string, TsType>();
-        TsType inner;
+        TsType inner = new TsType.TypeRef("Value");
         switch (component)
         {
             case "definition":
-                definitions["Value"] = new TsTypeDefinition(
-                    "Value",
-                    [],
-                    new TsType.Primitive("string"),
-                    ScalarMetadata: nullable
-                );
-                inner = new TsType.TypeRef("Value");
+                definitions["Value"] = nullableString;
                 break;
             case "stringEnum":
                 enums["Value"] = new TsType.StringUnion(["a", "b"], ScalarMetadata: nullable);
-                inner = new TsType.TypeRef("Value");
                 break;
             case "intEnum":
                 enums["Value"] = new TsType.IntUnion(["1", "2"], ScalarMetadata: nullable);
-                inner = new TsType.TypeRef("Value");
                 break;
-            default:
+            case "brand":
                 var brand = new TsType.Brand("Value", new TsType.Primitive("string"));
                 brands["Value"] = brand;
+                definitions["Value"] = nullableString;
+                inner = brand;
+                break;
+            case "aliasOfUnknown":
+                // rivet-ts `type Payload = unknown`: the component is {}, which admits null.
                 definitions["Value"] = new TsTypeDefinition(
                     "Value",
+                    [],
+                    new TsType.Primitive("unknown")
+                );
+                break;
+            case "aliasOfNullableEnum":
+                enums["Status"] = new TsType.StringUnion(["a", "b"], ScalarMetadata: nullable);
+                definitions["Value"] = new TsTypeDefinition(
+                    "Value",
+                    [],
+                    new TsType.TypeRef("Status")
+                );
+                break;
+            case "aliasOfNullableBrand":
+                var id = new TsType.Brand("Id", new TsType.Primitive("string"));
+                brands["Id"] = id;
+                definitions["Id"] = new TsTypeDefinition(
+                    "Id",
                     [],
                     new TsType.Primitive("string"),
                     ScalarMetadata: nullable
                 );
-                inner = brand;
+                definitions["Value"] = new TsTypeDefinition("Value", [], id);
                 break;
+            case "nullableOfNullable":
+                definitions["Value"] = nullableString;
+                inner = new TsType.Nullable(inner);
+                break;
+            case "brandOnlyInBrands":
+                brands["Value"] = new TsType.Brand(
+                    "Value",
+                    new TsType.Nullable(new TsType.Primitive("string"))
+                );
+                break;
+            case "enumOverDefinition":
+                // The enum's schema replaces the same-name definition's at the component.
+                definitions["Value"] = new TsTypeDefinition(
+                    "Value",
+                    [],
+                    new TsType.Primitive("string")
+                );
+                enums["Value"] = new TsType.StringUnion(["a", "b"], ScalarMetadata: nullable);
+                break;
+            case "syntheticBrand":
+                var synthetic = new TsType.Brand(
+                    "Value",
+                    new TsType.Primitive("string"),
+                    new TsTypeMetadata(null, TsTypeProvenance.Synthetic)
+                );
+                brands["Value"] = synthetic;
+                definitions["Value"] = nullableString;
+                inner = synthetic;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(component), component, null);
         }
         definitions["Holder"] = new TsTypeDefinition(
             "Holder",
@@ -2121,22 +2187,24 @@ public sealed class OpenApiEmitterTests
 
         var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
         var value = schemas.GetProperty("Holder").GetProperty("properties").GetProperty("value");
-        Assert.Equal("""{"$ref":"#/components/schemas/Value"}""", JsonSerializer.Serialize(value));
-        Assert.Contains(
-            "null",
-            schemas
-                .GetProperty("Value")
-                .GetProperty("type")
-                .EnumerateArray()
-                .Select(type => type.GetString())
-        );
+        Assert.Equal(expected, JsonSerializer.Serialize(value));
+        if (
+            expected == BareValueRef
+            && schemas.GetProperty("Value").TryGetProperty("type", out var componentType)
+        )
+        {
+            Assert.Contains(
+                "null",
+                componentType.EnumerateArray().Select(type => type.GetString())
+            );
+        }
     }
 
     [Fact]
     public void Dangling_Ref_Check_Ignores_Ref_Shaped_Literal_Values()
     {
-        // An example or extension is data: a "$ref" key inside one is part of the value,
-        // and a valid document may carry it.
+        // An example, extension or link's request body or parameter is data: a "$ref" key
+        // inside one is part of the value, and a valid document may carry it.
         const string refShaped = """{"$ref":"#/components/schemas/Nowhere"}""";
         using var doc = EmitOpenApiFromModel(
             [
@@ -2177,6 +2245,15 @@ public sealed class OpenApiEmitterTests
                     PreservedFields:
                     [
                         new OpenApiPreservedFieldProvenance("#", "x-shape", refShaped),
+                        new OpenApiPreservedFieldProvenance(
+                            "#/paths/~1things/get/responses/200",
+                            "links",
+                            """{"next":{"operationId":"things","requestBody":REF,"parameters":{"id":REF}}}""".Replace(
+                                "REF",
+                                refShaped,
+                                StringComparison.Ordinal
+                            )
+                        ),
                     ]
                 )
             )
@@ -2186,45 +2263,89 @@ public sealed class OpenApiEmitterTests
             "#/components/schemas/Nowhere",
             doc.RootElement.GetProperty("x-shape").GetProperty("$ref").GetString()
         );
+        var link = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/things")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("links")
+            .GetProperty("next");
+        Assert.Equal(refShaped, JsonSerializer.Serialize(link.GetProperty("requestBody")));
     }
 
     /// <summary>
-    /// A property or header the author named like a keyword still holds a schema, so a
-    /// dangling reference under it is still refused.
+    /// A property, header, component, response or callback the author named like a keyword
+    /// still holds a schema or an OpenAPI object, so a dangling reference under it is still
+    /// refused.
     /// </summary>
     [Theory]
     [InlineData("property", "default")]
     [InlineData("property", "x-trace")]
     [InlineData("header", "x-trace")]
+    [InlineData("component", "default")]
+    [InlineData("response", "default")]
+    [InlineData("callback", "default")]
     public void Dangling_Ref_Under_A_Keyword_Like_Name_Still_Fails(string site, string name)
     {
         var missing = new TsType.TypeRef("Missing");
-        var definitions = new Dictionary<string, TsTypeDefinition>
+        var definitions = new Dictionary<string, TsTypeDefinition>();
+        var preservedFields = new List<OpenApiPreservedFieldProvenance>();
+        TsResponseType response;
+        switch (site)
         {
-            ["Holder"] = new(
-                "Holder",
-                [],
-                [
-                    new TsPropertyDefinition(
-                        name,
-                        site == "property" ? missing : new TsType.Primitive("string"),
-                        false
-                    ),
-                ]
-            ),
-        };
-        var response = new TsResponseType(
-            200,
-            new TsType.TypeRef("Holder"),
-            Headers: site == "header" ? [new TsResponseHeader(name, missing)] : null
-        );
+            case "property":
+                definitions["Holder"] = new("Holder", [], [new(name, missing, false)]);
+                response = new TsResponseType(200, new TsType.TypeRef("Holder"));
+                break;
+            case "header":
+                response = new TsResponseType(
+                    200,
+                    new TsType.Primitive("string"),
+                    Headers: [new TsResponseHeader(name, missing)]
+                );
+                break;
+            case "component":
+                definitions[name] = new(name, [], [new("id", missing, false)]);
+                response = new TsResponseType(200, new TsType.TypeRef(name));
+                break;
+            case "response":
+                response = new TsResponseType(0, missing, StatusKey: name);
+                break;
+            case "callback":
+                response = new TsResponseType(200, new TsType.Primitive("string"));
+                preservedFields.Add(
+                    new OpenApiPreservedFieldProvenance(
+                        "#/paths/~1holder/get",
+                        "callbacks",
+                        """{"NAME":{"{$request.body#/url}":{"post":{"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Missing"}}}},"responses":{"200":{"description":"OK"}}}}}}""".Replace(
+                            "NAME",
+                            name,
+                            StringComparison.Ordinal
+                        )
+                    )
+                );
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(site), site, null);
+        }
 
         var exception = Assert.Throws<RivetUserException>(() =>
             EmitOpenApiFromModel(
                 [new TsEndpointDefinition("get", "GET", "/holder", [], null, "holder", [response])],
                 definitions,
                 new Dictionary<string, TsType.Brand>(),
-                new Dictionary<string, TsType>()
+                new Dictionary<string, TsType>(),
+                documentInfo: new OpenApiDocumentInfo(
+                    Provenance: new OpenApiDocumentProvenance(
+                        new OpenApiInfoProvenance("API", "1"),
+                        [],
+                        null,
+                        [],
+                        [],
+                        PreservedFields: preservedFields
+                    )
+                )
             )
         );
 

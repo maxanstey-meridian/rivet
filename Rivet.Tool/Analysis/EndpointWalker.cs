@@ -94,10 +94,20 @@ public static class EndpointWalker
         if (httpMethod is null)
         {
             throw new RivetUserException(
-                $"error {Diagnostics.UnresolvedBindingSource}: {label} is marked [RivetEndpoint] but has "
-                    + "no [HttpGet], [HttpPost], [HttpPut], [HttpPatch] or [HttpDelete] attribute, so Rivet "
-                    + "can't tell its HTTP method and would drop the operation. Add the verb attribute with "
-                    + "its route template, or remove [RivetEndpoint]."
+                $"error {Diagnostics.UnresolvedBindingSource}: {label} "
+                    + (
+                        isContract
+                            ? "is an abstract method on a [RivetContract] class"
+                            : "is marked [RivetEndpoint]"
+                    )
+                    + " but has no [HttpGet], [HttpPost], [HttpPut], [HttpPatch] or [HttpDelete] attribute, "
+                    + "so Rivet can't tell its HTTP method and would drop the operation. Add the verb attribute "
+                    + "with its route template, or "
+                    + (
+                        isContract
+                            ? "remove the method from the contract."
+                            : "remove [RivetEndpoint]."
+                    )
             );
         }
 
@@ -177,7 +187,7 @@ public static class EndpointWalker
         var requestExamples = ExtractRequestExamples(wkt, method, parameters, isFormEncoded);
         ApplyResponseExamples(
             responses,
-            ExtractResponseExamples(wkt, method),
+            ExtractResponseExamples(wkt, method, responseContentTypeOverride),
             Diagnostics.ControllerExampleUndeclaredStatus,
             $"controller endpoint '{name}'",
             "declare the status on the action (e.g. [ProducesResponseType])"
@@ -378,14 +388,23 @@ public static class EndpointWalker
         return examples.Count == 0 ? null : examples;
     }
 
+    /// <summary>
+    /// The action's [RivetResponseExample]s. One without a media type lands where the spec
+    /// puts its status's body: a success under the [Produces] media type when there is one,
+    /// anything else under application/json.
+    /// </summary>
     private static IReadOnlyList<(
         string StatusKey,
         TsEndpointExample Example
-    )> ExtractResponseExamples(WellKnownTypes wkt, IMethodSymbol method) =>
+    )> ExtractResponseExamples(
+        WellKnownTypes wkt,
+        IMethodSymbol method,
+        string? successContentType
+    ) =>
         method
             .GetAttributes()
             .Where(attr => attr.Is(wkt.RivetResponseExample))
-            .Select(ToResponseExample)
+            .Select(attr => ToResponseExample(attr, successContentType))
             .OfType<(string, TsEndpointExample)>()
             .ToList();
 
@@ -440,13 +459,16 @@ public static class EndpointWalker
     }
 
     private static (string StatusKey, TsEndpointExample Example)? ToResponseExample(
-        AttributeData attr
+        AttributeData attr,
+        string? successContentType
     ) =>
         attr.ConstructorArguments is [{ Value: int statusCode }, { Value: string json }, ..]
             ? (
                 statusCode.ToString(),
                 ToEndpointExample(
-                    "application/json",
+                    statusCode is >= 200 and < 300
+                        ? successContentType ?? "application/json"
+                        : "application/json",
                     GetStringArg(attr, 3),
                     json,
                     GetStringArg(attr, 2),

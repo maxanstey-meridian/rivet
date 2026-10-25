@@ -449,8 +449,13 @@ internal static class ParameterBindingSources
         {
             var own = MvcOwnSource(wkt, attributes, memberType);
             var effective = own?.Source ?? source;
-            var wireName =
-                NameOverride(own?.Attribute) ?? (prefix is null ? name : $"{prefix}.{name}");
+            var wireName = MemberWireName(
+                host,
+                effective,
+                prefix,
+                name,
+                NameOverride(own?.Attribute)
+            );
             var memberPath = $"{path}.{name}";
             var reaches = ReachesEnumParser(effective);
 
@@ -490,6 +495,30 @@ internal static class ParameterBindingSources
         }
 
         expanding.Remove(type);
+    }
+
+    /// <summary>
+    /// The key a member of a complex type is read under. MVC's ComplexObjectModelBinder
+    /// names the member <c>Name =</c> ?? its own name (the field name) and prefixes it with
+    /// the container's model name (ModelNames.CreatePropertyModelName), so a renamed member
+    /// under a prefix is <c>prefix.override</c>; HeaderModelBinder reads the field name alone,
+    /// never prefixed. The minimal-API form mapper takes the override as the whole key.
+    /// </summary>
+    private static string MemberWireName(
+        ParameterBindingHost host,
+        InputSource source,
+        string? prefix,
+        string name,
+        string? nameOverride
+    )
+    {
+        if (host != ParameterBindingHost.Mvc)
+        {
+            return nameOverride ?? (prefix is null ? name : $"{prefix}.{name}");
+        }
+
+        var fieldName = nameOverride ?? name;
+        return source == InputSource.Header || prefix is null ? fieldName : $"{prefix}.{fieldName}";
     }
 
     // ---------------------------------------------------------------
@@ -555,7 +584,7 @@ internal static class ParameterBindingSources
     /// InferParameterBindingInfoConvention, so an unattributed parameter has no binding source
     /// and is bound from the value providers, as on a controller without [ApiController]. A
     /// value that isn't a constant can't be read statically, and every RIV1110, RIV4005 and
-    /// RIV4006 answer for an MVC action depends on it, so it stops the run with RIV4007
+    /// RIV4006 answer for an MVC action depends on it, so it stops the run with RIV1115
     /// rather than guessing.
     /// </summary>
     public static bool SuppressesInferredBindingSources(Compilation compilation) =>
@@ -601,7 +630,7 @@ internal static class ParameterBindingSources
                 {
                     var span = assignment.Syntax.GetLocation().GetLineSpan();
                     throw new RivetUserException(
-                        $"error {Diagnostics.CoverageBindingInferenceUnreadable}: "
+                        $"error {Diagnostics.BindingInferenceUnreadable}: "
                             + $"{span.Path}({span.StartLinePosition.Line + 1},{span.StartLinePosition.Character + 1}): "
                             + $"ApiBehaviorOptions.{property} is set to a value that isn't a compile-time "
                             + "constant, so Rivet can't tell whether MVC infers binding sources for "
@@ -688,6 +717,28 @@ internal static class ParameterBindingSources
         FullName(type)
             is "Microsoft.AspNetCore.Http.HttpContext"
                 or "Microsoft.AspNetCore.Http.HttpRequest";
+
+    /// <summary>
+    /// True when an operation in a handler's body hands over the request or its route values
+    /// without a parameter: a read of an HttpRequest-typed property (a controller's
+    /// <c>Request</c>, <c>context.Request</c>, <c>accessor.HttpContext!.Request</c>) or a
+    /// RouteData-typed one (a controller's <c>RouteData</c>), or a call to
+    /// <c>HttpContext.GetRouteValue</c> or <c>GetRouteData</c>. Reading HttpContext alone
+    /// isn't: its User, RequestAborted and Response carry no input.
+    /// </summary>
+    public static bool ReadsRequest(IOperation operation) =>
+        operation switch
+        {
+            IPropertyReferenceOperation { Property.Type: var type } => FullName(type)
+                is "Microsoft.AspNetCore.Http.HttpRequest"
+                    or "Microsoft.AspNetCore.Routing.RouteData",
+            IInvocationOperation
+            {
+                TargetMethod: { Name: "GetRouteValue" or "GetRouteData" } method,
+            } => FullName(method.ContainingType)
+                == "Microsoft.AspNetCore.Routing.RoutingHttpContextExtensions",
+            _ => false,
+        };
 
     /// <summary>Stream or PipeReader: the raw request body, whatever its media type.</summary>
     public static bool IsRawBody(ITypeSymbol type) =>

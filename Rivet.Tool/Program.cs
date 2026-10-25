@@ -65,6 +65,10 @@ static async Task<int> Run(string[] args)
     );
     var contracts = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
     var contractEndpoints = contracts.Select(contract => contract.Endpoint).ToList();
+    // --security replaces the source's security wholesale, for --check and emission alike.
+    var security =
+        SecurityParser.ParseMany(options.SecuritySchemes ?? [])
+        ?? SecurityMetadataWalker.Walk(compilation);
 
     if (options.Check)
     {
@@ -75,6 +79,7 @@ static async Task<int> Run(string[] args)
             compilation,
             wkt,
             contracts,
+            security,
             functionsRoutePrefix
         );
         foreach (var w in coverageWarnings)
@@ -147,7 +152,6 @@ static async Task<int> Run(string[] args)
         return 0;
     }
 
-    var securityMetadata = SecurityMetadataWalker.Walk(compilation);
     var documentProvenance = OpenApiProvenanceWalker.Walk(compilation, walker);
 
     var emitInput = new EmitPipeline.EmitInput(
@@ -155,7 +159,7 @@ static async Task<int> Run(string[] args)
         merged,
         walker.Definitions,
         walker.Brands,
-        securityMetadata,
+        security,
         documentProvenance
     );
 
@@ -191,7 +195,8 @@ static async Task<int> RunFromContract(RivetOptions options)
         enums,
         endpoints,
         types.ToDictionary(t => t.Name),
-        brands
+        brands,
+        SecurityParser.ParseMany(options.SecuritySchemes ?? [])
     );
 
     return await EmitPipeline.RunAsync(emitInput, options);

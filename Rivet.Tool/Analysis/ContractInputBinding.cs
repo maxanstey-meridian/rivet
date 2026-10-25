@@ -27,12 +27,13 @@ internal sealed record InputBindingMismatch(
 /// <item>an input both have under one name but from different places, which never arrives.</item>
 /// </list>
 /// A handler that can read the request itself (an HttpContext or HttpRequest parameter, a
-/// BindAsync type, a custom model binder, or a body reading a property that hands over the
-/// request, such as a controller's <c>Request</c>, <c>HttpContext</c> or
-/// <c>ControllerContext.HttpContext</c>, or <c>IHttpContextAccessor.HttpContext</c>) may read
-/// a declared input by hand, so it's never told an input is unbound; what it does bind is
-/// still checked. ASP.NET has no attribute that binds a cookie, so a declared cookie needs
-/// such a handler. An unattributed complex parameter that might be a service counts as the
+/// BindAsync type, a custom model binder, or a body that reads the request or its route
+/// values, such as a controller's <c>Request</c> or <c>RouteData</c>,
+/// <c>ControllerContext.HttpContext.Request</c>, <c>IHttpContextAccessor.HttpContext!.Request</c>
+/// or <c>HttpContext.GetRouteValue</c>) may read a declared input by hand, so it's never told
+/// an input is unbound; what it does bind is still checked. Touching only the HttpContext
+/// (its User, RequestAborted or Response) reads no input. ASP.NET has no attribute that
+/// binds a cookie, so a declared cookie needs such a handler. An unattributed complex parameter that might be a service counts as the
 /// body when the contract declares one and as a service when it doesn't. The
 /// <c>Authorization</c> header, a <c>.QueryAuth()</c> token and the header or query parameter
 /// of an apiKey scheme the endpoint's security names belong to the contract's security, not
@@ -43,9 +44,7 @@ internal static class ContractInputBinding
 {
     public static IEnumerable<InputBindingMismatch> Compare(
         WellKnownTypes wkt,
-        TypeWalker walker,
         ContractSecurityMetadata? security,
-        IFieldSymbol field,
         TsEndpointDefinition endpoint,
         IMethodSymbol handler,
         ParameterBindingHost host,
@@ -59,7 +58,7 @@ internal static class ContractInputBinding
         }
 
         var body = DeclaredBody(endpoint);
-        var declared = DeclaredInputs(wkt, walker, field, endpoint, body);
+        var declared = DeclaredInputs(endpoint, body);
         var apiKeys = ApiKeySchemes(endpoint, security);
         var routeParameters = RouteParser.ParseRouteParamNames(route ?? endpoint.RouteTemplate);
         var inputs = handler
@@ -255,14 +254,10 @@ internal static class ContractInputBinding
 
     /// <summary>
     /// The contract's named inputs: route, query, header and cookie parameters, the named
-    /// parts of a multipart body, and the fields of a form-encoded body. Those fields are the
-    /// input type's request properties under their JSON names, less any a route token takes,
-    /// as ContractWalker lowers them into the form schema.
+    /// parts of a multipart body, and the fields of a form-encoded body, which ContractWalker
+    /// records as it lowers the body (<see cref="TsEndpointDefinition.FormFieldNames"/>).
     /// </summary>
     private static List<DeclaredInput> DeclaredInputs(
-        WellKnownTypes wkt,
-        TypeWalker walker,
-        IFieldSymbol field,
         TsEndpointDefinition endpoint,
         DeclaredBodyKind body
     )
@@ -288,40 +283,18 @@ internal static class ContractInputBinding
         if (
             body == DeclaredBodyKind.Form
             && !declared.Any(input => input.Source == InputSource.Form)
-            && InputType(wkt, field) is { } inputType
         )
         {
-            var routeTokens = RouteParser
-                .ParseRouteParamNames(endpoint.RouteTemplate)
-                .Select(RouteParser.NormalizeForMatching)
-                .ToHashSet(StringComparer.Ordinal);
             declared.AddRange(
-                walker
-                    .GetRequestProperties(inputType)
-                    .Where(property =>
-                        !routeTokens.Contains(RouteParser.NormalizeForMatching(property.Name))
-                    )
-                    .Select(property => new DeclaredInput(
-                        walker.GetJsonMemberName(property) ?? Naming.ToCamelCase(property.Name),
-                        InputSource.Form
-                    ))
+                (endpoint.FormFieldNames ?? []).Select(name => new DeclaredInput(
+                    name,
+                    InputSource.Form
+                ))
             );
         }
 
         return declared;
     }
-
-    /// <summary>The contract's input type: the TInput its <c>.Bind(...)</c> takes.</summary>
-    private static ITypeSymbol? InputType(WellKnownTypes wkt, IFieldSymbol field) =>
-        field.Type is INamedTypeSymbol { TypeArguments: [var input, ..] } definition
-        && new[]
-        {
-            wkt.RouteDefinitionOfTInputTOutput,
-            wkt.InputRouteDefinitionOfT,
-            wkt.FileRouteDefinitionOfT,
-        }.Contains(definition.OriginalDefinition, SymbolEqualityComparer.Default)
-            ? input
-            : null;
 
     private static DeclaredBodyKind DeclaredBody(TsEndpointDefinition endpoint) =>
         endpoint.Params.Any(parameter =>
@@ -426,11 +399,9 @@ internal static class ContractInputBinding
         };
 
     /// <summary>
-    /// True when the handler's body reads a property that hands over the request (one typed
-    /// HttpContext or HttpRequest): a controller's <c>Request</c>, <c>HttpContext</c> or
-    /// <c>ControllerContext.HttpContext</c>, <c>IHttpContextAccessor.HttpContext</c> on a
-    /// parameter or an injected field, or <c>context.Request</c>. It can then pick any input
-    /// out of the request by hand. Helpers the handler calls aren't followed.
+    /// True when the handler's body reaches the request or its route values
+    /// (<see cref="ParameterBindingSources.ReadsRequest"/>), so it can pick any input out by
+    /// hand. Helpers the handler calls aren't followed.
     /// </summary>
     private static bool ReadsRequestInBody(IMethodSymbol handler)
     {
@@ -444,8 +415,6 @@ internal static class ContractInputBinding
 
         var syntax = reference.GetSyntax();
         return compilation.GetSemanticModel(syntax.SyntaxTree).GetOperation(syntax) is { } body
-            && body.Descendants()
-                .OfType<IPropertyReferenceOperation>()
-                .Any(property => ParameterBindingSources.IsRequest(property.Property.Type));
+            && body.Descendants().Any(ParameterBindingSources.ReadsRequest);
     }
 }

@@ -70,14 +70,18 @@ internal static class EnumParameterBinding
     /// </summary>
     public static bool MvcInfersBody(WellKnownTypes wkt, INamedTypeSymbol controller)
     {
-        if (
-            controller.ContainingAssembly is ISourceAssemblySymbol { Compilation: var compilation }
-            && ParameterBindingSources.SuppressesInferredBindingSources(compilation)
-        )
-        {
-            return false;
-        }
+        // The setting is read only for an API controller: a non-constant one refuses
+        // (RIV1115), and it can't change how a plain controller binds.
+        return IsApiController(wkt, controller)
+            && !(
+                controller.ContainingAssembly
+                    is ISourceAssemblySymbol { Compilation: var compilation }
+                && ParameterBindingSources.SuppressesInferredBindingSources(compilation)
+            );
+    }
 
+    private static bool IsApiController(WellKnownTypes wkt, INamedTypeSymbol controller)
+    {
         for (var type = controller; type is not null; type = type.BaseType)
         {
             if (type.GetAttributes().Any(attribute => IsApiBehavior(wkt, attribute)))
