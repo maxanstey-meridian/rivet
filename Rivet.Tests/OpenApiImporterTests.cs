@@ -3960,6 +3960,29 @@ public sealed class OpenApiImporterTests
             "Target": {
                 "type": "string",
                 "enum": ["production", "preview", "development", "preview"]
+            },
+            "Tagged": {
+                "type": "object",
+                "properties": { "default": { "type": "string", "enum": ["on", "on", "off"] } },
+                "required": ["default"]
+            }
+            """,
+            // A property or response named 'default' is a name, not an opaque default value.
+            paths: """
+            "/modes": {
+                "get": {
+                    "operationId": "getModes",
+                    "responses": {
+                        "default": {
+                            "description": "Other",
+                            "content": {
+                                "application/json": {
+                                    "schema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["a", "a", "b"] } } }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             """,
             title: "API"
@@ -3973,6 +3996,11 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("Value1_2", content);
         Assert.Contains("Value2 = 2", content);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(target, "\"preview\""));
+        Assert.DoesNotContain("On_2", CompilationHelper.FindFile(result, "TaggedDefault.cs"));
+        Assert.DoesNotContain(
+            "A_2",
+            CompilationHelper.FindFile(result, "GetModesResponseDefaultContent0Mode.cs")
+        );
 
         // Must compile — duplicate member names would cause CS errors
         var compilation = CompilationHelper.CompileImportResult(result);
@@ -6197,18 +6225,48 @@ public sealed class OpenApiImporterTests
         Assert.Equal("The deployment.", (string?)delete["parameters"]![0]!["description"]);
     }
 
-    [Fact]
-    public void Paths_That_Differ_Only_In_Parameter_Names_And_Share_A_Method_Fail_Emission()
+    [Theory]
+    // Two GETs on one template is a real clash, not a naming slip.
+    [InlineData(
+        """
+            "/clash/{a}": { "get": { "operationId": "clashA", "parameters": [{ "name": "a", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "A" } } } },
+            "/clash/{b}": { "get": { "operationId": "clashB", "parameters": [{ "name": "b", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "B" } } } }
+            """
+    )]
+    // The earlier path's own parameters and servers would silently apply to moved operations.
+    [InlineData(
+        """
+            "/clash/{a}": { "servers": [{ "url": "https://a.example.com" }], "parameters": [{ "name": "X-Trace", "in": "header", "required": true, "schema": { "type": "string" } }], "get": { "operationId": "clashA", "parameters": [{ "name": "a", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "A" } } } },
+            "/clash/{b}": { "delete": { "operationId": "clashB", "parameters": [{ "name": "b", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "B" } } } }
+            """
+    )]
+    // One name used twice in the later template can't take two different names (this
+    // crashed the import).
+    [InlineData(
+        """
+            "/clash/{b}/sub/{c}": { "get": { "operationId": "clashA", "parameters": [{ "name": "b", "in": "path", "required": true, "schema": { "type": "string" } }, { "name": "c", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "A" } } } },
+            "/clash/{a}/sub/{a}": { "delete": { "operationId": "clashB", "parameters": [{ "name": "a", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "B" } } } }
+            """
+    )]
+    // Two names would both become 'c', leaving two parameters with one name.
+    [InlineData(
+        """
+            "/clash/{c}/sub/{c}": { "get": { "operationId": "clashA", "parameters": [{ "name": "c", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "A" } } } },
+            "/clash/{a}/sub/{b}": { "delete": { "operationId": "clashB", "parameters": [{ "name": "a", "in": "path", "required": true, "schema": { "type": "string" } }, { "name": "b", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "B" } } } }
+            """
+    )]
+    public void Paths_That_Differ_Only_In_Parameter_Names_But_Cannot_Merge_Fail_Emission(
+        string paths
+    )
     {
-        // Two GETs on one template is a real clash, not a naming slip: nothing merges, and
-        // emitting both keys would write the invalid document, so generation refuses.
-        var spec = """
+        // Nothing merges, and emitting both keys would write the invalid document, so
+        // generation refuses.
+        var spec = $$"""
             {
               "openapi": "3.0.3",
               "info": { "title": "Clash", "version": "1.0.0" },
               "paths": {
-                "/clash/{a}": { "get": { "operationId": "clashA", "parameters": [{ "name": "a", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "A" } } } },
-                "/clash/{b}": { "get": { "operationId": "clashB", "parameters": [{ "name": "b", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "204": { "description": "B" } } } }
+                {{paths}}
               }
             }
             """;
@@ -6221,6 +6279,61 @@ public sealed class OpenApiImporterTests
             RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first")
         );
         Assert.Contains("error RIV2013:", exception.Message);
+    }
+
+    [Fact]
+    public void Reference_Shaped_Example_Values_Stay_Data()
+    {
+        // An example, default or const is a JSON value, so one shaped like a $ref with a
+        // description is not a schema reference to rewrite into allOf. A response named
+        // 'default' is structure, so its schema reference still keeps its description.
+        var spec = """
+            {
+              "openapi": "3.0.3",
+              "info": { "title": "Literals", "version": "1.0.0" },
+              "components": {
+                "schemas": {
+                  "Pet": { "type": "object", "properties": { "name": { "type": "string" } } },
+                  "Link": {
+                    "type": "object",
+                    "properties": { "$ref": { "type": "string" }, "description": { "type": "string" } },
+                    "example": { "$ref": "#/components/schemas/Pet", "description": "A literal link." },
+                    "default": { "$ref": "#/components/schemas/Pet", "description": "A literal link." }
+                  }
+                }
+              },
+              "paths": {
+                "/links": {
+                  "get": {
+                    "operationId": "getLink",
+                    "responses": {
+                      "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Link" }, "example": { "$ref": "#/components/schemas/Pet", "description": "A literal link." } } } },
+                      "default": { "description": "Other", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Pet", "description": "The fallback pet." } } } }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        const string literal =
+            """{"$ref":"#/components/schemas/Pet","description":"A literal link."}""";
+        var responses = emitted["paths"]!["/links"]!["get"]!["responses"]!;
+        Assert.Equal(
+            literal,
+            responses["200"]!["content"]!["application/json"]!["example"]!.ToJsonString()
+        );
+        var link = emitted["components"]!["schemas"]!["Link"]!;
+        Assert.Equal(literal, link["example"]!.ToJsonString());
+        Assert.Equal(literal, link["default"]!.ToJsonString());
+        Assert.Equal(
+            """{"$ref":"#/components/schemas/Pet","description":"The fallback pet."}""",
+            responses["default"]!["content"]!["application/json"]!["schema"]!.ToJsonString()
+        );
     }
 
     [Fact]
@@ -6249,7 +6362,7 @@ public sealed class OpenApiImporterTests
                             "oneOf": [{ "$ref": "#/components/schemas/Reboot" }, { "$ref": "#/components/schemas/Resize" }],
                             "discriminator": {
                               "propertyName": "type",
-                              "mapping": { "reboot": "#/components/schemas/Reboot", "resize": "models/resize.yml" }
+                              "mapping": { "reboot": "#/components/schemas/Reboot", "resize": "models/resize.yml", "resized": "Resize", "cat": "Cat.yaml" }
                             }
                           }
                         }
@@ -6268,6 +6381,11 @@ public sealed class OpenApiImporterTests
             "RIV3005: Discriminator mapping entry dropped: 'resize' at #/paths/~1actions/post/requestBody/content/application~1json/schema/discriminator/mapping references 'models/resize.yml', outside this document; Rivet imports one document, so the tag keeps no mapping.",
             result.Warnings
         );
+        // OpenAPI 3.1.1: a value is a schema name only if a schema component has that name.
+        Assert.Contains(
+            "RIV3005: Discriminator mapping entry dropped: 'cat' at #/paths/~1actions/post/requestBody/content/application~1json/schema/discriminator/mapping references 'Cat.yaml', outside this document; Rivet imports one document, so the tag keeps no mapping.",
+            result.Warnings
+        );
 
         using var workDirectory = new TempDir();
         var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
@@ -6276,7 +6394,7 @@ public sealed class OpenApiImporterTests
         var mapping = first["paths"]!["/actions"]!["post"]!["requestBody"]!["content"]![
             "application/json"
         ]!["schema"]!["discriminator"]!["mapping"]!.AsObject();
-        Assert.Equal(["reboot"], mapping.Select(entry => entry.Key));
+        Assert.Equal(["reboot", "resized"], mapping.Select(entry => entry.Key));
 
         var firstPath = Path.Combine(workDirectory.FullName, "first.json");
         File.WriteAllText(firstPath, first.ToJsonString());

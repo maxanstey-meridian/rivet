@@ -279,31 +279,28 @@ public sealed class OpenApiEmitter
             doc["components"] = components;
         }
 
-        // After attaching, so each reference's JSON path is rooted at the document.
-        RejectDanglingSchemaReferences(paths, components, schemas);
-
         var preservedFields = documentInfo.Provenance?.PreservedFields ?? [];
         RetainPreservedFieldOwners(doc, paths, components, preservedFields);
         AttachPreservedFields(doc, preservedFields);
 
+        // Last, over the finished document: a preserved field (an encoding's headers, say)
+        // can reference a schema component too.
+        RejectDanglingSchemaReferences(doc);
+
         return doc.ToJsonString(_jsonOptions);
     }
 
-    private static void RejectDanglingSchemaReferences(
-        JsonObject paths,
-        JsonObject components,
-        JsonObject schemas
-    )
+    private static void RejectDanglingSchemaReferences(JsonObject document)
     {
+        var schemas = (document["components"] as JsonObject)?["schemas"] as JsonObject;
         // Component id → JSON path of its first reference, so the error names a site.
         var referenced = new Dictionary<string, string>(StringComparer.Ordinal);
-        CollectSchemaReferences(paths, referenced);
-        CollectSchemaReferences(components, referenced);
+        CollectSchemaReferences(document, JsonKeys.Keywords, referenced);
         foreach (
             var (componentId, site) in referenced.OrderBy(pair => pair.Key, StringComparer.Ordinal)
         )
         {
-            if (schemas.ContainsKey(componentId))
+            if (schemas?.ContainsKey(componentId) == true)
             {
                 continue;
             }
@@ -317,8 +314,58 @@ public sealed class OpenApiEmitter
         }
     }
 
+    /// <summary>
+    /// What an object's keys are, so the reference walk tells a keyword from a name the
+    /// author chose: a property called "default" holds a schema, the keyword holds a value.
+    /// </summary>
+    private enum JsonKeys
+    {
+        /// <summary>OpenAPI or JSON Schema keywords, plus x- extensions.</summary>
+        Keywords,
+
+        /// <summary>Author-chosen names (properties, headers, media types…).</summary>
+        Names,
+
+        /// <summary>Names that can't start with x-, so x- is still an extension: paths, responses, a callback.</summary>
+        ExtensibleNames,
+
+        /// <summary>The components object: maps of names, plus x- extensions.</summary>
+        Components,
+
+        /// <summary>A callbacks map: names whose values are callback objects.</summary>
+        Callbacks,
+    }
+
+    /// <summary>Keywords whose values are literal JSON, where a "$ref" key is data, not a reference.</summary>
+    private static readonly HashSet<string> _literalKeywords = new(StringComparer.Ordinal)
+    {
+        "example",
+        "examples",
+        "value",
+        "default",
+        "const",
+        "enum",
+    };
+
+    /// <summary>Keywords whose value is a map keyed by author-chosen names.</summary>
+    private static readonly HashSet<string> _nameMapKeywords = new(StringComparer.Ordinal)
+    {
+        "properties",
+        "patternProperties",
+        "$defs",
+        "dependentSchemas",
+        "headers",
+        "content",
+        "encoding",
+        "links",
+        "webhooks",
+        "variables",
+        "mapping",
+    };
+
     private static void CollectSchemaReferences(
         JsonNode? node,
+        JsonKeys keys,
         Dictionary<string, string> referenced
     )
     {
@@ -327,8 +374,14 @@ public sealed class OpenApiEmitter
             case JsonObject obj:
                 foreach (var (name, child) in obj)
                 {
+                    if (IsLiteral(keys, name))
+                    {
+                        continue;
+                    }
+
                     if (
-                        name == "$ref"
+                        keys is JsonKeys.Keywords
+                        && name == "$ref"
                         && child is JsonValue value
                         && value.TryGetValue<string>(out var reference)
                     )
@@ -337,18 +390,44 @@ public sealed class OpenApiEmitter
                     }
                     else
                     {
-                        CollectSchemaReferences(child, referenced);
+                        CollectSchemaReferences(child, ChildKeys(keys, name), referenced);
                     }
                 }
                 break;
             case JsonArray array:
                 foreach (var child in array)
                 {
-                    CollectSchemaReferences(child, referenced);
+                    CollectSchemaReferences(child, JsonKeys.Keywords, referenced);
                 }
                 break;
         }
     }
+
+    private static bool IsLiteral(JsonKeys keys, string name) =>
+        keys switch
+        {
+            JsonKeys.Keywords => _literalKeywords.Contains(name) || IsExtension(name),
+            JsonKeys.ExtensibleNames or JsonKeys.Components => IsExtension(name),
+            _ => false,
+        };
+
+    private static bool IsExtension(string name) => name.StartsWith("x-", StringComparison.Ordinal);
+
+    private static JsonKeys ChildKeys(JsonKeys keys, string name) =>
+        keys switch
+        {
+            JsonKeys.Keywords => name switch
+            {
+                "components" => JsonKeys.Components,
+                "paths" or "responses" => JsonKeys.ExtensibleNames,
+                "callbacks" => JsonKeys.Callbacks,
+                _ when _nameMapKeywords.Contains(name) => JsonKeys.Names,
+                _ => JsonKeys.Keywords,
+            },
+            JsonKeys.Components => name == "callbacks" ? JsonKeys.Callbacks : JsonKeys.Names,
+            JsonKeys.Callbacks => JsonKeys.ExtensibleNames,
+            _ => JsonKeys.Keywords,
+        };
 
     private static void AddSchemaReference(
         string reference,
@@ -392,32 +471,32 @@ public sealed class OpenApiEmitter
         IReadOnlyList<OpenApiPreservedFieldProvenance> fields
     )
     {
-        foreach (var extension in fields)
+        foreach (var field in fields)
         {
             if (
-                !JsonPointer.TryResolve(document, extension.OwnerPointer, out var target)
+                !JsonPointer.TryResolve(document, field.OwnerPointer, out var target)
                 || target is not JsonObject owner
             )
             {
                 throw new RivetUserException(
-                    $"Cannot attach preserved field '{extension.Name}': emitted owner '{extension.OwnerPointer}' does not exist or is not an object."
+                    $"Cannot attach preserved field '{field.Name}': emitted owner '{field.OwnerPointer}' does not exist or is not an object."
                 );
             }
-            if (owner.ContainsKey(extension.Name))
+            if (owner.ContainsKey(field.Name))
             {
                 throw new RivetUserException(
-                    $"Cannot attach preserved field '{extension.Name}' at '{extension.OwnerPointer}': the emitted owner already contains that property."
+                    $"Cannot attach preserved field '{field.Name}' at '{field.OwnerPointer}': the emitted owner already contains that property."
                 );
             }
 
             try
             {
-                owner[extension.Name] = JsonNode.Parse(extension.JsonValue);
+                owner[field.Name] = JsonNode.Parse(field.JsonValue);
             }
             catch (JsonException exception)
             {
                 throw new RivetUserException(
-                    $"Cannot attach preserved field '{extension.Name}' at '{extension.OwnerPointer}': invalid JSON value ({exception.Message})."
+                    $"Cannot attach preserved field '{field.Name}' at '{field.OwnerPointer}': invalid JSON value ({exception.Message})."
                 );
             }
         }
@@ -1024,9 +1103,8 @@ public sealed class OpenApiEmitter
                 resp.Description
                 ?? (resp.StatusCode == 0 ? "Response" : DefaultStatusDescription(resp.StatusCode));
 
-            // Declared response headers are spec-only at runtime.
-            // required is emitted only on explicit opt-in — Rivet cannot enforce presence,
-            // so defaulting it would over-promise.
+            // required is emitted only on explicit opt-in: the adapters then refuse a response
+            // that leaves the header out, so defaulting it would break handlers that never set it.
             if (resp.Headers is { Count: > 0 })
             {
                 var headerObjs = new JsonObject();
@@ -1681,11 +1759,6 @@ public sealed class OpenApiEmitter
             return true;
         }
 
-        if (definition.TypeParameters.Count != generic.TypeArguments.Count)
-        {
-            return false;
-        }
-
         var substitutions = TypeParameterMap(definition, generic);
         properties = definition
             .Properties.Select(property =>
@@ -1925,7 +1998,11 @@ public sealed class OpenApiEmitter
     {
         if (example.ComponentExampleId is not null && example.ResolvedJson is not null)
         {
-            return ComponentReference("examples", example.ComponentExampleId);
+            // OpenAPI 3.1 Reference Objects allow summary and description beside $ref.
+            var reference = ComponentReference("examples", example.ComponentExampleId);
+            AddOptionalString(reference, "summary", example.Summary);
+            AddOptionalString(reference, "description", example.Description);
+            return reference;
         }
 
         var json = example.Json ?? example.ResolvedJson;
@@ -2273,7 +2350,7 @@ public sealed class OpenApiEmitter
                 + "Give the variant's metadata.componentId a name of its own, or make the variant a ref to the existing type"
         );
 
-    // System.Text.Json's TimeSpan "c" format: [-][d.]hh:mm:ss[.fffffff].
+    // System.Text.Json writes TimeSpan in the "c" format: [-][d.]hh:mm:ss[.fffffff].
     private const string TimeSpanPattern =
         @"^-?(\d{1,8}\.)?([01]\d|2[0-3]):[0-5]\d:[0-5]\d(\.\d{1,7})?$";
 
@@ -2292,8 +2369,8 @@ public sealed class OpenApiEmitter
         if (p.Name == "unknown")
         {
             // "Any JSON value" has one honest schema, the empty one: TypeScript's `unknown`
-            // (no csharpType), object, JsonElement and the JsonNode family all map to it
-            // silently. Any other csharpType names a type with no schema mapping at all,
+            // (no csharpType), object, JsonElement, JsonDocument and the JsonNode family all
+            // map to it silently. Any other csharpType names a type with no schema mapping at all,
             // and an untyped stand-in would advertise "anything goes" for a fixed wire shape.
             if (
                 p.CSharpType
@@ -2301,9 +2378,11 @@ public sealed class OpenApiEmitter
                     null
                     or "object"
                     or "JsonElement"
+                    or "JsonDocument"
                     or "JsonNode"
                     or "JsonObject"
                     or "JsonArray"
+                    or "JsonValue"
                 )
             )
             {
@@ -2357,8 +2436,8 @@ public sealed class OpenApiEmitter
             };
         }
 
-        // TimeSpan: System.Text.Json writes and reads only the invariant "c" format, so the
-        // pattern tells clients which strings the server will take.
+        // TimeSpan: the pattern describes what the server writes, System.Text.Json's invariant
+        // "c" format. Its reader is more lenient, but a client sending the written form is safe.
         if (p is { Name: "string", CSharpType: "TimeSpan" })
         {
             return new JsonObject
@@ -2409,11 +2488,7 @@ public sealed class OpenApiEmitter
 
         // A component that already admits null needs no null alternative: a oneOf of it
         // and {type: null} would match null twice, which oneOf rejects.
-        if (
-            n.Inner is TsType.TypeRef { Name: var referenced }
-            && _definitions.TryGetValue(referenced, out var definition)
-            && (definition.Type is TsType.Nullable || definition.ScalarMetadata?.IsNullable == true)
-        )
+        if (ComponentAdmitsNull(n.Inner))
         {
             return inner;
         }
@@ -2458,6 +2533,47 @@ public sealed class OpenApiEmitter
             },
         };
     }
+
+    /// <summary>
+    /// Whether the schema <paramref name="inner"/> maps to already admits null, resolved the
+    /// way <see cref="MapTypeReference"/> and <see cref="MapBrandReference"/> resolve it and
+    /// matching how <see cref="BuildSchemas"/> builds the component it points at.
+    /// </summary>
+    private bool ComponentAdmitsNull(TsType inner)
+    {
+        if (inner is TsType.TypeRef { Name: var name })
+        {
+            if (_definitions.TryGetValue(name, out var definition))
+            {
+                return definition.ScalarMetadata?.IsNullable == true
+                    || definition.Type is { } aliased && ScalarAdmitsNull(aliased);
+            }
+            if (_enums.TryGetValue(name, out var enumType))
+            {
+                return ScalarAdmitsNull(enumType);
+            }
+            if (!_brands.TryGetValue(name, out var referencedBrand))
+            {
+                return false;
+            }
+            inner = referencedBrand;
+        }
+
+        // A synthetic brand is inlined, so its scalar definition's metadata never applies.
+        return inner is TsType.Brand brand
+            && (
+                ScalarAdmitsNull(brand.Inner)
+                || brand.Metadata?.Provenance != TsTypeProvenance.Synthetic
+                    && _definitions.TryGetValue(brand.Name, out var scalarDefinition)
+                    && scalarDefinition.ScalarMetadata?.IsNullable == true
+            );
+    }
+
+    private static bool ScalarAdmitsNull(TsType type) =>
+        type
+            is TsType.Nullable
+                or TsType.StringUnion { ScalarMetadata.IsNullable: true }
+                or TsType.IntUnion { ScalarMetadata.IsNullable: true };
 
     private static RivetUserException UnresolvedTypeParam(
         TsType.TypeParam tp,
@@ -3060,10 +3176,23 @@ public sealed class OpenApiEmitter
     private static Dictionary<string, TsType> TypeParameterMap(
         TsTypeDefinition template,
         TsType.Generic instance
-    ) =>
-        template
+    )
+    {
+        if (template.TypeParameters.Count != instance.TypeArguments.Count)
+        {
+            throw new RivetUserException(
+                $"error {Diagnostics.UnresolvedTypeParameter}: generic '{instance.Name}' is instantiated with "
+                    + $"{instance.TypeArguments.Count} type argument(s), but its template declares "
+                    + $"{template.TypeParameters.Count} ({string.Join(", ", template.TypeParameters)}), "
+                    + "so the arguments can't be matched to the parameters. "
+                    + "Give every generic instantiation one type argument per template parameter"
+            );
+        }
+
+        return template
             .TypeParameters.Zip(instance.TypeArguments)
             .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
+    }
 
     private void CollectGenericInstances(
         IReadOnlyList<TsEndpointDefinition> endpoints,

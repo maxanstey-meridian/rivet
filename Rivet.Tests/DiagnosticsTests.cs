@@ -147,30 +147,25 @@ public sealed class DiagnosticsTests
     // what System.Text.Json writes; BigInteger, which STJ cannot round-trip, is refused.
     // ---------------------------------------------------------------
 
-    private static string WalkDtoCapturingStdErr(string propertyType, string extraUsing = "")
-    {
-        var source = $$"""
+    // Emits the whole pipeline, so a type that loses its mapping fails with RIV2005.
+    private static JsonDocument EmitHolder(string propertyType) =>
+        CompilationHelper.EmitOpenApi(
+            $$"""
             using System;
-            {{extraUsing}}
             using Rivet;
 
             namespace Test;
 
             [RivetType]
             public sealed record HolderDto({{propertyType}} Value);
-            """;
 
-        var compilation = CompilationHelper.CreateCompilation(source);
-        return CompilationHelper.CaptureStdErr(() =>
-        {
-            var discovered = Rivet.Tool.Analysis.SymbolDiscovery.Discover(compilation);
-            _ = Rivet.Tool.Analysis.TypeWalker.Create(
-                compilation,
-                new Rivet.Tool.Analysis.WellKnownTypes(compilation),
-                discovered.RivetTypes
-            );
-        });
-    }
+            [RivetContract]
+            public static class HolderContract
+            {
+                public static readonly RouteDefinition<HolderDto> Get = Define.Get<HolderDto>("/api/holder");
+            }
+            """
+        );
 
     [Fact]
     public void Int128_UInt128_And_Half_Map_To_The_Numbers_System_Text_Json_Writes()
@@ -246,13 +241,7 @@ public sealed class DiagnosticsTests
             }
             """;
 
-        JsonDocument? doc = null;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            doc = CompilationHelper.EmitOpenApi(source)
-        );
-        using var emitted = doc!;
-        Assert.DoesNotContain("'HolderDto.value'", stderr);
-
+        using var emitted = CompilationHelper.EmitOpenApi(source);
         var props = emitted
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -328,33 +317,52 @@ public sealed class DiagnosticsTests
     }
 
     // char and object graduated to supported mappings in P2 wave 6 — RIV1011 and
-    // RIV1012 are retired (tombstoned in Diagnostics.cs and diagnostics.md) and the
-    // walk must be silent for both.
-
-    [Fact]
-    public void Char_Property_Is_Supported_And_Walks_Silently()
+    // RIV1012 are retired (tombstoned in Diagnostics.cs and diagnostics.md). Each emits
+    // its mapping; object is any JSON, the empty schema.
+    [Theory]
+    [InlineData("char", "string")]
+    [InlineData("Guid", "string")]
+    [InlineData("object", null)]
+    public void Supported_Scalars_Emit_Their_Mapping(string propertyType, string? jsonType)
     {
-        var stderr = WalkDtoCapturingStdErr("char");
+        using var emitted = EmitHolder(propertyType);
+        var value = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("HolderDto")
+            .GetProperty("properties")
+            .GetProperty("value");
 
-        Assert.DoesNotContain("RIV1011", stderr);
-        Assert.DoesNotContain("has no schema mapping", stderr);
+        Assert.Equal(
+            jsonType,
+            value.TryGetProperty("type", out var type) ? type.GetString() : null
+        );
     }
 
-    [Fact]
-    public void Object_Property_Is_Supported_And_Walks_Silently()
+    // STJ writes JsonValue and JsonDocument as arbitrary JSON, like JsonNode and
+    // JsonElement, so they share the "any JSON" mapping.
+    [Theory]
+    [InlineData("System.Text.Json.Nodes.JsonValue", "JsonValue")]
+    [InlineData("System.Text.Json.JsonDocument", "JsonDocument")]
+    public void JsonValue_And_JsonDocument_Map_To_Any_Json(string propertyType, string csharpType)
     {
-        var stderr = WalkDtoCapturingStdErr("object");
+        var compilation = CompilationHelper.CreateCompilation(
+            $$"""
+            using Rivet;
 
-        Assert.DoesNotContain("RIV1012", stderr);
-        Assert.DoesNotContain("has no schema mapping", stderr);
-    }
+            namespace Test;
 
-    [Fact]
-    public void Supported_Scalars_Emit_No_Unsupported_Type_Diagnostic()
-    {
-        var stderr = WalkDtoCapturingStdErr("Guid");
+            [RivetType]
+            public sealed record HolderDto({{propertyType}} Value);
+            """
+        );
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
-        Assert.DoesNotContain("has no schema mapping", stderr);
+        var value = Assert.Single(walker.Definitions["HolderDto"].Properties);
+        Assert.Equal(
+            new Rivet.Tool.Model.TsType.Primitive("unknown", CSharpType: csharpType),
+            value.Type
+        );
     }
 
     // ---------------------------------------------------------------

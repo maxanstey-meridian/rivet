@@ -1345,6 +1345,12 @@ public sealed class JsonContractReaderTests
         ] }]
         """;
 
+    private const string PageTemplateTypes = """
+        [{ "name": "Page", "typeParameters": ["T"], "properties": [
+          { "name": "items", "type": { "kind": "array", "element": { "kind": "typeParam", "name": "T" } }, "optional": false }
+        ] }]
+        """;
+
     private const string GetEndpoint = """
         "name": "get", "httpMethod": "GET", "routeTemplate": "/api/things", "params": [], "controllerName": "things"
         """;
@@ -1368,6 +1374,11 @@ public sealed class JsonContractReaderTests
         "RIV2006",
         "[]",
         $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "typeParam", "name": "T" } }] }]"""
+    )]
+    [InlineData(
+        "RIV2006",
+        PageTemplateTypes,
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "generic", "name": "Page", "typeArgs": [{ "kind": "primitive", "type": "string" }, { "kind": "primitive", "type": "number" }] } }] }]"""
     )]
     [InlineData(
         "RIV2007",
@@ -1398,6 +1409,42 @@ public sealed class JsonContractReaderTests
         Assert.Equal(1, exitCode);
         Assert.Contains($"error {id}:", stderr);
         Assert.DoesNotContain("warning RIV20", stderr);
+        Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
+    }
+
+    [Fact]
+    public void Cli_Refuses_A_Scheme_Listed_Twice_In_One_Security_Alternative()
+    {
+        // An alternative is one Security Requirement Object, keyed by scheme name; the
+        // repeated entry used to crash emission with an ArgumentException.
+        using var workDirectory = new TempDir();
+        var contractPath = Path.Combine(workDirectory.FullName, "contract.json");
+        File.WriteAllText(
+            contractPath,
+            $$"""
+            {
+              "types": [],
+              "enums": [],
+              "endpoints": [{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }],
+                "security": { "alternatives": [{ "schemes": [
+                  { "name": "oauth", "scopes": ["read"] },
+                  { "name": "oauth", "scopes": ["write"] }
+                ] }] } }]
+            }
+            """
+        );
+        var outputDirectory = Path.Combine(workDirectory.FullName, "out");
+
+        var (exitCode, _, stderr) = CliRunner.RunCli(
+            workDirectory.FullName,
+            ["--from", contractPath, "--output", outputDirectory, "--security", "oauth=bearer"]
+        );
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("error: invalid contract JSON", stderr);
+        Assert.Contains("endpoint 'things.get' (GET /api/things)", stderr);
+        Assert.Contains("security scheme 'oauth' more than once", stderr);
+        Assert.DoesNotContain("ArgumentException", stderr);
         Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
     }
 

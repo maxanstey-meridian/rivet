@@ -118,9 +118,16 @@ internal sealed class RivetExactEnumConverter<T> : JsonConverter<T>
 
     private static JsonException Refuse(ref Utf8JsonReader reader, IEnumerable<string> accepted)
     {
-        var sent = reader.TokenType is JsonTokenType.String or JsonTokenType.PropertyName
-            ? $"\"{reader.GetString()}\""
-            : $"A JSON {reader.TokenType.ToString().ToLowerInvariant()}";
+        var sent = reader.TokenType switch
+        {
+            JsonTokenType.String or JsonTokenType.PropertyName => $"\"{reader.GetString()}\"",
+            JsonTokenType.StartObject => "A JSON object",
+            JsonTokenType.StartArray => "A JSON array",
+            JsonTokenType.True or JsonTokenType.False => "A JSON boolean",
+            JsonTokenType.Number => "A JSON number",
+            JsonTokenType.Null => "A JSON null",
+            _ => "A JSON value",
+        };
         return new JsonException(
             $"{sent} is not a {typeof(T).Name} value. Send one of "
                 + string.Join(", ", accepted.Select(name => $"\"{name}\""))

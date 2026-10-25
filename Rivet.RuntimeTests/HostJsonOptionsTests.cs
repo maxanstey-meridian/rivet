@@ -1,8 +1,11 @@
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using static Rivet.RuntimeTests.TerminalAndAdapterTests;
 
 namespace Rivet.RuntimeTests;
@@ -52,6 +55,9 @@ public sealed class HostJsonOptionsTests
             options => options.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
             "DefaultIgnoreCondition is WhenWritingNull"
         ),
+#pragma warning disable SYSLIB0020
+        ["null values"] = (options => options.IgnoreNullValues = true, "IgnoreNullValues is on"),
+#pragma warning restore SYSLIB0020
         ["read-only properties"] = (
             options => options.IgnoreReadOnlyProperties = true,
             "IgnoreReadOnlyProperties"
@@ -196,29 +202,105 @@ public sealed class HostJsonOptionsTests
     }
 
     // ProblemDetails puts ASP.NET's own source-generated context in the minimal-API chain, and
-    // an AOT app puts its own there; both follow the host options at runtime.
+    // an AOT app puts its own there; both follow the host options at runtime. So do the naming,
+    // ignore and converter settings on a context's own [JsonSourceGenerationOptions].
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Source_generated_contexts_and_problem_details_are_allowed(bool mvc)
     {
         var response = await ExecuteAsync(
-            Define.Get<Payload>("/items").Success(new Payload("item_1")),
+            Define.Get<Painted>("/items").Success(new Painted("item_1", Shade.Dark, null)),
             mvc,
             services: services =>
             {
                 services.AddProblemDetails();
                 Configure(
                     services,
-                    options => options.TypeInfoResolverChain.Insert(0, PayloadJsonContext.Default)
+                    options =>
+                    {
+                        options.TypeInfoResolverChain.Insert(0, PayloadJsonContext.Default);
+                        options.TypeInfoResolverChain.Insert(
+                            0,
+                            GeneratedOptionsJsonContext.Default
+                        );
+                    }
                 );
             }
         );
 
         Assert.Equal(
-            "item_1",
-            JsonDocument.Parse(response.Body).RootElement.GetProperty("id").GetString()
+            """{"id":"item_1","shade":1,"note":null}""",
+            Encoding.UTF8.GetString(response.Body)
         );
+    }
+
+    // UseStringEnumConverter is the one context setting the generator bakes into the type
+    // infos it emits. The host options never see it, and "Dark" goes out where the spec says 1.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_context_generated_with_string_enums_is_refused(bool mvc)
+    {
+        var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(
+                Define.Get<Painted>("/items").Success(new Painted("item_1", Shade.Dark, null)),
+                mvc,
+                services: services =>
+                {
+                    services.AddProblemDetails();
+                    Configure(
+                        services,
+                        options =>
+                            options.TypeInfoResolverChain.Insert(0, StringEnumJsonContext.Default)
+                    );
+                }
+            )
+        );
+
+        Assert.Contains(
+            "StringEnumJsonContext is generated with UseStringEnumConverter = true",
+            refusal.Message
+        );
+        Assert.DoesNotContain("ProblemDetails", refusal.Message);
+    }
+
+    // The options freeze when first checked, so one verdict per instance can't go stale, and a
+    // refusal for one instance never reaches another.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Each_options_instance_gets_its_own_verdict(bool mvc)
+    {
+        var result = Define.Get<Payload>("/items").Success(new Payload("item_1"));
+        var seen = new List<JsonSerializerOptions>();
+        Task Capture(HttpContext context)
+        {
+            var services = context.RequestServices;
+            seen.Add(
+                mvc
+                    ? services
+                        .GetRequiredService<IOptions<Microsoft.AspNetCore.Mvc.JsonOptions>>()
+                        .Value.JsonSerializerOptions
+                    : services
+                        .GetRequiredService<IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
+                        .Value.SerializerOptions
+            );
+            return Task.CompletedTask;
+        }
+
+        static void Change(JsonSerializerOptions options) => options.PropertyNamingPolicy = null;
+
+        for (var round = 0; round < 2; round++)
+        {
+            await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+                ExecuteAsync(result, mvc, Capture, s => Configure(s, Change))
+            );
+            Assert.Equal(200, (await ExecuteAsync(result, mvc, Capture)).StatusCode);
+        }
+
+        Assert.Equal(4, seen.Distinct().Count());
+        Assert.All(seen, options => Assert.True(options.IsReadOnly));
     }
 
     private static void Configure(IServiceCollection services, Action<JsonSerializerOptions> change)
@@ -233,8 +315,28 @@ public sealed class HostJsonOptionsTests
 
     public sealed record Payload(string Id);
 
+    public enum Shade
+    {
+        Light,
+        Dark,
+    }
+
+    public sealed record Painted(string Id, Shade Shade, string? Note);
+
     private sealed class RenamingResolver : DefaultJsonTypeInfoResolver;
 }
 
 [JsonSerializable(typeof(HostJsonOptionsTests.Payload))]
 internal sealed partial class PayloadJsonContext : JsonSerializerContext;
+
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    Converters = [typeof(JsonStringEnumConverter<HostJsonOptionsTests.Shade>)]
+)]
+[JsonSerializable(typeof(HostJsonOptionsTests.Painted))]
+internal sealed partial class GeneratedOptionsJsonContext : JsonSerializerContext;
+
+[JsonSourceGenerationOptions(UseStringEnumConverter = true)]
+[JsonSerializable(typeof(HostJsonOptionsTests.Painted))]
+internal sealed partial class StringEnumJsonContext : JsonSerializerContext;

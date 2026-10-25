@@ -47,6 +47,44 @@ public sealed class ControllerEndpointTests
         Assert.True(ep.ReturnType is TsType.TypeRef { Name: "ItemDto" });
     }
 
+    // A method marked as an operation that has no verb, or no route on the action or its
+    // class, used to vanish from the spec without a word.
+    [Theory]
+    [InlineData("[Route(\"api/items\")]", "", "no [HttpGet], [HttpPost]")]
+    [InlineData("", "[HttpGet]", "has no route template")]
+    public void RivetEndpoint_Without_Verb_Or_Route_Is_Refused(
+        string classRoute,
+        string verb,
+        string reason
+    )
+    {
+        var source = $$"""
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Name);
+
+            {{classRoute}}
+            public sealed class ItemsController
+            {
+                [RivetEndpoint]
+                {{verb}}
+                [ProducesResponseType(typeof(ItemDto), 200)]
+                public Task<IActionResult> List() => throw new NotImplementedException();
+            }
+            """;
+
+        var message = Assert.Throws<RivetUserException>(() => WalkEndpoints(source)).Message;
+
+        Assert.StartsWith("error RIV1100: endpoint 'ItemsController.List'", message);
+        Assert.Contains(reason, message);
+    }
+
     [Fact]
     public void Controller_CombinesRoutes()
     {

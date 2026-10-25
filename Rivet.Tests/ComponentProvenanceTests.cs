@@ -770,7 +770,8 @@ public sealed class ComponentProvenanceTests
     public void Titled_const_one_of_imports_as_an_enum_named_by_its_titles()
     {
         // OpenAPI 3.1's enum idiom (discord's ThreadAutoArchiveDuration) used to become a
-        // union record of four indistinguishable int slots, under RIV3015.
+        // union record of four indistinguishable int slots, under RIV3015. The real CLI pass
+        // keeps the titled branches and their descriptions, and a named enum keeps its null.
         var spec = CompilationHelper.BuildSpec(
             schemas: """
             "Duration": {
@@ -785,13 +786,15 @@ public sealed class ComponentProvenanceTests
                 "type": "string",
                 "oneOf": [{ "title": "USERS", "const": "users" }, { "title": "Roles", "const": "Roles" }]
             },
+            "Side": { "type": "string", "nullable": true, "enum": ["LEFT", "RIGHT", null] },
             "Envelope": {
                 "type": "object",
                 "properties": {
                     "duration": { "$ref": "#/components/schemas/Duration" },
-                    "kinds": { "type": "array", "items": { "$ref": "#/components/schemas/Kind" } }
+                    "kinds": { "type": "array", "items": { "$ref": "#/components/schemas/Kind" } },
+                    "side": { "$ref": "#/components/schemas/Side" }
                 },
-                "required": ["duration", "kinds"]
+                "required": ["duration", "kinds", "side"]
             }
             """,
             paths: """
@@ -842,6 +845,23 @@ public sealed class ComponentProvenanceTests
                 .GetProperty("enum")
                 .EnumerateArray()
                 .Select(value => value.GetString()!)
+        );
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var cliSchemas = RealCliOpenApiPass.ImportAndEmit(
+            workDirectory.FullName,
+            sourcePath,
+            "first"
+        )["components"]!["schemas"]!;
+        Assert.Equal(
+            """{"type":"integer","format":"int32","oneOf":[{"title":"ONE_HOUR","const":60},{"title":"ONE_DAY","description":"A day.","const":1440}]}""",
+            cliSchemas["Duration"]!.ToJsonString()
+        );
+        Assert.Equal(
+            """{"type":["string","null"],"enum":["LEFT","RIGHT",null]}""",
+            cliSchemas["Side"]!.ToJsonString()
         );
     }
 

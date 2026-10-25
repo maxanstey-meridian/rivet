@@ -899,7 +899,10 @@ internal static class OpenApiProvenanceReader
         if (host is not null || schemes.Count > 0)
         {
             warnings.Add(
-                "RIV3019: Swagger host/schemes cannot be projected without both an explicit host and at least one explicit scheme; no server was invented."
+                Diagnostics.Prefix(
+                    Diagnostics.ImportSwaggerServerNotProjected,
+                    "Swagger host/schemes cannot be projected without both an explicit host and at least one explicit scheme; no server was invented."
+                )
             );
             return [];
         }

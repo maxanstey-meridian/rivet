@@ -2049,6 +2049,336 @@ public sealed class OpenApiEmitterTests
         );
     }
 
+    /// <summary>
+    /// A component that already admits null is referenced bare from a nullable site: a
+    /// oneOf of it and {type: null} would match null on both branches, which oneOf rejects.
+    /// </summary>
+    [Theory]
+    [InlineData("definition")]
+    [InlineData("stringEnum")]
+    [InlineData("intEnum")]
+    [InlineData("brand")]
+    public void Nullable_Use_Of_A_Component_That_Admits_Null_Is_A_Bare_Ref(string component)
+    {
+        var nullable = new TsScalarMetadata(IsNullable: true);
+        var definitions = new Dictionary<string, TsTypeDefinition>();
+        var brands = new Dictionary<string, TsType.Brand>();
+        var enums = new Dictionary<string, TsType>();
+        TsType inner;
+        switch (component)
+        {
+            case "definition":
+                definitions["Value"] = new TsTypeDefinition(
+                    "Value",
+                    [],
+                    new TsType.Primitive("string"),
+                    ScalarMetadata: nullable
+                );
+                inner = new TsType.TypeRef("Value");
+                break;
+            case "stringEnum":
+                enums["Value"] = new TsType.StringUnion(["a", "b"], ScalarMetadata: nullable);
+                inner = new TsType.TypeRef("Value");
+                break;
+            case "intEnum":
+                enums["Value"] = new TsType.IntUnion(["1", "2"], ScalarMetadata: nullable);
+                inner = new TsType.TypeRef("Value");
+                break;
+            default:
+                var brand = new TsType.Brand("Value", new TsType.Primitive("string"));
+                brands["Value"] = brand;
+                definitions["Value"] = new TsTypeDefinition(
+                    "Value",
+                    [],
+                    new TsType.Primitive("string"),
+                    ScalarMetadata: nullable
+                );
+                inner = brand;
+                break;
+        }
+        definitions["Holder"] = new TsTypeDefinition(
+            "Holder",
+            [],
+            [new TsPropertyDefinition("value", new TsType.Nullable(inner), false)]
+        );
+
+        using var doc = EmitOpenApiFromModel(
+            [
+                new TsEndpointDefinition(
+                    "get",
+                    "GET",
+                    "/holder",
+                    [],
+                    null,
+                    "holder",
+                    [new TsResponseType(200, new TsType.TypeRef("Holder"))]
+                ),
+            ],
+            definitions,
+            brands,
+            enums
+        );
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        var value = schemas.GetProperty("Holder").GetProperty("properties").GetProperty("value");
+        Assert.Equal("""{"$ref":"#/components/schemas/Value"}""", JsonSerializer.Serialize(value));
+        Assert.Contains(
+            "null",
+            schemas
+                .GetProperty("Value")
+                .GetProperty("type")
+                .EnumerateArray()
+                .Select(type => type.GetString())
+        );
+    }
+
+    [Fact]
+    public void Dangling_Ref_Check_Ignores_Ref_Shaped_Literal_Values()
+    {
+        // An example or extension is data: a "$ref" key inside one is part of the value,
+        // and a valid document may carry it.
+        const string refShaped = """{"$ref":"#/components/schemas/Nowhere"}""";
+        using var doc = EmitOpenApiFromModel(
+            [
+                new TsEndpointDefinition(
+                    "get",
+                    "GET",
+                    "/things",
+                    [],
+                    null,
+                    "things",
+                    [
+                        new TsResponseType(
+                            200,
+                            new TsType.Primitive("unknown"),
+                            Examples: [new TsEndpointExample("application/json", Json: refShaped)],
+                            Headers:
+                            [
+                                new TsResponseHeader(
+                                    "X-Shape",
+                                    new TsType.Primitive("string"),
+                                    Example: JsonDocument.Parse(refShaped).RootElement.Clone()
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            documentInfo: new OpenApiDocumentInfo(
+                Provenance: new OpenApiDocumentProvenance(
+                    new OpenApiInfoProvenance("API", "1"),
+                    [],
+                    null,
+                    [],
+                    [],
+                    PreservedFields:
+                    [
+                        new OpenApiPreservedFieldProvenance("#", "x-shape", refShaped),
+                    ]
+                )
+            )
+        );
+
+        Assert.Equal(
+            "#/components/schemas/Nowhere",
+            doc.RootElement.GetProperty("x-shape").GetProperty("$ref").GetString()
+        );
+    }
+
+    /// <summary>
+    /// A property or header the author named like a keyword still holds a schema, so a
+    /// dangling reference under it is still refused.
+    /// </summary>
+    [Theory]
+    [InlineData("property", "default")]
+    [InlineData("property", "x-trace")]
+    [InlineData("header", "x-trace")]
+    public void Dangling_Ref_Under_A_Keyword_Like_Name_Still_Fails(string site, string name)
+    {
+        var missing = new TsType.TypeRef("Missing");
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Holder"] = new(
+                "Holder",
+                [],
+                [
+                    new TsPropertyDefinition(
+                        name,
+                        site == "property" ? missing : new TsType.Primitive("string"),
+                        false
+                    ),
+                ]
+            ),
+        };
+        var response = new TsResponseType(
+            200,
+            new TsType.TypeRef("Holder"),
+            Headers: site == "header" ? [new TsResponseHeader(name, missing)] : null
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitOpenApiFromModel(
+                [new TsEndpointDefinition("get", "GET", "/holder", [], null, "holder", [response])],
+                definitions,
+                new Dictionary<string, TsType.Brand>(),
+                new Dictionary<string, TsType>()
+            )
+        );
+
+        Assert.StartsWith("error RIV2005:", exception.Message);
+        Assert.Contains("'Missing'", exception.Message);
+    }
+
+    [Fact]
+    public void Dangling_Ref_In_A_Preserved_Field_Fails_Generation()
+    {
+        // The check runs over the finished document, so a preserved encoding's header
+        // can't $ref a schema component nothing emits.
+        var provenance = new OpenApiDocumentProvenance(
+            new OpenApiInfoProvenance("API", "1"),
+            [],
+            null,
+            [],
+            [],
+            PreservedFields:
+            [
+                new OpenApiPreservedFieldProvenance(
+                    "#/paths/~1things/get/responses/200/content/application~1json",
+                    "encoding",
+                    """{"file":{"headers":{"X-Rate":{"schema":{"$ref":"#/components/schemas/Rate"}}}}}"""
+                ),
+            ]
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitOpenApiFromModel(
+                [
+                    new TsEndpointDefinition(
+                        "get",
+                        "GET",
+                        "/things",
+                        [],
+                        null,
+                        "things",
+                        [new TsResponseType(200, new TsType.Primitive("string"))]
+                    ),
+                ],
+                new Dictionary<string, TsTypeDefinition>(),
+                new Dictionary<string, TsType.Brand>(),
+                new Dictionary<string, TsType>(),
+                documentInfo: new OpenApiDocumentInfo(Provenance: provenance)
+            )
+        );
+
+        Assert.StartsWith("error RIV2005:", exception.Message);
+        Assert.Contains("'Rate'", exception.Message);
+        Assert.Contains("encoding", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("JsonValue")]
+    [InlineData("JsonDocument")]
+    public void Any_Json_CSharpTypes_Map_To_The_Empty_Schema_Silently(string csharpType)
+    {
+        JsonElement schema = default;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            schema = ResponseSchemaOf(new TsType.Primitive("unknown", CSharpType: csharpType))
+        );
+
+        Assert.Empty(schema.EnumerateObject());
+        Assert.Equal("", stderr);
+    }
+
+    [Fact]
+    public void Generic_With_Extra_Type_Arguments_Fails_With_RIV2006()
+    {
+        // Pairing arguments with parameters used to drop the extra ones silently.
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Page"] = new(
+                "Page",
+                ["T"],
+                [
+                    new TsPropertyDefinition(
+                        "items",
+                        new TsType.Array(new TsType.TypeParam("T")),
+                        false
+                    ),
+                ]
+            ),
+        };
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            ResponseSchemaOf(
+                new TsType.Generic(
+                    "Page",
+                    [new TsType.Primitive("string"), new TsType.Primitive("number")]
+                ),
+                definitions
+            )
+        );
+
+        Assert.StartsWith("error RIV2006:", exception.Message);
+        Assert.Contains("generic 'Page'", exception.Message);
+        Assert.Contains("2 type argument(s)", exception.Message);
+        Assert.Contains("declares 1 (T)", exception.Message);
+    }
+
+    [Fact]
+    public void Ref_Backed_Example_Keeps_Its_Summary_And_Description()
+    {
+        // OpenAPI 3.1 Reference Objects allow summary and description beside $ref.
+        using var doc = EmitOpenApiFromModel(
+            [
+                new TsEndpointDefinition(
+                    "get",
+                    "GET",
+                    "/things",
+                    [],
+                    null,
+                    "things",
+                    [
+                        new TsResponseType(
+                            200,
+                            new TsType.Primitive("string"),
+                            Examples:
+                            [
+                                new TsEndpointExample(
+                                    "application/json",
+                                    Name: "shared",
+                                    ComponentExampleId: "thing",
+                                    ResolvedJson: "\"value\"",
+                                    Summary: "A shared thing",
+                                    Description: "Points at the component"
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ],
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+
+        var example = doc
+            .RootElement.GetProperty("paths")
+            .GetProperty("/things")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("examples")
+            .GetProperty("shared");
+        Assert.Equal("#/components/examples/thing", example.GetProperty("$ref").GetString());
+        Assert.Equal("A shared thing", example.GetProperty("summary").GetString());
+        Assert.Equal("Points at the component", example.GetProperty("description").GetString());
+    }
+
     [Fact]
     public void Enrichment_Survives_As_Ref_Siblings()
     {

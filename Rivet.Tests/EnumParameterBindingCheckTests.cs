@@ -911,6 +911,43 @@ public sealed class EnumParameterBindingCheckTests
         }
     }
 
+    [Theory]
+    [InlineData("options.SuppressInferBindingSourcesForParameters = suppress;")]
+    [InlineData("options.SuppressInferBindingSourcesForParameters |= suppress;")]
+    public void Mvc_Suppressed_Inference_That_Is_Not_A_Constant_Stops_The_Check(
+        string configuration
+    )
+    {
+        // Every MVC binding answer turns on this value, so a guess would make RIV4005 and
+        // RIV4006 errors up; the check stops and names the assignment instead.
+        var startup = $$"""
+            using Microsoft.AspNetCore.Mvc;
+
+            namespace Test;
+
+            public static class Startup
+            {
+                public static void Configure(ApiBehaviorOptions options, bool suppress)
+                {
+                    {{configuration}}
+                }
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            RunCheck(
+                Contract,
+                StreetKind(Snake),
+                StreetRequest(),
+                startup,
+                MvcHandler("StreetRequest request")
+            )
+        );
+
+        Assert.StartsWith("error RIV4007: (9,9): ", exception.Message);
+        Assert.Contains("isn't a compile-time constant", exception.Message);
+    }
+
     [Fact]
     public void Mvc_Nested_Complex_Member_Is_Reported()
     {

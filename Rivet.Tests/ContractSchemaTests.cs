@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Json.Schema;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -7,6 +9,11 @@ namespace Rivet.Tests;
 public sealed class ContractSchemaTests
 {
     private static readonly JsonSchema _schema = LoadSchema();
+
+    private static readonly JsonSerializerOptions _modelOptions = new(JsonContractReader.Options)
+    {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+    };
 
     private static JsonSchema LoadSchema()
     {
@@ -546,9 +553,8 @@ public sealed class ContractSchemaTests
     [Fact]
     public void Invalid_ParamSource_Rejected()
     {
-        // "header" became a valid source in P2 wave 5 — "cookie" remains unrepresentable.
         var json =
-            """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"cookie"}],"controllerName":"C","responses":[]}]}""";
+            """{"types":[],"enums":[],"endpoints":[{"name":"foo","httpMethod":"GET","routeTemplate":"/","params":[{"name":"x","type":{"kind":"primitive","type":"string"},"source":"path"}],"controllerName":"C","responses":[]}]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
@@ -924,6 +930,318 @@ public sealed class ContractSchemaTests
         var result = Validate(json);
         Assert.False(result.IsValid);
     }
+
+    /// <summary>
+    /// The schema has additionalProperties:false throughout, so a field the C# model
+    /// serializes but the schema doesn't list makes valid --from JSON invalid. The fixture
+    /// sets every field the model serializes (the coverage assertion fails when a new one
+    /// is added and left unset), and the schema must accept the result.
+    /// </summary>
+    [Fact]
+    public void Fully_Populated_Model_Validates()
+    {
+        var scalar = new TsScalarMetadata(
+            Description: "d",
+            DefaultValue: "\"x\"",
+            Example: "\"x\"",
+            Examples: "[\"x\"]",
+            IsDeprecated: true,
+            IsReadOnly: true,
+            IsWriteOnly: true,
+            Constraints: new TsPropertyConstraints(
+                MinLength: 1,
+                MaxLength: 2,
+                Pattern: "^x$",
+                Minimum: 1,
+                Maximum: 2,
+                ExclusiveMinimum: 0,
+                ExclusiveMaximum: 3,
+                MultipleOf: 1,
+                MinItems: 1,
+                MaxItems: 2,
+                UniqueItems: true,
+                MinProperties: 1,
+                MaxProperties: 2
+            ),
+            IsNullable: true,
+            Title: "t",
+            Xml: new TsSchemaXmlMetadata("n", "urn:x", "p", IsAttribute: true, IsWrapped: true),
+            Format: "f",
+            IsFormatSpecified: true,
+            Required: ["a"],
+            Enum: "[true]",
+            EnumListsNull: true
+        );
+        var component = new TsTypeMetadata("Id", TsTypeProvenance.Component);
+        var synthetic = new TsTypeMetadata(null, TsTypeProvenance.Synthetic);
+        var everyKind = new TsType.Union([
+            new TsType.Primitive("string", "uuid", "Guid"),
+            new TsType.Nullable(new TsType.TypeRef("Thing")),
+            new TsType.Array(new TsType.TypeParam("T"), scalar),
+            new TsType.Dictionary(
+                new TsType.Primitive("number"),
+                new TsType.Primitive("string"),
+                scalar
+            ),
+            new TsType.StringUnion(["a"], component, "f", "d", scalar, "camelCase"),
+            new TsType.IntUnion(["1"], "int32", synthetic, "d", scalar),
+            new TsType.Literal(JsonDocument.Parse("\"x\"").RootElement.Clone()),
+            new TsType.Generic("Page", [new TsType.Primitive("string")]),
+            new TsType.Brand("Email", new TsType.Primitive("string"), component, "d"),
+            new TsType.InlineObject([
+                new TsType.InlineObjectField(
+                    "f",
+                    new TsType.Primitive("string"),
+                    Optional: true,
+                    Surface: TsType.InlineObjectFieldSurface.RequestOnly
+                ),
+            ]),
+            new TsType.TaggedUnion(
+                "kind",
+                [new TsType.TaggedUnionVariant("a", new TsType.TypeRef("Thing"), component)]
+            ),
+        ]);
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Page"] = new(
+                "Page",
+                ["T"],
+                [
+                    new TsPropertyDefinition(
+                        "items",
+                        everyKind,
+                        IsOptional: true,
+                        IsDeprecated: true,
+                        Format: "f",
+                        DefaultValue: "\"x\"",
+                        Constraints: new TsPropertyConstraints(MinItems: 1),
+                        Description: "d",
+                        Example: "\"x\"",
+                        IsReadOnly: true,
+                        IsWriteOnly: true,
+                        ScalarMetadata: scalar
+                    ),
+                ],
+                "d",
+                component,
+                scalar
+            ),
+            ["Alias"] = new("Alias", [], new TsType.Primitive("string"), "d", component, scalar),
+        };
+        var json = JsonDocument.Parse("\"x\"").RootElement.Clone();
+        var examples = new List<TsEndpointExample>
+        {
+            new("application/json", "inline", Json: "\"x\"", Summary: "s", Description: "d"),
+            new(
+                "application/json",
+                "shared",
+                ComponentExampleId: "ex",
+                ResolvedJson: "\"x\"",
+                ReferencedComponents: new Dictionary<string, string> { ["Thing"] = "{}" }
+            ),
+        };
+        var content = new TsMediaTypeContent(
+            "text/plain",
+            new TsType.Primitive("string"),
+            IsBinary: true,
+            SchemaType: "string",
+            Format: "f",
+            IsFormatSpecified: true,
+            SchemaDescription: "d"
+        );
+        var server = new OpenApiServerProvenance(
+            "https://{host}",
+            "d",
+            [new OpenApiServerVariableProvenance("host", "a", ["a"], "d")]
+        );
+        var endpoint = new TsEndpointDefinition(
+            "get",
+            "POST",
+            "/things/{id}",
+            [
+                new TsEndpointParam(
+                    "id",
+                    new TsType.Primitive("string"),
+                    ParamSource.Cookie,
+                    IsOptional: true,
+                    BodyPropertyName: "id",
+                    Description: "d",
+                    IsDeprecated: true,
+                    DefaultValue: "\"x\"",
+                    Constraints: new TsPropertyConstraints(MinLength: 1),
+                    SchemaExamples: json,
+                    Example: json,
+                    Examples: json,
+                    Style: "form",
+                    Explode: true,
+                    SchemaType: "string",
+                    Format: "f",
+                    IsFormatSpecified: true,
+                    AllowEmptyValue: true,
+                    AllowReserved: true
+                ),
+            ],
+            new TsType.TypeRef("Thing"),
+            "things",
+            [
+                new TsResponseType(
+                    200,
+                    new TsType.TypeRef("Thing"),
+                    "d",
+                    examples,
+                    [
+                        new TsResponseHeader(
+                            "X-Thing",
+                            new TsType.Primitive("string"),
+                            "d",
+                            Required: true,
+                            IsDeprecated: true,
+                            SchemaExamples: json,
+                            Example: json,
+                            Examples: json,
+                            Style: "simple",
+                            Explode: true,
+                            AllowReserved: true,
+                            AllowEmptyValue: true,
+                            ContentType: "text/plain"
+                        ),
+                    ],
+                    [content]
+                ),
+                new TsResponseType(0, null, StatusKey: "4XX"),
+            ],
+            Summary: "s",
+            Description: "d",
+            Security: new SecurityRequirements([
+                new SecurityRequirement([new SecurityRequirementScheme("oauth", ["read"])]),
+            ]),
+            FileContentType: "application/pdf",
+            InputTypeName: "Thing",
+            IsFormEncoded: true,
+            RequestType: new TsType.TypeRef("Thing"),
+            RequestExamples: examples,
+            IsFileEndpoint: true,
+            QueryAuth: new QueryAuthMetadata("token"),
+            BinaryRequestContentType: "application/octet-stream",
+            RequestContentTypeOverride: "text/plain",
+            ResponseContentTypeOverride: "text/plain",
+            RequestContents: [content],
+            RequestBodyRequired: true,
+            RequestBodyPresent: true,
+            Provenance: new OpenApiOperationProvenance(
+                true,
+                "things.get",
+                ["things"],
+                true,
+                [server],
+                "d",
+                new OpenApiRivetIdentityProvenance("ThingsContract", "Get"),
+                "ThingBody",
+                [new OpenApiParameterComponentReference("id", "cookie", "Id")],
+                [new OpenApiResponseComponentReference("200", "Ok")],
+                new OpenApiOperationSchemaProvenance(
+                    [new OpenApiParameterSchemaProvenance("id", "cookie", "{}")],
+                    [new OpenApiRequestSchemaProvenance("text/plain", "{}")],
+                    [new OpenApiResponseSchemaProvenance("200", "text/plain", "{}")]
+                ),
+                [new OpenApiResponseHeaderComponentReference("200", "X-Thing", "Header")]
+            )
+        );
+
+        var declared = new SortedSet<string>(StringComparer.Ordinal);
+        var populated = new HashSet<string>(StringComparer.Ordinal);
+        CollectSerializedFields(definitions, declared, populated);
+        CollectSerializedFields(endpoint, declared, populated);
+        var unset = declared.Except(populated).ToList();
+        Assert.True(unset.Count == 0, "Fixture leaves unset: " + string.Join(", ", unset));
+
+        var contract = ContractEmitter.Emit(
+            definitions,
+            new Dictionary<string, TsType>
+            {
+                ["Colour"] = new TsType.StringUnion(
+                    ["red"],
+                    component,
+                    "f",
+                    "d",
+                    scalar,
+                    "camelCase"
+                ),
+                ["Level"] = new TsType.IntUnion(["1"], "int32", component, "d", scalar),
+            },
+            [endpoint]
+        );
+        var result = Validate(contract);
+        Assert.True(result.IsValid, FormatErrors(result));
+    }
+
+    /// <summary>
+    /// Records every serialized field of each model record reached from
+    /// <paramref name="value"/> as "Type.jsonName" in <paramref name="declared"/>, and in
+    /// <paramref name="populated"/> once some instance gives it a value that is written.
+    /// </summary>
+    private static void CollectSerializedFields(
+        object? value,
+        ISet<string> declared,
+        ISet<string> populated
+    )
+    {
+        switch (value)
+        {
+            case null or string or JsonElement:
+                return;
+            case System.Collections.IDictionary dictionary:
+                foreach (var entry in dictionary.Values)
+                {
+                    CollectSerializedFields(entry, declared, populated);
+                }
+                return;
+            case System.Collections.IEnumerable items:
+                foreach (var item in items)
+                {
+                    CollectSerializedFields(item, declared, populated);
+                }
+                return;
+        }
+
+        var type = value.GetType();
+        if (type.Namespace != typeof(TsType).Namespace || type.IsEnum)
+        {
+            return;
+        }
+
+        foreach (var property in _modelOptions.GetTypeInfo(type).Properties)
+        {
+            // [JsonIgnore] properties stay in the metadata without an accessor.
+            if (property.Get is null)
+            {
+                continue;
+            }
+
+            var field = $"{type.Name}.{property.Name}";
+            declared.Add(field);
+            var fieldValue = property.Get?.Invoke(value);
+            if (IsWritten(property.PropertyType, fieldValue))
+            {
+                populated.Add(field);
+            }
+            CollectSerializedFields(fieldValue, declared, populated);
+        }
+    }
+
+    private static bool IsWritten(Type declaredType, object? value) =>
+        value switch
+        {
+            null => false,
+            string => true,
+            JsonElement element => element.ValueKind != JsonValueKind.Undefined,
+            System.Collections.IEnumerable items => items.Cast<object?>().Any(),
+            _ when Nullable.GetUnderlyingType(declaredType) is not null => true,
+            _ when declaredType.IsValueType => !value.Equals(
+                Activator.CreateInstance(declaredType)
+            ),
+            _ => true,
+        };
 
     private static string FormatErrors(EvaluationResults results) =>
         string.Join(

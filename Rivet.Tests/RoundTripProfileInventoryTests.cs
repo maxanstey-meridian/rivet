@@ -345,6 +345,22 @@ public sealed class RoundTripProfileInventoryTests
     }
 
     [Fact]
+    public void Value_Outside_An_Example_Object_Fails_The_Inventory()
+    {
+        // 'value' is a keyword only inside an Example Object; on a schema it is unreviewed.
+        using var mutation = MutateOkta(document =>
+            document["components"] = JsonNode.Parse(
+                """{ "schemas": { "Stray": { "type": "string", "value": 1 } } }"""
+            )
+        );
+
+        var result = RunInventory("--document", $"okta={mutation.Path}");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("unknown keyword: /components/schemas/Stray/value", Errors(result.StdOut));
+    }
+
+    [Fact]
     public void Changed_Reviewed_Disposition_Fails_The_Inventory()
     {
         var profile = JsonNode

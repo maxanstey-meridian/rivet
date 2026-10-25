@@ -471,6 +471,55 @@ public sealed class PreservedFieldProvenanceTests
         }
     }
 
+    [Fact]
+    public void A_referenced_path_item_is_read_through_its_reference()
+    {
+        // The import inlines a $ref'd path item, so its documentation fields and callbacks
+        // belong to the referencing path; the path's own summary wins over the target's.
+        var spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Shared", "version": "1.0.0" },
+              "components": {
+                "pathItems": {
+                  "Shared": {
+                    "summary": "Target summary",
+                    "description": "Shared pets",
+                    "get": {
+                      "operationId": "listShared",
+                      "externalDocs": { "url": "https://example.com/shared" },
+                      "callbacks": { "onDone": { "{$request.body#/url}": { "post": { "responses": { "200": { "description": "ok" } } } } } },
+                      "responses": { "204": { "description": "ok" } }
+                    }
+                  }
+                }
+              },
+              "paths": {
+                "/shared": { "$ref": "#/components/pathItems/Shared", "summary": "Local summary" }
+              }
+            }
+            """;
+
+        Assert.Contains(
+            "RIV3027: Callback dropped: #/paths/~1shared/get/callbacks/onDone; Rivet contracts describe the requests an API receives, not the ones it sends. Document the outgoing call in the operation description, or give the receiving service its own contract.",
+            CompilationHelper.Import(spec).Warnings
+        );
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generated = Path.Combine(workDirectory.FullName, "generated");
+        Import(workDirectory.FullName, sourcePath, generated);
+        var path = Emit(workDirectory.FullName, generated, "output")["paths"]!["/shared"]!;
+
+        Assert.Equal("Local summary", (string?)path["summary"]);
+        Assert.Equal("Shared pets", (string?)path["description"]);
+        Assert.Equal(
+            """{"url":"https://example.com/shared"}""",
+            path["get"]!["externalDocs"]!.ToJsonString()
+        );
+    }
+
     internal const string DocumentationFieldsSpec = """
         {
           "openapi": "3.1.0",

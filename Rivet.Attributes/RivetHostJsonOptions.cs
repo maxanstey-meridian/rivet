@@ -1,5 +1,6 @@
 namespace Rivet;
 
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -23,19 +24,23 @@ internal static class RivetHostJsonOptions
         "MVC's JSON options (Microsoft.AspNetCore.Mvc.JsonOptions, set by AddJsonOptions or "
         + "Configure<JsonOptions>)";
 
-    // Options become read-only on first use, so a verdict is cached only once it can't change.
     private static readonly ConditionalWeakTable<JsonSerializerOptions, string[]> _verdicts = new();
 
+    /// <summary>
+    /// The host resolves these options from <c>IOptions</c> once every <c>Configure</c> has run,
+    /// and freezes them on its first write anyway. Freezing them here, before comparing, means
+    /// the verdict can't go stale, so each instance is compared once.
+    /// </summary>
     internal static void Ensure(JsonSerializerOptions options, string registration)
     {
-        if (!_verdicts.TryGetValue(options, out var differences))
-        {
-            differences = Compare(options);
-            if (options.IsReadOnly)
+        var differences = _verdicts.GetValue(
+            options,
+            static options =>
             {
-                _verdicts.AddOrUpdate(options, differences);
+                options.MakeReadOnly(populateMissingResolver: true);
+                return Compare(options);
             }
-        }
+        );
 
         if (differences.Length > 0)
         {
@@ -48,7 +53,7 @@ internal static class RivetHostJsonOptions
         }
     }
 
-    internal static string[] Compare(JsonSerializerOptions options)
+    private static string[] Compare(JsonSerializerOptions options)
     {
         var differences = new List<string>();
         if (!ReferenceEquals(options.PropertyNamingPolicy, JsonNamingPolicy.CamelCase))
@@ -139,31 +144,48 @@ internal static class RivetHostJsonOptions
 #endif
 
         // A source-generated context reads the same attributes as reflection and follows these
-        // options at runtime (ASP.NET adds its own for ProblemDetails). Anything else, or a
+        // options at runtime (ASP.NET adds its own for ProblemDetails), naming, ignore and
+        // converter settings on its [JsonSourceGenerationOptions] included. Anything else, or a
         // resolver with modifiers, can rename, drop or add members.
         var resolvers = options
-            .TypeInfoResolverChain.Where(resolver =>
-                resolver is not JsonSerializerContext
-                && !(
-                    resolver.GetType() == typeof(DefaultJsonTypeInfoResolver)
-                    && ((DefaultJsonTypeInfoResolver)resolver).Modifiers.Count == 0
-                )
+            .TypeInfoResolverChain.Select(resolver =>
+                resolver switch
+                {
+                    JsonSerializerContext => null,
+                    DefaultJsonTypeInfoResolver { Modifiers.Count: 0 }
+                        when resolver.GetType() == typeof(DefaultJsonTypeInfoResolver) => null,
+                    DefaultJsonTypeInfoResolver { Modifiers.Count: > 0 } =>
+                        $"{Name(resolver.GetType())} with modifiers",
+                    _ => Name(resolver.GetType()),
+                }
             )
+            .OfType<string>()
             .ToArray();
         if (resolvers.Length > 0)
         {
             differences.Add(
                 "TypeInfoResolver uses "
-                    + string.Join(
-                        ", ",
-                        resolvers.Select(resolver =>
-                            resolver is DefaultJsonTypeInfoResolver { Modifiers.Count: > 0 }
-                                ? $"{Name(resolver.GetType())} with modifiers"
-                                : Name(resolver.GetType())
-                        )
-                    )
+                    + string.Join(", ", resolvers)
                     + ", which can rename, drop or add members"
             );
+        }
+
+        // UseStringEnumConverter is the exception: the generator bakes the converter into each
+        // enum's type info, and the context's runtime options don't carry it.
+        foreach (var context in options.TypeInfoResolverChain.OfType<JsonSerializerContext>())
+        {
+            if (
+                context
+                    .GetType()
+                    .GetCustomAttribute<JsonSourceGenerationOptionsAttribute>()
+                    ?.UseStringEnumConverter == true
+            )
+            {
+                differences.Add(
+                    $"{Name(context.GetType())} is generated with UseStringEnumConverter = true, "
+                        + "so it writes every enum it covers by name"
+                );
+            }
         }
 
         return [.. differences];

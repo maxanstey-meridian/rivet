@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Rivet.Tool;
 
 namespace Rivet.Tests;
 
@@ -256,6 +257,43 @@ public sealed class DocumentOperationProvenanceTests
                 );
             }
         );
+    }
+
+    [Theory]
+    [InlineData("\"host\": \"pet.example.test\"")]
+    [InlineData("\"schemes\": [\"https\"]")]
+    public void Swagger2_Half_An_Address_Imports_No_Server(string address)
+    {
+        var spec = $$"""
+            {
+              "swagger": "2.0",
+              "info": { "title": "Swagger source", "version": "2.0" },
+              {{address}},
+              "paths": {
+                "/pets": { "get": { "responses": { "204": { "description": "Done" } } } }
+              }
+            }
+            """;
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var generatedDirectory = Path.Combine(workDirectory.FullName, "generated");
+        var import = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                "--from-openapi",
+                sourcePath,
+                "--output",
+                generatedDirectory,
+                "--namespace",
+                "Generated",
+            ]
+        );
+
+        Assert.True(import.ExitCode == 0, import.StdErr);
+        Assert.Contains($"{Diagnostics.ImportSwaggerServerNotProjected}:", import.StdErr);
+        var emitted = Emit(workDirectory.FullName, generatedDirectory);
+        Assert.Null(emitted["servers"]);
     }
 
     private static void WithImportedSource(string spec, Action<string, string> assertion)

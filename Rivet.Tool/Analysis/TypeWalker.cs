@@ -63,6 +63,9 @@ public sealed class TypeWalker
     private readonly INamedTypeSymbol? _jsonArrayType;
     private readonly INamedTypeSymbol? _bigIntegerType;
 
+    // Number scalars outside SpecialType that System.Text.Json applies number handling to.
+    private readonly ImmutableHashSet<INamedTypeSymbol> _extraNumberTypes;
+
     private readonly INamedTypeSymbol? _listType;
     private readonly ImmutableHashSet<INamedTypeSymbol> _dictionaryTypes;
 
@@ -151,6 +154,18 @@ public sealed class TypeWalker
         AddScalar(
             scalars,
             compilation,
+            "System.Text.Json.Nodes.JsonValue",
+            new TsType.Primitive("unknown", CSharpType: "JsonValue")
+        );
+        AddScalar(
+            scalars,
+            compilation,
+            "System.Text.Json.JsonDocument",
+            new TsType.Primitive("unknown", CSharpType: "JsonDocument")
+        );
+        AddScalar(
+            scalars,
+            compilation,
             "Microsoft.AspNetCore.Http.IFormFile",
             new TsType.Primitive("File")
         );
@@ -162,6 +177,13 @@ public sealed class TypeWalker
         // BigInteger has no System.Text.Json converter — resolved up front so the
         // fallback path can refuse it by name.
         _bigIntegerType = compilation.GetTypeByMetadataName("System.Numerics.BigInteger");
+
+        _extraNumberTypes = ResolveTypeSet(
+            compilation,
+            "System.Int128",
+            "System.UInt128",
+            "System.Half"
+        );
 
         _listType = compilation.GetTypeByMetadataName("System.Collections.Generic.List`1");
 
@@ -440,9 +462,14 @@ public sealed class TypeWalker
     /// constructor parameter (records);
     /// set-only properties deserialize only (request); non-public members are absent
     /// unless [JsonInclude] (fields likewise). Unsupported shapes are reported and
-    /// excluded rather than guessed.
+    /// excluded rather than guessed. <paramref name="boundType"/> is the type being
+    /// (de)serialized, whose constructor binds get-only properties, inherited ones
+    /// included.
     /// </summary>
-    public JsonPropertySurface GetJsonPropertySurface(IPropertySymbol prop)
+    public JsonPropertySurface GetJsonPropertySurface(
+        IPropertySymbol prop,
+        INamedTypeSymbol boundType
+    )
     {
         var hasInclude = prop.HasAttribute(_types.JsonInclude);
 
@@ -475,12 +502,11 @@ public sealed class TypeWalker
 
         if (prop.SetMethod is null)
         {
-            // Get-only property. STJ deserializes it only via a matching constructor
-            // parameter (records) or a public parameterized constructor — response
-            // surface otherwise.
+            // Get-only property. STJ deserializes it only via a matching parameter of
+            // the constructor it deserializes through; response surface otherwise.
             if (getterPublic || hasInclude)
             {
-                return IsDeserializableViaConstructor(prop)
+                return IsDeserializableViaConstructor(prop, boundType)
                     ? JsonPropertySurface.Both
                     : JsonPropertySurface.ResponseOnly;
             }
@@ -527,36 +553,38 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// True when System.Text.Json can deserialize into the property through a
-    /// constructor parameter with a matching name (case-insensitive), i.e. a record
-    /// positional parameter or a [JsonConstructor]-attributed constructor.
+    /// True when the constructor System.Text.Json deserializes the bound type through has
+    /// a parameter matching the property's name (case-insensitive).
     /// </summary>
-    private bool IsDeserializableViaConstructor(IPropertySymbol prop)
+    private bool IsDeserializableViaConstructor(IPropertySymbol prop, INamedTypeSymbol boundType) =>
+        GetDeserializationConstructor(boundType) is { } constructor
+        && constructor.Parameters.Any(parameter =>
+            string.Equals(parameter.Name, prop.Name, StringComparison.OrdinalIgnoreCase)
+        );
+
+    /// <summary>
+    /// System.Text.Json's constructor choice: a [JsonConstructor] constructor wins; a
+    /// struct otherwise uses its default constructor; a class otherwise uses its public
+    /// parameterless constructor, else its only public constructor (a record's or a C# 12
+    /// class's primary constructor, say), else none. Null means no parameters bind.
+    /// </summary>
+    private IMethodSymbol? GetDeserializationConstructor(INamedTypeSymbol type)
     {
-        var named = prop.ContainingType;
-
-        // Records: primary constructor parameters bind properties by name.
-        var constructors = named
-            .Constructors.Where(constructor => !constructor.IsImplicitlyDeclared)
-            .ToList();
-
-        foreach (var constructor in constructors)
+        var attributed = type.InstanceConstructors.FirstOrDefault(constructor =>
+            constructor.HasAttribute(_types.JsonConstructor)
+        );
+        if (attributed is not null || type.IsValueType)
         {
-            var hasJsonConstructor = constructor.HasAttribute(_types.JsonConstructor);
-
-            foreach (var parameter in constructor.Parameters)
-            {
-                if (
-                    string.Equals(parameter.Name, prop.Name, StringComparison.OrdinalIgnoreCase)
-                    && (hasJsonConstructor || IsRecordPrimaryConstructor(constructor))
-                )
-                {
-                    return true;
-                }
-            }
+            return attributed;
         }
 
-        return false;
+        var publicConstructors = type
+            .InstanceConstructors.Where(constructor =>
+                constructor.DeclaredAccessibility == Accessibility.Public
+            )
+            .ToList();
+        return publicConstructors.FirstOrDefault(constructor => constructor.Parameters.Length == 0)
+            ?? (publicConstructors is [var lone] ? lone : null);
     }
 
     // A record's primary constructor shares the record's parameter list: its parameters
@@ -569,22 +597,27 @@ public sealed class TypeWalker
         );
 
     /// <summary>
-    /// The attributes that describe a wire member: its own, plus, for a record's
-    /// positional property, those on the matching primary-constructor parameter. An
-    /// attribute written on a positional parameter without <c>[property:]</c> lands on the
-    /// parameter only; of the attributes the walker reads, only the DataAnnotations
-    /// (constraints, <c>[EmailAddress]</c>, <c>[Url]</c>) may target a parameter, and MVC
-    /// validation reads them there, so the spec must too.
+    /// The attributes that describe a wire member: its own, plus, when the walked type is
+    /// a record, those on the walked record's own primary-constructor parameter of the
+    /// same name. An attribute written on a positional parameter without
+    /// <c>[property:]</c> lands on the parameter only; of the attributes the walker reads,
+    /// only the DataAnnotations (constraints, <c>[EmailAddress]</c>, <c>[Url]</c>) may
+    /// target a parameter, and MVC validation reads them there, through the bound type's
+    /// constructor, so the spec must too. A base record's parameter is never read: MVC
+    /// doesn't construct the base.
     /// </summary>
-    private static ImmutableArray<AttributeData> GetWireMemberAttributes(ISymbol member)
+    private static ImmutableArray<AttributeData> GetWireMemberAttributes(
+        ISymbol member,
+        INamedTypeSymbol walkedType
+    )
     {
         var own = member.GetAttributes();
-        if (member is not IPropertySymbol { ContainingType: { IsRecord: true } record } property)
+        if (member is not IPropertySymbol property || !walkedType.IsRecord)
         {
             return own;
         }
 
-        foreach (var constructor in record.InstanceConstructors)
+        foreach (var constructor in walkedType.InstanceConstructors)
         {
             if (!IsRecordPrimaryConstructor(constructor))
             {
@@ -710,7 +743,10 @@ public sealed class TypeWalker
             .OfType<IPropertySymbol>()
             .Where(property =>
                 !IsJsonIgnored(property)
-                && GetJsonPropertySurface(property) != JsonPropertySurface.ResponseOnly
+                && GetJsonPropertySurface(
+                    property,
+                    type as INamedTypeSymbol ?? property.ContainingType
+                ) != JsonPropertySurface.ResponseOnly
                 && GetHeaderName(property) is null
             );
 
@@ -729,8 +765,8 @@ public sealed class TypeWalker
     {
         // For closed generics like PagedResult<MessageDto>, walk the open definition
         var definition = symbol.IsGenericType ? symbol.OriginalDefinition : symbol;
-        // Resolve via the full-namespace registry — same FQN reuses its emitted name,
-        // a simple-name collision gets a deterministic disambiguated name + loud diagnostic
+        // Resolve via the full-namespace registry: the same FQN reuses its emitted name,
+        // and a simple-name collision aborts generation (RIV1007)
         var name = GetEmittedName(definition);
 
         if (_definitions.ContainsKey(name) || _visiting.Contains(name))
@@ -800,7 +836,7 @@ public sealed class TypeWalker
         {
             var memberSurface = member switch
             {
-                IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol),
+                IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol, definition),
                 IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
                 _ => JsonPropertySurface.Excluded,
             };
@@ -841,7 +877,7 @@ public sealed class TypeWalker
             string? example = null;
             var isReadOnly = false;
             var isWriteOnly = false;
-            var attributes = GetWireMemberAttributes(member);
+            var attributes = GetWireMemberAttributes(member, definition);
             var constraints = ReadConstraints(
                 attributes,
                 tsType is TsType.Array or TsType.Nullable { Inner: TsType.Array }
@@ -1301,7 +1337,7 @@ public sealed class TypeWalker
                 // writeOnly/readOnly), never Both-only filtering.
                 var memberSurface = member switch
                 {
-                    IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol),
+                    IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol, derivedType),
                     IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
                     _ => JsonPropertySurface.Excluded,
                 };
@@ -1494,8 +1530,8 @@ public sealed class TypeWalker
             // honoring [JsonStringEnumMemberName].
             if (namedType.TypeKind == TypeKind.Enum)
             {
-                // Full-namespace keyed naming — colliding enum names disambiguate
-                // loudly instead of first-wins TryAdd
+                // Full-namespace keyed naming: colliding enum names abort generation
+                // (RIV1007) instead of first-wins TryAdd
                 var enumName = GetEmittedName(namedType);
                 if (!_enums.ContainsKey(enumName))
                 {
@@ -2047,9 +2083,11 @@ public sealed class TypeWalker
             : $"[{attribute.AttributeClass?.ToDisplayString()}]";
 
     /// <summary>
-    /// The shapes System.Text.Json applies number handling to: a number, or a
-    /// collection/dictionary whose values are numbers (through Nullable). byte[] is a
-    /// base64 string and is excluded.
+    /// The shapes System.Text.Json applies number handling to: a number (Int128, UInt128
+    /// and Half included), or a collection/dictionary whose values are numbers (through
+    /// Nullable). byte[] is a base64 string and is excluded. A type parameter counts: the
+    /// open definition is one schema for every instantiation, and Wrapper&lt;int&gt; puts
+    /// strings on the wire where the spec says number.
     /// </summary>
     private bool IsNumberOrNumberCollection(ITypeSymbol type) =>
         type switch
@@ -2064,7 +2102,9 @@ public sealed class TypeWalker
                 IsNumberOrNumberCollection(named.TypeArguments[0]),
             INamedTypeSymbol { TypeArguments.Length: 2 } named when IsDictionaryType(named) =>
                 IsNumberOrNumberCollection(named.TypeArguments[1]),
-            _ => type.SpecialType is >= SpecialType.System_SByte and <= SpecialType.System_Double,
+            ITypeParameterSymbol => true,
+            _ => type.SpecialType is >= SpecialType.System_SByte and <= SpecialType.System_Double
+                || type is INamedTypeSymbol named && _extraNumberTypes.Contains(named),
         };
 
     private ITypeSymbol? TryGetScalarInner(INamedTypeSymbol symbol)

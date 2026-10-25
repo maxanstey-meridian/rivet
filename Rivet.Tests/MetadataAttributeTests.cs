@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
@@ -169,9 +170,9 @@ public sealed class MetadataAttributeTests
 
     // ========== [RivetConstraints] ==========
 
-    // A DataAnnotations attribute on a positional record parameter without [property:]
-    // lands on the constructor parameter, where MVC validation reads it. The spec reads
-    // it there too, so both placements emit the same constraints, inherited ones included.
+    // A DataAnnotations attribute (or [RivetConstraints]) on a positional record parameter
+    // without [property:] lands on the constructor parameter, where MVC validation reads
+    // it. The spec reads it there too, so both placements emit the same constraints.
     [Theory]
     [InlineData("property: ")]
     [InlineData("")]
@@ -181,13 +182,11 @@ public sealed class MetadataAttributeTests
             using System.ComponentModel.DataAnnotations;
             using Rivet;
 
-            public abstract record NamedDto([{{target}}MinLength(1), MaxLength(100), RegularExpression("^[a-z]+$")] string Name);
-
             [RivetType]
             public sealed record ItemDto(
-                string Name,
-                [{{target}}Range(0, 999.5)][property: RivetConstraints(MultipleOf = 0.5)] double Score,
-                [{{target}}EmailAddress] string Contact) : NamedDto(Name);
+                [{{target}}MinLength(1), MaxLength(100), RegularExpression("^[a-z]+$")] string Name,
+                [{{target}}Range(0, 999.5)][{{target}}RivetConstraints(MultipleOf = 0.5)] double Score,
+                [{{target}}EmailAddress] string Contact);
 
             [RivetContract]
             public static class ItemContract
@@ -214,6 +213,39 @@ public sealed class MetadataAttributeTests
         Assert.Equal(0.5, score.GetProperty("multipleOf").GetDouble());
 
         Assert.Equal("email", props.GetProperty("contact").GetProperty("format").GetString());
+    }
+
+    // MVC validates a record through the bound type's own constructor, so the parameter
+    // attributes that count are the derived record's, never the base record's.
+    [Fact]
+    public void Parameter_Constraints_Come_From_The_Walked_Record_Not_Its_Base()
+    {
+        var source = """
+            using System.ComponentModel.DataAnnotations;
+            using Rivet;
+
+            public abstract record NamedDto([MaxLength(5)] string Name);
+
+            [RivetType]
+            public sealed record ItemDto([MinLength(1)] string Name) : NamedDto(Name);
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto> Get = Define.Get<ItemDto>("/api/items");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var name = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto")
+            .GetProperty("properties")
+            .GetProperty("name");
+
+        Assert.Equal(1, name.GetProperty("minLength").GetInt32());
+        Assert.False(name.TryGetProperty("maxLength", out _));
     }
 
     // ========== [RivetDefault] ==========
@@ -312,6 +344,93 @@ public sealed class MetadataAttributeTests
         Assert.True(props.GetProperty("password").GetProperty("writeOnly").GetBoolean());
         Assert.False(props.GetProperty("name").TryGetProperty("readOnly", out _));
         Assert.False(props.GetProperty("name").TryGetProperty("writeOnly", out _));
+    }
+
+    // System.Text.Json binds a get-only property only through the constructor it
+    // deserializes with: [JsonConstructor], else a public parameterless one, else the only
+    // public one. A bound property is on both surfaces; an unbound one is readOnly.
+    [Theory]
+    [InlineData(
+        "public sealed record ItemDto(string Name) { public string Name { get; } = Name; }",
+        false
+    )]
+    [InlineData(
+        "public sealed class ItemDto(string name) { public string Name { get; } = name; }",
+        false
+    )]
+    [InlineData(
+        "public sealed class ItemDto { public ItemDto(string name) => Name = name; public string Name { get; } }",
+        false
+    )]
+    [InlineData(
+        "public sealed class ItemDto { public ItemDto() { } [JsonConstructor] public ItemDto(string name) => Name = name; public string Name { get; } = \"\"; }",
+        false
+    )]
+    [InlineData(
+        "public sealed record ItemDto(string Name) { public string Name { get; } = Name; public ItemDto() : this(\"x\") { } }",
+        true
+    )]
+    [InlineData(
+        "public sealed class ItemDto { public ItemDto(string name) => Name = name; public ItemDto(string name, int n) => Name = name; public string Name { get; } }",
+        true
+    )]
+    public void GetOnly_Property_Is_ReadOnly_Unless_The_Deserialization_Constructor_Binds_It(
+        string declaration,
+        bool readOnly
+    )
+    {
+        var source = $$"""
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            [RivetType]
+            {{declaration}}
+
+            [RivetContract]
+            public static class ItemContract
+            {
+                public static readonly RouteDefinition<ItemDto> Get = Define.Get<ItemDto>("/api/items");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var name = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ItemDto")
+            .GetProperty("properties")
+            .GetProperty("name");
+
+        Assert.Equal(readOnly, name.TryGetProperty("readOnly", out _));
+    }
+
+    [Fact]
+    public void System_Text_Json_Picks_The_Constructors_The_Walker_Assumes()
+    {
+        var lone = JsonSerializer.Deserialize<LoneConstructorProbe>(
+            """{"name":"wire"}""",
+            JsonSerializerOptions.Web
+        );
+        Assert.Equal("wire", lone!.Name);
+
+        var parameterless = JsonSerializer.Deserialize<ParameterlessConstructorProbe>(
+            """{"name":"wire"}""",
+            JsonSerializerOptions.Web
+        );
+        Assert.Equal("default", parameterless!.Name);
+    }
+
+    private sealed class LoneConstructorProbe(string name)
+    {
+        public string Name { get; } = name;
+    }
+
+    private sealed record ParameterlessConstructorProbe(string Name)
+    {
+        public string Name { get; } = Name;
+
+        public ParameterlessConstructorProbe()
+            : this("default") { }
     }
 
     // ========== [RivetFormat] ==========

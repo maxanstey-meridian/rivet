@@ -45,7 +45,7 @@ public sealed class RivetActionResult : IActionResult, IStatusCodeActionResult
             .Value.JsonSerializerOptions;
         if (
             !RivetResultExtensions.BeginResponse(
-                httpContext,
+                httpContext.Response,
                 _result,
                 options,
                 RivetHostJsonOptions.Mvc

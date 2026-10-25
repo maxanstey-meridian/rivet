@@ -193,10 +193,10 @@ Docs via any OpenAPI renderer; runtime validators via
 
 - [Azure Functions sample](samples/FunctionsApi/README.md) and [integration guide](docs/guides/azure-functions.md) — isolated-worker routes, per-response file MIME selection, and `task test:functions` against the real host
 
-- [Contract coverage checking](https://maxanstey-meridian.github.io/rivet/guides/contract-coverage) — `--check` verifies every contract field has an implementation on the declared route and method, and that every enum parameter the spec lists is one the host can actually bind
+- [Contract coverage checking](https://maxanstey-meridian.github.io/rivet/guides/contract-coverage) — `--check` verifies every contract field has an implementation on the declared route and method, that the handler binds each input where the contract declares it, and that every enum parameter the spec lists is one the host can actually bind
 - [OpenAPI import](https://maxanstey-meridian.github.io/rivet/guides/openapi-import) — one-shot onboarding for existing APIs: generate C# contracts from a spec, then the C# is the source of truth
 - [File endpoints](https://maxanstey-meridian.github.io/rivet/guides/file-uploads), headers as contract concepts, minimal-API hosts, [round-trippable specs](https://maxanstey-meridian.github.io/rivet/guides/openapi-round-trips)
-- Stable `RIVnnnn` [diagnostic IDs](https://maxanstey-meridian.github.io/rivet/reference/diagnostics) on every warning — grep or baseline by ID
+- Stable `RIVnnnn` [diagnostic IDs](https://maxanstey-meridian.github.io/rivet/reference/diagnostics) on every warning and error — grep or baseline by ID
 - A TypeScript-first sibling, [rivet-ts](https://github.com/maxanstey-meridian/rivet-ts) — same pipeline, contracts authored as TS types, Hono runtime
 
 ## Documentation

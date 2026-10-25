@@ -48,11 +48,15 @@ Verified limits of the current tool, so you don't discover them in production.
   Rivet describes it, ASP.NET enforces it.
 - The spec reflects *declared* C# types and the default System.Text.Json
   conventions. `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies emit as
-  `oneOf` + `discriminator`; runtime polymorphism *without* those registrations
-  and validation living outside attributes (e.g. FluentValidation) are invisible
-  to the spec. A serializer attribute Rivet can't model, such as a custom
-  `[JsonConverter]` or a `[JsonNumberHandling]` that writes numbers as strings,
-  stops generation (`RIV1111`, `RIV1112`) rather than shipping the CLR shape.
+  `oneOf` + `discriminator`, and polymorphism that skips them doesn't get past the
+  adapters: a subtype instance returned where a concrete type is declared is refused
+  when the result runs, and polymorphism bolted on through `TypeInfoResolver`
+  modifiers is refused with the rest of the host's
+  [JSON options](/guides/runtime-validation#runtime-guarantees-contract-responses).
+  A serializer attribute Rivet can't model, such as a custom `[JsonConverter]` or a
+  `[JsonNumberHandling]` that writes numbers as strings, stops generation (`RIV1111`,
+  `RIV1112`) rather than shipping the CLR shape. Validation living outside attributes
+  (e.g. FluentValidation) is invisible to the spec.
 - `info.title`, `info.version`, and `servers` come from the `--title`, `--version`,
   and `--server` flags (defaults: `"API"` / `"1.0.0"` / no `servers` block); there
   is no flag for `info.contact`, `info.description`, or `info.license`.
@@ -96,20 +100,24 @@ combination:
   fills an enum parameter from the route by parsing the raw text as JSON, and an
   unquoted name isn't JSON, so only a plain enum (or a `string`) binds there.
 
-  A parameter the host reads as a JSON body is left alone. On a minimal API an
+  A parameter the host reads as a JSON body is left alone, and so are `[FromServices]`
+  and, on MVC, a parameter or enum with an explicit `[ModelBinder]`. On a minimal API an
   unattributed array comes from the query when the endpoint is mapped to a body-less
   verb such as GET, written in capitals the way `MapGet` passes it (a `MapMethods`
-  `"get"` still infers a body), and any other unattributed collection is a body. A
-  `[FromForm]` complex type goes through the form mapper, which binds each member by
-  name and, unlike the rest of the minimal-API binder, ignores case. On MVC an
+  `"get"` still infers a body), and any other unattributed collection is a body. An
+  `[AsParameters]` type is bound member by member, and so is a `[FromForm]` complex
+  type, which goes through the form mapper: it binds each member by name and, unlike
+  the rest of the minimal-API binder, ignores case. On MVC an
   unattributed collection or complex type is a body under `[ApiController]`, with the
   same two exceptions MVC makes: a complex type whose members carry their own binding
   source (a `[FromQuery]` property, an `IFormFile`) is bound piece by piece, and so is
   everything once the app sets `SuppressInferBindingSourcesForParameters`. Without a
   body, a collection is checked as it stands and a complex type member by member, all
   the way down, since MVC binds `?Filter.Kind=` into a nested type just as happily.
-- **`RIV1110`** (generation): the same rule for a `[RivetEndpoint]` or `[RivetClient]`
-  action. A static `[RivetEndpoint]` is a minimal-API handler and gets the exact rule.
+- **`RIV1110`** (generation): the same rule, with the same parameters counted, for a
+  `[RivetEndpoint]` or `[RivetClient]` action. An instance method is an MVC action and
+  gets the ignore-case rule; a static `[RivetEndpoint]` is a minimal-API handler and
+  gets the exact one.
 
 A contract on its own gets no check at generation, because generation can't see
 how the handler binds. `--check` is where a contract-first API finds out.
@@ -142,11 +150,15 @@ It's the same on .NET 8, 9 and 10; .NET 8's System.Text.Json would happily read
 
 ## Importer (`--from-openapi`)
 
-A one-shot onboarding scaffold, not a sync tool. Callbacks, webhooks, links and
-parameter serialization styles are out of scope (discriminator dispatch imports as a
-`[JsonPolymorphic]` hierarchy when the `oneOf` mapping is usable, and falls
-back loudly otherwise) — the full
-honest list, including every diagnostic marker and warning category, is in the
+A one-shot onboarding scaffold, not a sync tool. Links, media-type `encoding` and
+parameter serialization (`style`, `explode`, `allowReserved`, `allowEmptyValue`) come
+through; what Rivet has no contract slot for is dropped and reported, never lost
+quietly: callbacks (`RIV3027`), webhooks and `components.pathItems` (`RIV3028`),
+parameters with `content` instead of a `schema` (`RIV3025`), and operation-level
+`externalValue` examples (an `external-value` marker in the generated C#).
+Discriminator dispatch imports as a `[JsonPolymorphic]` hierarchy when the `oneOf`
+mapping is usable, and falls back loudly otherwise. The full list, including every
+diagnostic marker and warning category, is in the
 [Import Profile](/reference/import-profile).
 
 ## Formats

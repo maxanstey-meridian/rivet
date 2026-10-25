@@ -62,8 +62,6 @@ public sealed class ImportMetricTests
             Diagnostics.ImportAliasCycleBroken => "alias-unresolvable",
             Diagnostics.ImportAliasTargetMissing => "alias-unresolvable",
             Diagnostics.ImportUnresolvableAliasReference => "alias-unresolvable",
-            // Added with Phase 4 / I12: multi-scheme document security collapses to the first
-            // scheme — previously silent, now a named warning.
             // TRACE has no contract representation; each dropped operation emits RIV3003.
             Diagnostics.ImportOperationMethodDropped => "operation-method-dropped",
             // Added with P2 wave 3 (dictionary key types): a propertyNames key schema the
@@ -71,6 +69,7 @@ public sealed class ImportMetricTests
             // WITH a named warning.
             Diagnostics.ImportDictionaryKeyDropped => "dictionary-key-dropped",
             Diagnostics.ImportNamedScalarAlgebraUnsupported => "named-scalar-algebra-unsupported",
+            Diagnostics.ImportSwaggerServerNotProjected => "swagger-server-not-projected",
             Diagnostics.ImportEmptyParameterNameDropped => "empty-parameter-name-dropped",
             Diagnostics.ImportReservedContentTypeHeaderDropped =>
                 "reserved-content-type-header-dropped",
@@ -216,19 +215,12 @@ public sealed class ImportMetricTests
         // "enum-constraint-dropped" added deliberately with I.A-15: Stripe's `object:
         // {"enum": ["account"]}` discriminator constants are single-value enums that degrade
         // to string — previously silent, now each emits a named warning.
-        // "security-schemes-dropped" added deliberately with Phase 4 / I12: Stripe declares
-        // two global schemes (basic + bearer); only the first is imported — previously
-        // silent, now a named warning.
-        // "unrepresented-field-dropped" added deliberately: Stripe's form bodies declare
-        // per-part `encoding`, which no generated contract carries — previously silent.
         AssertWarningCategoriesSubsetOf(
             r,
             "unresolved-schema",
             "unsupported-schema-type",
             "array-missing-items",
-            "enum-constraint-dropped",
-            "security-schemes-dropped",
-            "unrepresented-field-dropped"
+            "enum-constraint-dropped"
         );
     }
 
@@ -260,9 +252,6 @@ public sealed class ImportMetricTests
         // "enum-constraint-dropped" added deliberately with I.A-15: GitHub's single-value
         // permission enums ({"enum": ["read"]} etc.) degrade to string — previously silent,
         // now each emits a named warning.
-        // "unrepresented-field-dropped" added deliberately: every GitHub operation links its
-        // docs page through operation `externalDocs`, which no generated contract carries —
-        // previously silent.
         // "equivalent-path-template-merged" added deliberately: GitHub's attestation DELETE
         // and GET author one template under two parameter names, which OpenAPI forbids.
         AssertWarningCategoriesSubsetOf(
@@ -271,7 +260,6 @@ public sealed class ImportMetricTests
             "unsupported-schema-type",
             "array-missing-items",
             "enum-constraint-dropped",
-            "unrepresented-field-dropped",
             "equivalent-path-template-merged"
         );
     }

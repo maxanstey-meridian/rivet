@@ -98,17 +98,35 @@ The body counts as one input. An MVC action without `[ApiController]` binds an
 unattributed complex parameter from the route, query and form, never the body, so a
 contract body there needs `[FromBody]`; under `[ApiController]` the same parameter *is*
 the body, so a GET whose query record lacks `[FromQuery]` reads an empty body instead
-of the query. Names compare ignoring case, as ASP.NET's do, and the check follows the
-same binding rules as `RIV4005`: explicit `[From*]` attributes and their `Name =`,
-`[AsParameters]`, and each host's inference.
+of the query. A `.FormEncoded()` body is different: its fields travel as named form
+values, so each one counts as an input of its own, under the name the spec gives it. A
+`[FromForm]` record whose `Body` property the spec calls `note_body` reports both halves,
+just like the query example above.
+
+Names compare ignoring case, as ASP.NET's do, and the check follows the same binding rules
+as `RIV4005`: explicit `[From*]` attributes and their `Name =`, `[AsParameters]`, and each
+host's inference. On MVC, a `Name =` on a complex parameter is the prefix its members are
+read under, so `[FromQuery(Name = "f")] NoteSearch filter` wants `?f.Search=`, which no
+client sends. Minimal APIs read a `StringValues` like a `string[]`, from the query on a GET,
+and never consult a `[TypeConverter]`, so a type that only has one is a service or a body
+there. And because every MVC answer depends on whether `[ApiController]` infers binding
+sources, a `SuppressInferBindingSourcesForParameters` set to anything but a constant stops
+the check with `RIV4007` instead of letting it guess.
 
 A handler that can read the request itself is trusted to pick inputs out by hand: an
-`HttpContext` or `HttpRequest` parameter, a `BindAsync` type, a custom model binder, or an
-MVC action that touches `Request` or `HttpContext`. It's never told an input is unbound,
-though what it does bind is still checked. An unattributed complex parameter that could be
-a service counts as the body when the contract has one and as a service when it doesn't.
-The `Authorization` header and a `.QueryAuth()` token belong to the contract's security,
-not its inputs. Azure Functions handlers aren't compared: they read the query, headers and
+`HttpContext` or `HttpRequest` parameter, a `BindAsync` type, a custom model binder, or a
+handler body that reaches the request through a property, such as a controller's
+`Request`, `HttpContext` or `ControllerContext.HttpContext`, or an `IHttpContextAccessor`'s
+`HttpContext`, whether it arrives as a parameter or through the constructor. Helpers it
+calls aren't followed. Such a handler is never told an input is unbound, though what it
+does bind is still checked. That's also the only way to read a cookie the contract
+declares: ASP.NET has no attribute that binds one, so `--check` reports a declared cookie
+unless the handler can read `Request.Cookies`. An unattributed complex parameter that
+could be a service counts as the body when the contract has one and as a service when it
+doesn't. The `Authorization` header, a `.QueryAuth()` token and the header or query
+parameter of an apiKey scheme the endpoint's security names (its own `.Secure(...)`, or
+the document's global security) belong to the contract's security, not its inputs.
+Azure Functions handlers aren't compared: they read the query, headers and
 body from `HttpRequest` by hand, so only their route values are bound at all.
 
 ## Helpers are fine

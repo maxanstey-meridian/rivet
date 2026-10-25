@@ -134,7 +134,15 @@ public static class CoverageChecker
             }
         }
 
-        return BuildWarnings(wkt, fieldMap, implementations, bindings, consumedBindings);
+        return BuildWarnings(
+            wkt,
+            TypeWalker.Create(compilation, wkt, []),
+            SecurityMetadataWalker.Walk(compilation),
+            fieldMap,
+            implementations,
+            bindings,
+            consumedBindings
+        );
     }
 
     // Matched on the receiver's type, not the method's declaring type: Error and File are
@@ -315,6 +323,8 @@ public static class CoverageChecker
 
     private static IReadOnlyList<CoverageWarning> BuildWarnings(
         WellKnownTypes wkt,
+        TypeWalker walker,
+        ContractSecurityMetadata? security,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
         IReadOnlyDictionary<IFieldSymbol, List<TerminalImplementation>> implementations,
         IReadOnlyList<ContractBinding> bindings,
@@ -359,6 +369,9 @@ public static class CoverageChecker
                         ContractInputBinding
                             .Compare(
                                 wkt,
+                                walker,
+                                security,
+                                field,
                                 endpoint,
                                 handler,
                                 host,
@@ -927,7 +940,28 @@ public static class CoverageChecker
     }
 
     /// <summary>The values <paramref name="function"/> returns from its own reachable returns.</summary>
-    private static IEnumerable<IOperation> ReturnedValues(IOperation function) =>
+    private static IEnumerable<IOperation> ReturnedValues(IOperation function)
+    {
+        // An iterator, so each enumeration starts with nothing expanded.
+        foreach (
+            var value in ReturnedValues(
+                function,
+                new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)
+            )
+        )
+        {
+            yield return value;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ReturnedValues(IOperation)"/>, with the local functions already expanded:
+    /// one reached again, as in <c>IResult Attempt() => Retry(Attempt);</c>, adds nothing new.
+    /// </summary>
+    private static IEnumerable<IOperation> ReturnedValues(
+        IOperation function,
+        HashSet<IMethodSymbol> expanded
+    ) =>
         OwnDescendants(function)
             .OfType<IReturnOperation>()
             .Where(returned =>
@@ -938,7 +972,7 @@ public static class CoverageChecker
                         is { Succeeded: true, StartPointIsReachable: true }
                 )
             )
-            .SelectMany(returned => ValuesOf(returned.ReturnedValue));
+            .SelectMany(returned => ValuesOf(returned.ReturnedValue, expanded));
 
     /// <summary>
     /// The leaf values an expression can produce: each switch arm and conditional branch
@@ -949,14 +983,30 @@ public static class CoverageChecker
     /// <see cref="FunctionOf"/> resolves it. A lambda buried deeper, as in
     /// <c>Ok(items.Select(item => ...))</c>, isn't followed.
     /// </summary>
-    private static IEnumerable<IOperation> ValuesOf(IOperation? expression) =>
+    private static IEnumerable<IOperation> ValuesOf(IOperation? expression)
+    {
+        foreach (
+            var value in ValuesOf(
+                expression,
+                new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)
+            )
+        )
+        {
+            yield return value;
+        }
+    }
+
+    private static IEnumerable<IOperation> ValuesOf(
+        IOperation? expression,
+        HashSet<IMethodSymbol> expanded
+    ) =>
         LeavesOf(expression)
             .SelectMany(leaf =>
                 leaf is IInvocationOperation invocation
                     ? invocation
-                        .Arguments.Select(argument => FunctionOf(argument.Value, []))
+                        .Arguments.Select(argument => FunctionOf(argument.Value, [], expanded))
                         .OfType<IOperation>()
-                        .SelectMany(ReturnedValues)
+                        .SelectMany(function => ReturnedValues(function, expanded))
                         .Prepend(invocation)
                     : [leaf]
             );
@@ -985,24 +1035,39 @@ public static class CoverageChecker
     /// The function an argument value is, through its delegate creation: a lambda, a local
     /// holding one (whose single value <see cref="ProvenanceValue"/> knows), or a local
     /// function named as a method group. Each is the handler's own code, so its returns are
-    /// the handler's answer. A method group naming any other method is a helper.
+    /// the handler's answer. A method group naming any other method is a helper. A local
+    /// function already in <paramref name="expanded"/> resolves to nothing, so one that names
+    /// itself is read once.
     /// </summary>
-    private static IOperation? FunctionOf(IOperation value, HashSet<ILocalSymbol> visitedLocals) =>
+    private static IOperation? FunctionOf(
+        IOperation value,
+        HashSet<ILocalSymbol> visitedLocals,
+        HashSet<IMethodSymbol> expanded
+    ) =>
         value switch
         {
             IAnonymousFunctionOperation lambda => lambda,
-            IDelegateCreationOperation creation => FunctionOf(creation.Target, visitedLocals),
-            IConversionOperation conversion => FunctionOf(conversion.Operand, visitedLocals),
+            IDelegateCreationOperation creation => FunctionOf(
+                creation.Target,
+                visitedLocals,
+                expanded
+            ),
+            IConversionOperation conversion => FunctionOf(
+                conversion.Operand,
+                visitedLocals,
+                expanded
+            ),
             ILocalReferenceOperation local
                 when visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } provenance =>
-                FunctionOf(provenance, visitedLocals),
+                FunctionOf(provenance, visitedLocals, expanded),
             IMethodReferenceOperation
             {
                 Method: { MethodKind: MethodKind.LocalFunction } localFunction,
                 SemanticModel: { } semanticModel,
-            } => localFunction.DeclaringSyntaxReferences is [var reference]
-                ? semanticModel.GetOperation(reference.GetSyntax()) as ILocalFunctionOperation
-                : null,
+            } when expanded.Add(localFunction.OriginalDefinition) =>
+                localFunction.DeclaringSyntaxReferences is [var reference]
+                    ? semanticModel.GetOperation(reference.GetSyntax()) as ILocalFunctionOperation
+                    : null,
             _ => null,
         };
 

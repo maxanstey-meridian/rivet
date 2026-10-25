@@ -165,6 +165,33 @@ public sealed class RequiredResponseHeaderTests
         );
     }
 
+    // A text body is written whole, so it goes out with its length; JSON is streamed and
+    // doesn't, and an absent body has none to give.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_text_body_carries_its_length(bool mvc)
+    {
+        var route = Define
+            .Get<string>("/text")
+            .ProducesContentType("text/plain")
+            .WithResponseHeader("Content-Length", required: true);
+
+        var response = await ExecuteAsync(route.Success("hello"), mvc);
+        var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(
+                Define
+                    .Get<Response>("/items")
+                    .WithResponseHeader("Content-Length", required: true)
+                    .Success(new Response("item_1")),
+                mvc
+            )
+        );
+
+        Assert.Equal("5", response.Headers["Content-Length"]);
+        Assert.Contains("'Content-Length' for status 200", refusal.Message);
+    }
+
     // Each header a file result writes from its own arguments counts, and the response
     // really carries it, so the check can't pass a header that never goes out.
     public static TheoryData<string, string, bool> FileHeaders()

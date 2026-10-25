@@ -159,6 +159,20 @@ public sealed class StringEnumConverterTests
         );
     }
 
+    [Theory]
+    [InlineData("{}", "A JSON object")]
+    [InlineData("[]", "A JSON array")]
+    [InlineData("true", "A JSON boolean")]
+    [InlineData("false", "A JSON boolean")]
+    [InlineData("3", "A JSON number")]
+    [InlineData("null", "A JSON null")]
+    public void A_Refusal_Names_The_Json_Type_Sent(string json, string named)
+    {
+        var refusal = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<Colour>(json));
+
+        Assert.StartsWith($"{named} is not a Colour value", refusal.Message);
+    }
+
     [Fact]
     public void Dictionary_Keys_And_Nullable_Values_Follow_The_Same_Names()
     {

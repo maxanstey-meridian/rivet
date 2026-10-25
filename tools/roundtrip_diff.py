@@ -495,9 +495,10 @@ def merge_equivalent_path_templates(document):
     """Mirror the import's RIV3029 merge of paths that differ only in parameter names.
 
     OpenAPI forbids two such paths. A later twin whose operations don't clash with the
-    earlier path's, with no path-level fields and no referenced path parameter being
-    renamed, moves its operations to the earlier path and renames its inline path
-    parameters. Returns the merged copy and one source defect per merged twin.
+    earlier path's, with no path-level fields on either path, no parameter name repeated
+    within either template and no referenced path parameter being renamed, moves its
+    operations to the earlier path and renames its inline path parameters. Returns the
+    merged copy and one source defect per merged twin.
     """
     paths = document.get("paths")
     if not isinstance(paths, dict):
@@ -511,17 +512,18 @@ def merge_equivalent_path_templates(document):
         target = earliest.setdefault(template, path)
         if target == path:
             continue
+        names = PATH_TEMPLATE_PARAMETER.findall(path)
+        target_names = PATH_TEMPLATE_PARAMETER.findall(target)
+        if len(set(names)) != len(names) or len(set(target_names)) != len(target_names):
+            continue
         renames = {
-            source: earlier
-            for source, earlier in zip(
-                PATH_TEMPLATE_PARAMETER.findall(path), PATH_TEMPLATE_PARAMETER.findall(target)
-            )
-            if source != earlier
+            source: earlier for source, earlier in zip(names, target_names) if source != earlier
         }
         twin, merged_into = paths.get(path), paths.get(target)
         if (
             not isinstance(twin, dict)
             or not isinstance(merged_into, dict)
+            or any(key not in METHODS for key in merged_into)
             or any(key not in METHODS or key in merged_into for key in twin)
             or any(
                 isinstance(parameter, dict)
@@ -556,23 +558,41 @@ def merge_equivalent_path_templates(document):
     return document, defects
 
 
-SCHEMA_COMPONENT_NAME = re.compile(r"^[A-Za-z0-9.\-_]+$")
 OPAQUE_VALUE_KEYS = ("const", "default", "enum", "example", "examples")
+# Fields whose object value maps names to OpenAPI objects or schemas: their keys are names,
+# so a response named "default" is structure, not an opaque value.
+NAME_MAP_FIELDS = (
+    "$defs", "callbacks", "content", "definitions", "dependentSchemas", "encoding", "headers",
+    "links", "parameters", "pathItems", "paths", "patternProperties", "properties",
+    "requestBodies", "responses", "schemas", "securityDefinitions", "securitySchemes",
+    "variables", "webhooks",
+)
 
 
 def drop_external_discriminator_mappings(document):
     """Mirror the import's drop of discriminator mapping entries that point outside the
-    document (neither a local reference nor a schema name). Returns the stripped copy and
+    document. A value is a schema name only when it names a schema component (OpenAPI
+    3.1.1); anything else is a reference, kept when local. Returns the stripped copy and
     one source defect per dropped entry, in document order."""
     document = json.loads(json.dumps(document))
     defects = []
+    schemas = (
+        document.get("definitions")
+        if "swagger" in document
+        else (document.get("components") or {}).get("schemas")
+    )
+    schema_names = set(schemas) if isinstance(schemas, dict) else set()
 
-    def visit(value, pointer):
+    def visit(value, pointer, name_map=False):
         if isinstance(value, list):
             for index, item in enumerate(value):
                 visit(item, f"{pointer}/{index}")
             return
         if not isinstance(value, dict):
+            return
+        if name_map:
+            for key, child in value.items():
+                visit(child, f"{pointer}/{pointer_token(key)}")
             return
         discriminator = value.get("discriminator")
         if isinstance(discriminator, dict) and isinstance(discriminator.get("mapping"), dict):
@@ -581,7 +601,7 @@ def drop_external_discriminator_mappings(document):
                 if (
                     isinstance(target, str)
                     and not target.startswith("#")
-                    and not SCHEMA_COMPONENT_NAME.match(target)
+                    and target not in schema_names
                 ):
                     del mapping[tag]
                     defects.append(
@@ -595,7 +615,7 @@ def drop_external_discriminator_mappings(document):
         for key, child in value.items():
             if key in OPAQUE_VALUE_KEYS or key.lower().startswith("x-"):
                 continue
-            visit(child, f"{pointer}/{pointer_token(key)}")
+            visit(child, f"{pointer}/{pointer_token(key)}", key in NAME_MAP_FIELDS)
 
     visit(document, "#")
     return document, defects

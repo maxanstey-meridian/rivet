@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using Microsoft.OpenApi.Reader;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
@@ -45,7 +44,7 @@ public static partial class OpenApiImporter
         var warnings = new List<string>();
         var root = ParseJson(json);
         MergeEquivalentPathTemplates(root, warnings);
-        DropExternalDiscriminatorMappings(root, "#", warnings);
+        DropExternalDiscriminatorMappings(root, warnings);
         var preservedFields = new List<OpenApiPreservedFieldProvenance>();
         UnrepresentedFieldReporter.Report(root, warnings, preservedFields);
 
@@ -436,8 +435,9 @@ public static partial class OpenApiImporter
     /// A later twin whose operations don't clash with the earlier path's moves them there,
     /// renaming its inline path parameters to the earlier names. Path parameter names never
     /// reach the wire, so requests and responses are unchanged. A twin that can't merge
-    /// cleanly (a shared method, path-level fields, a referenced path parameter) is left
-    /// for emission to refuse with RIV2013.
+    /// cleanly (a shared method, path-level fields on either path, a parameter name repeated
+    /// within either template, a referenced path parameter) is left for emission to refuse
+    /// with RIV2013.
     /// </summary>
     private static void MergeEquivalentPathTemplates(JsonObject root, List<string> warnings)
     {
@@ -449,22 +449,30 @@ public static partial class OpenApiImporter
         var earliest = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var path in paths.Select(entry => entry.Key).ToList())
         {
-            var template = RouteParser.EraseParameterNames(path);
+            var template = PathTemplateParameter().Replace(path, "{}");
             if (!earliest.TryGetValue(template, out var target))
             {
                 earliest[template] = path;
                 continue;
             }
 
-            var renames = PathTemplateParameter()
-                .Matches(path)
-                .Zip(PathTemplateParameter().Matches(target))
-                .Select(pair => (From: pair.First.Groups[1].Value, To: pair.Second.Groups[1].Value))
-                .Where(pair => pair.From != pair.To)
-                .ToDictionary(pair => pair.From, pair => pair.To, StringComparer.Ordinal);
+            var names = PathTemplateNames(path);
+            var targetNames = PathTemplateNames(target);
+            if (
+                names.Distinct(StringComparer.Ordinal).Count() != names.Count
+                || targetNames.Distinct(StringComparer.Ordinal).Count() != targetNames.Count
+            )
+            {
+                continue;
+            }
+            var renames = names
+                .Zip(targetNames)
+                .Where(pair => pair.First != pair.Second)
+                .ToDictionary(pair => pair.First, pair => pair.Second, StringComparer.Ordinal);
             if (
                 paths[path] is not JsonObject twin
                 || paths[target] is not JsonObject earlier
+                || earlier.Any(entry => !OperationMethods.Contains(entry.Key))
                 || twin.Any(entry =>
                     !OperationMethods.Contains(entry.Key) || earlier.ContainsKey(entry.Key)
                 )
@@ -473,8 +481,7 @@ public static partial class OpenApiImporter
                     .SelectMany(operation => operation["parameters"] as JsonArray ?? [])
                     .Any(parameter =>
                         parameter is JsonObject { } referenced
-                        && referenced["$ref"] is not null
-                        && referenced["$ref"]!.GetValue<string>() is var reference
+                        && StringValue(referenced["$ref"]) is { } reference
                         && renames.Keys.Any(name => ResolvesToPathParameter(root, reference, name))
                     )
             )
@@ -491,8 +498,8 @@ public static partial class OpenApiImporter
                 )
                 {
                     if (
-                        parameter["in"]?.GetValue<string>() == "path"
-                        && parameter["name"]?.GetValue<string>() is { } name
+                        StringValue(parameter["in"]) == "path"
+                        && StringValue(parameter["name"]) is { } name
                         && renames.TryGetValue(name, out var renamed)
                     )
                     {
@@ -520,16 +527,163 @@ public static partial class OpenApiImporter
         }
     }
 
+    private static bool ResolvesToPathParameter(JsonObject root, string reference, string name) =>
+        JsonPointer.TryResolve(root, reference, out var target)
+        && target is JsonObject parameter
+        && StringValue(parameter["in"]) == "path"
+        && StringValue(parameter["name"]) == name;
+
+    private static string? StringValue(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
     /// <summary>
-    /// A discriminator mapping value is a schema name or a reference. One that points into
-    /// another file (digitalocean's <c>models/droplet_actions.yml#/droplet_action</c>) cannot
-    /// resolve in the single document Rivet imports, and re-emitted it crashes the reader of
-    /// the next import, so the entry is dropped, loudly, before anything else reads it.
+    /// The parameter names of an OpenAPI path template, in order. OpenAPI templates have no
+    /// constraint grammar (<c>{id:int}</c> names a parameter <c>id:int</c>), so this one
+    /// expression both erases and reads names here, as it does in tools/roundtrip_diff.py.
     /// </summary>
-    private static void DropExternalDiscriminatorMappings(
+    private static List<string> PathTemplateNames(string path) =>
+        PathTemplateParameter().Matches(path).Select(match => match.Groups[1].Value).ToList();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\{([^{}/]*)\}")]
+    private static partial System.Text.RegularExpressions.Regex PathTemplateParameter();
+
+    /// <summary>
+    /// A discriminator mapping value is a schema name or a reference, and OpenAPI 3.1.1 makes
+    /// it a name only when it matches a schema component's name; anything else is a URI
+    /// reference. A reference into another file (digitalocean's
+    /// <c>models/droplet_actions.yml#/droplet_action</c>) cannot resolve in the single
+    /// document Rivet imports, and re-emitted it crashes the reader of the next import, so
+    /// the entry is dropped, loudly, before anything else reads it.
+    /// </summary>
+    private static void DropExternalDiscriminatorMappings(JsonObject root, List<string> warnings)
+    {
+        var schemaNames = (
+            root["swagger"] is null ? root["components"]?["schemas"] : root["definitions"]
+        )
+            is JsonObject schemas
+            ? schemas.Select(entry => entry.Key).ToHashSet(StringComparer.Ordinal)
+            : [];
+
+        VisitStructuralObjects(
+            root,
+            "#",
+            (obj, pointer) =>
+            {
+                if (
+                    obj["discriminator"] is not JsonObject { } discriminator
+                    || discriminator["mapping"] is not JsonObject mapping
+                )
+                {
+                    return;
+                }
+                foreach (var (tag, value) in mapping.ToList())
+                {
+                    if (
+                        StringValue(value) is { } reference
+                        && !reference.StartsWith('#')
+                        && !schemaNames.Contains(reference)
+                    )
+                    {
+                        mapping.Remove(tag);
+                        warnings.Add(
+                            Diagnostics.Prefix(
+                                Diagnostics.ImportDiscriminatorDropped,
+                                $"Discriminator mapping entry dropped: '{tag}' at {pointer}/discriminator/mapping references '{reference}', outside this document; Rivet imports one document, so the tag keeps no mapping."
+                            )
+                        );
+                    }
+                }
+                if (mapping.Count == 0)
+                {
+                    discriminator.Remove("mapping");
+                }
+            }
+        );
+    }
+
+    /// <summary>
+    /// An enum is a set of allowed values, so a repeated member adds nothing; it would only
+    /// give the C# enum two members with one wire value (vercel repeats 'preview').
+    /// The first occurrence keeps its position.
+    /// </summary>
+    private static void CollapseRepeatedEnumMembers(JsonObject root) =>
+        VisitStructuralObjects(
+            root,
+            "#",
+            (obj, _) =>
+            {
+                if (obj["enum"] is not JsonArray members)
+                {
+                    return;
+                }
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                for (var index = 0; index < members.Count; index++)
+                {
+                    if (!seen.Add(members[index]?.ToJsonString() ?? "null"))
+                    {
+                        members.RemoveAt(index--);
+                    }
+                }
+            }
+        );
+
+    private static void MarkEnumNullMembers(JsonObject root) =>
+        VisitStructuralObjects(
+            root,
+            "#",
+            (obj, _) =>
+            {
+                if (obj["enum"] is JsonArray members && members.Any(member => member is null))
+                {
+                    obj[ImportedEnumNullMemberExtension] = true;
+                }
+            }
+        );
+
+    internal static bool IsOpaqueOpenApiValue(string name) =>
+        name is "const" or "default" or "enum" or "example" or "examples"
+        || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The fields whose object value maps names to OpenAPI objects or schemas. Their keys are
+    /// names, so a response named <c>default</c> or a property named <c>example</c> is
+    /// structure, not an opaque value.
+    /// </summary>
+    private static readonly HashSet<string> _nameMapFields = new(StringComparer.Ordinal)
+    {
+        "$defs",
+        "callbacks",
+        "content",
+        "definitions",
+        "dependentSchemas",
+        "encoding",
+        "headers",
+        "links",
+        "parameters",
+        "pathItems",
+        "paths",
+        "patternProperties",
+        "properties",
+        "requestBodies",
+        "responses",
+        "schemas",
+        "securityDefinitions",
+        "securitySchemes",
+        "variables",
+        "webhooks",
+    };
+
+    /// <summary>
+    /// Visits every OpenAPI or schema object under <paramref name="node"/>, parent before
+    /// children, with its JSON pointer. Opaque values (examples, defaults, enums, consts and
+    /// extensions) are data, so nothing inside them is visited, and name maps are crossed
+    /// without being visited themselves. tools/roundtrip_diff.py mirrors this walk.
+    /// </summary>
+    private static void VisitStructuralObjects(
         JsonNode node,
         string pointer,
-        List<string> warnings
+        Action<JsonObject, string> visit,
+        bool nameMap = false
     )
     {
         if (node is JsonArray array)
@@ -538,7 +692,7 @@ public static partial class OpenApiImporter
             {
                 if (array[index] is { } item)
                 {
-                    DropExternalDiscriminatorMappings(item, $"{pointer}/{index}", warnings);
+                    VisitStructuralObjects(item, $"{pointer}/{index}", visit);
                 }
             }
             return;
@@ -549,188 +703,47 @@ public static partial class OpenApiImporter
             return;
         }
 
-        if (
-            obj["discriminator"] is JsonObject { } discriminator
-            && discriminator["mapping"] is JsonObject mapping
-        )
+        if (!nameMap)
         {
-            foreach (var (tag, value) in mapping.ToList())
-            {
-                if (
-                    value is JsonValue target
-                    && target.TryGetValue<string>(out var reference)
-                    && !reference.StartsWith('#')
-                    && !SchemaComponentName().IsMatch(reference)
-                )
-                {
-                    mapping.Remove(tag);
-                    warnings.Add(
-                        Diagnostics.Prefix(
-                            Diagnostics.ImportDiscriminatorDropped,
-                            $"Discriminator mapping entry dropped: '{tag}' at {pointer}/discriminator/mapping references '{reference}', outside this document; Rivet imports one document, so the tag keeps no mapping."
-                        )
-                    );
-                }
-            }
-            if (mapping.Count == 0)
-            {
-                discriminator.Remove("mapping");
-            }
+            visit(obj, pointer);
         }
-
         foreach (var (key, child) in obj.ToList())
         {
-            if (child is not null && !IsOpaqueOpenApiValue(key))
+            if (child is not null && (nameMap || !IsOpaqueOpenApiValue(key)))
             {
-                DropExternalDiscriminatorMappings(
+                VisitStructuralObjects(
                     child,
                     $"{pointer}/{JsonPointer.Escape(key)}",
-                    warnings
+                    visit,
+                    nameMap: !nameMap && _nameMapFields.Contains(key)
                 );
             }
         }
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"^[A-Za-z0-9.\-_]+$")]
-    private static partial System.Text.RegularExpressions.Regex SchemaComponentName();
-
-    private static bool ResolvesToPathParameter(JsonObject root, string reference, string name) =>
-        reference.StartsWith("#/", StringComparison.Ordinal)
-        && reference[2..]
-            .Split('/')
-            .Aggregate(
-                (JsonNode?)root,
-                (node, token) => node?[token.Replace("~1", "/").Replace("~0", "~")]
-            )
-            is JsonObject parameter
-        && parameter["in"]?.GetValue<string>() == "path"
-        && parameter["name"]?.GetValue<string>() == name;
-
-    [System.Text.RegularExpressions.GeneratedRegex(@"\{([^{}/]*)\}")]
-    private static partial System.Text.RegularExpressions.Regex PathTemplateParameter();
-
     /// <summary>
-    /// An enum is a set of allowed values, so a repeated member adds nothing; it would only
-    /// give the C# enum two members with one wire value (vercel repeats 'preview').
-    /// The first occurrence keeps its position.
+    /// A schema <c>$ref</c> with metadata siblings becomes <c>allOf: [{$ref}]</c> beside them,
+    /// the form the OpenAPI reader keeps the siblings on.
     /// </summary>
-    private static void CollapseRepeatedEnumMembers(JsonNode node)
-    {
-        if (node is JsonArray array)
-        {
-            foreach (var child in array)
+    private static void NormalizeSchemaReferenceMetadataSiblings(JsonObject root) =>
+        VisitStructuralObjects(
+            root,
+            "#",
+            (obj, _) =>
             {
-                if (child is not null)
+                if (
+                    StringValue(obj["$ref"]) is not { } reference
+                    || obj.ContainsKey("allOf")
+                    || !_schemaReferenceMetadataKeywords.Any(obj.ContainsKey)
+                )
                 {
-                    CollapseRepeatedEnumMembers(child);
+                    return;
                 }
+
+                obj.Remove("$ref");
+                obj["allOf"] = new JsonArray(new JsonObject { ["$ref"] = reference });
             }
-            return;
-        }
-
-        if (node is not JsonObject obj)
-        {
-            return;
-        }
-
-        if (obj["enum"] is JsonArray members)
-        {
-            var seen = new HashSet<string>(StringComparer.Ordinal);
-            for (var index = 0; index < members.Count; index++)
-            {
-                if (!seen.Add(members[index]?.ToJsonString() ?? "null"))
-                {
-                    members.RemoveAt(index--);
-                }
-            }
-        }
-
-        foreach (var child in obj)
-        {
-            if (child.Value is not null && !IsOpaqueOpenApiValue(child.Key))
-            {
-                CollapseRepeatedEnumMembers(child.Value);
-            }
-        }
-    }
-
-    private static void MarkEnumNullMembers(JsonNode node)
-    {
-        if (node is JsonArray array)
-        {
-            foreach (var child in array)
-            {
-                if (child is not null)
-                {
-                    MarkEnumNullMembers(child);
-                }
-            }
-            return;
-        }
-
-        if (node is not JsonObject obj)
-        {
-            return;
-        }
-
-        if (obj["enum"] is JsonArray members && members.Any(member => member is null))
-        {
-            obj[ImportedEnumNullMemberExtension] = true;
-        }
-
-        foreach (var child in obj.ToList())
-        {
-            if (child.Value is not null && !IsOpaqueOpenApiValue(child.Key))
-            {
-                MarkEnumNullMembers(child.Value);
-            }
-        }
-    }
-
-    internal static bool IsOpaqueOpenApiValue(string name) =>
-        name is "const" or "default" or "enum" or "example" or "examples"
-        || name.StartsWith("x-", StringComparison.OrdinalIgnoreCase);
-
-    private static void NormalizeSchemaReferenceMetadataSiblings(JsonNode node)
-    {
-        if (node is JsonArray array)
-        {
-            foreach (var child in array)
-            {
-                if (child is not null)
-                {
-                    NormalizeSchemaReferenceMetadataSiblings(child);
-                }
-            }
-            return;
-        }
-
-        if (node is not JsonObject obj)
-        {
-            return;
-        }
-
-        foreach (var child in obj.ToList())
-        {
-            if (child.Value is not null)
-            {
-                NormalizeSchemaReferenceMetadataSiblings(child.Value);
-            }
-        }
-
-        if (
-            obj["$ref"] is not JsonValue reference
-            || obj.ContainsKey("allOf")
-            || !_schemaReferenceMetadataKeywords.Any(obj.ContainsKey)
-        )
-        {
-            return;
-        }
-
-        var refValue = reference.GetValue<string>();
-        obj.Remove("$ref");
-        obj["allOf"] = new JsonArray(new JsonObject { ["$ref"] = refValue });
-    }
+        );
 
     private static readonly string[] _schemaReferenceMetadataKeywords =
     [
@@ -1204,7 +1217,7 @@ public static partial class OpenApiImporter
 
     private static string? GetLocalReference(JsonObject obj)
     {
-        return obj["$ref"]?.GetValue<string>() is { } reference && reference.StartsWith('#')
+        return StringValue(obj["$ref"]) is { } reference && reference.StartsWith('#')
             ? reference
             : null;
     }

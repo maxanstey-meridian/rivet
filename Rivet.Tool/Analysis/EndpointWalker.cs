@@ -30,17 +30,15 @@ public static class EndpointWalker
         {
             if (seen.Add(method))
             {
-                var endpoint = BuildControllerEndpoint(
-                    method,
-                    Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
-                    isContract: false,
-                    wkt,
-                    typeWalker
+                endpoints.Add(
+                    BuildControllerEndpoint(
+                        method,
+                        Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
+                        isContract: false,
+                        wkt,
+                        typeWalker
+                    )
                 );
-                if (endpoint is not null)
-                {
-                    endpoints.Add(endpoint);
-                }
             }
         }
 
@@ -57,17 +55,15 @@ public static class EndpointWalker
         {
             if (seen.Add(method))
             {
-                var endpoint = BuildControllerEndpoint(
-                    method,
-                    Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
-                    isContract: false,
-                    wkt,
-                    typeWalker
+                endpoints.Add(
+                    BuildControllerEndpoint(
+                        method,
+                        Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
+                        isContract: false,
+                        wkt,
+                        typeWalker
+                    )
                 );
-                if (endpoint is not null)
-                {
-                    endpoints.Add(endpoint);
-                }
             }
         }
 
@@ -78,9 +74,11 @@ public static class EndpointWalker
     /// Builds an endpoint from an MVC-attributed method: an annotated action
     /// ([RivetEndpoint]/[RivetClient]) or an abstract [RivetContract] method. Contract
     /// methods refuse duplicate statuses and do not read MVC request metadata
-    /// ([Consumes], [FromForm] encoding, Rivet examples).
+    /// ([Consumes], [FromForm] encoding, Rivet examples). A method with no [Http*] verb,
+    /// or no route template on the action or its class, is refused (RIV1100): it was
+    /// marked as an operation, so skipping it would drop it from the spec without a word.
     /// </summary>
-    internal static TsEndpointDefinition? BuildControllerEndpoint(
+    internal static TsEndpointDefinition BuildControllerEndpoint(
         IMethodSymbol method,
         string controllerName,
         bool isContract,
@@ -89,12 +87,30 @@ public static class EndpointWalker
     )
     {
         var (httpMethod, route) = ResolveActionRoute(wkt, method);
-        if (httpMethod is null || route is null)
+        var name = Naming.ToCamelCase(method.Name);
+        var label = isContract
+            ? $"contract endpoint '{MethodOwner(method)}.{method.Name}'"
+            : $"endpoint '{MethodOwner(method)}.{method.Name}'";
+        if (httpMethod is null)
         {
-            return null;
+            throw new RivetUserException(
+                $"error {Diagnostics.UnresolvedBindingSource}: {label} is marked [RivetEndpoint] but has "
+                    + "no [HttpGet], [HttpPost], [HttpPut], [HttpPatch] or [HttpDelete] attribute, so Rivet "
+                    + "can't tell its HTTP method and would drop the operation. Add the verb attribute with "
+                    + "its route template, or remove [RivetEndpoint]."
+            );
         }
 
-        var name = Naming.ToCamelCase(method.Name);
+        if (route is null)
+        {
+            throw new RivetUserException(
+                $"error {Diagnostics.UnresolvedBindingSource}: {label} has no route template on its "
+                    + $"{httpMethod} attribute or a [Route] on "
+                    + "its class, so the operation has no path and would drop from the spec. Give the verb "
+                    + "attribute a template, or put [Route] on the class."
+            );
+        }
+
         var parameters = ExtractParams(wkt, method, typeWalker, route);
         if (!isContract)
         {

@@ -982,8 +982,13 @@ public sealed class TerminalAndAdapterTests
 
     public sealed record Dog(string Name, string Breed) : Animal(Name);
 
+    // System.Text.Json refuses [JsonPolymorphic] without a derived type once the options
+    // freeze, so one subtype is registered and the dog isn't.
     [JsonPolymorphic]
+    [JsonDerivedType(typeof(RegisteredCat), "cat")]
     public abstract record UnregisteredAnimal;
+
+    public sealed record RegisteredCat(string Name) : UnregisteredAnimal;
 
     public sealed record UnregisteredDog(string Name) : UnregisteredAnimal;
 

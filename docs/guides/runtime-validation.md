@@ -8,9 +8,13 @@ its runtime helpers enforce, and — just as important — what they do **not** 
 These hold whenever you regenerate the spec (`dotnet rivet --project … --output …`):
 
 - The emitted OpenAPI 3.1 spec is deterministically derived from the transport
-  shape declared in compiled C# via the Roslyn semantic model. Custom serializer
-  settings, middleware and other runtime behaviour outside that declaration are
-  not visible; known fidelity loss produces diagnostics where Rivet can detect it.
+  shape declared in compiled C# via the Roslyn semantic model, serializer attributes
+  on the types included. Serializer settings that would make the wire differ from
+  that declaration don't get waved through: a `[JsonConverter]` or
+  `[JsonNumberHandling]` Rivet can't model stops generation (`RIV1111`, `RIV1112`),
+  and host JSON options that change the wire are refused when a result runs (below).
+  Middleware that rewrites a response after the adapter is outside the declaration
+  and outside the spec.
 - Constraint attributes (`[Range]`, `[StringLength]`, `[MinLength]`, `[MaxLength]`, `[Length]`,
   `[RegularExpression]`, `[RivetConstraints]`, ...) are emitted as JSON Schema
   constraints (`minimum`, `maxLength`, `pattern`, `multipleOf`, ...).
@@ -127,10 +131,12 @@ Do not rely on Rivet for any of the following — none of it happens:
 
 - **Serialized JSON shape.** The runtime checks are type-identity checks on the CLR
   value and a comparison of the host's options, never inspection of serialized
-  output. A derived instance is rejected and so are wire-changing host options (see
-  above), but what a custom converter or `[JsonExtensionData]` declared on the type
-  itself writes goes to the wire unchecked, and `null` in a required member is not
-  caught.
+  output. A derived instance is rejected, wire-changing host options are refused
+  (see above), and a converter Rivet can't model never gets past generation. What's
+  left is taken on trust: a member pinned with `[RivetSchemaType]` is whatever its
+  converter writes, the pin is your word for it; whatever a `[JsonExtensionData]`
+  dictionary holds goes out as extra members; and `null` in a required,
+  non-nullable member is written as `null`, not caught.
 - **Validation constraints.** Rivet's response terminals perform no constraint
   validation on requests or responses. Enforcement is the host framework's job —
   see [Enforcing constraints at runtime](#enforcing-constraints-at-runtime) below

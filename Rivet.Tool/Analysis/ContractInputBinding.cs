@@ -16,9 +16,10 @@ internal sealed record InputBindingMismatch(
 /// RIV4006: the contract's inputs against what the handler implementing it binds. The spec
 /// (and every client generated from it) sends each input where the contract declares it, by
 /// the name it declares, so the handler has to read it there: route values, query parameters,
-/// headers and form fields are matched by name, ignoring case as ASP.NET does, and the body by
-/// presence. What the handler binds is <see cref="ParameterBindingSources"/>' reading of its
-/// parameters, the same one RIV4005 uses. Three things are reported:
+/// headers, cookies and form fields (a form-encoded body's fields included) are matched by
+/// name, ignoring case as ASP.NET does, and a JSON or binary body by presence. What the
+/// handler binds is <see cref="ParameterBindingSources"/>' reading of its parameters, the same
+/// one RIV4005 uses. Three things are reported:
 /// <list type="bullet">
 /// <item>an input the handler binds that the contract doesn't declare, which no generated
 /// client sends;</item>
@@ -26,18 +27,25 @@ internal sealed record InputBindingMismatch(
 /// <item>an input both have under one name but from different places, which never arrives.</item>
 /// </list>
 /// A handler that can read the request itself (an HttpContext or HttpRequest parameter, a
-/// BindAsync type, a custom model binder, or an MVC action touching <c>Request</c> or
-/// <c>HttpContext</c>) may read a declared input by hand, so it's never told an input is
-/// unbound; what it does bind is still checked. An unattributed complex parameter that might
-/// be a service counts as the body when the contract declares one and as a service when it
-/// doesn't. The <c>Authorization</c> header and a <c>.QueryAuth()</c> token belong to the
-/// contract's security, not its inputs. Azure Functions handlers aren't compared: they read
-/// the query, headers and body from the request by hand, so only route values are bound.
+/// BindAsync type, a custom model binder, or a body reading a property that hands over the
+/// request, such as a controller's <c>Request</c>, <c>HttpContext</c> or
+/// <c>ControllerContext.HttpContext</c>, or <c>IHttpContextAccessor.HttpContext</c>) may read
+/// a declared input by hand, so it's never told an input is unbound; what it does bind is
+/// still checked. ASP.NET has no attribute that binds a cookie, so a declared cookie needs
+/// such a handler. An unattributed complex parameter that might be a service counts as the
+/// body when the contract declares one and as a service when it doesn't. The
+/// <c>Authorization</c> header, a <c>.QueryAuth()</c> token and the header or query parameter
+/// of an apiKey scheme the endpoint's security names belong to the contract's security, not
+/// its inputs. Azure Functions handlers aren't compared: they read the query, headers and
+/// body from the request by hand, so only route values are bound.
 /// </summary>
 internal static class ContractInputBinding
 {
     public static IEnumerable<InputBindingMismatch> Compare(
         WellKnownTypes wkt,
+        TypeWalker walker,
+        ContractSecurityMetadata? security,
+        IFieldSymbol field,
         TsEndpointDefinition endpoint,
         IMethodSymbol handler,
         ParameterBindingHost host,
@@ -50,8 +58,9 @@ internal static class ContractInputBinding
             yield break;
         }
 
-        var declared = DeclaredInputs(endpoint);
         var body = DeclaredBody(endpoint);
+        var declared = DeclaredInputs(wkt, walker, field, endpoint, body);
+        var apiKeys = ApiKeySchemes(endpoint, security);
         var routeParameters = RouteParser.ParseRouteParamNames(route ?? endpoint.RouteTemplate);
         var inputs = handler
             .Parameters.SelectMany(parameter =>
@@ -61,13 +70,13 @@ internal static class ContractInputBinding
             .ToList();
         var readsRequest =
             inputs.Any(input => input.Source == InputSource.WholeRequest)
-            || host == ParameterBindingHost.Mvc && TouchesControllerRequest(handler);
+            || ReadsRequestInBody(handler);
         var readsWholeForm = inputs.Any(input => input.Source == InputSource.WholeForm);
 
         var settled = new HashSet<DeclaredInput>();
         foreach (var input in inputs.Where(input => Accepts(input.Source).Count > 0))
         {
-            if (IsSecurityInput(endpoint, input.Source, input.WireName))
+            if (IsSecurityInput(endpoint, apiKeys, input.Source, input.WireName))
             {
                 continue;
             }
@@ -104,23 +113,12 @@ internal static class ContractInputBinding
                 continue;
             }
 
-            // A form-encoded body's fields are the body type's members, not named inputs.
-            if (
-                input.Source is InputSource.Form or InputSource.ValueProviders
-                && body == DeclaredBodyKind.Form
-                && !declared.Any(candidate => candidate.Source == InputSource.Form)
-            )
-            {
-                continue;
-            }
-
             yield return new InputBindingMismatch(
                 "(not declared)",
                 Describe(input.Source, input.WireName),
                 $"handler parameter '{input.Path}' binds {Describe(input.Source, input.WireName)}, "
                     + "which the contract doesn't declare, so no client generated from the spec "
-                    + "sends it. Declare it on the contract's input type (a property, or "
-                    + "[RivetHeader] for a header), or stop binding it in the handler.",
+                    + $"sends it. {DeclareHint(input.Source, input.WireName)}",
                 input.Parameter.Locations.FirstOrDefault()
             );
         }
@@ -132,7 +130,9 @@ internal static class ContractInputBinding
                 inputs,
                 readsRequest,
                 readsWholeForm,
-                handler
+                handler,
+                host,
+                infersBody
             )
         )
         {
@@ -146,12 +146,16 @@ internal static class ContractInputBinding
                 continue;
             }
 
+            var remove =
+                input.Source == InputSource.Cookie
+                    ? "Or remove the cookie parameter from the contract."
+                    : "Or remove it from the contract's input type.";
             yield return new InputBindingMismatch(
                 Describe(input.Source, input.Name),
                 "(not bound)",
                 $"the contract declares {Describe(input.Source, input.Name)}, but the handler "
                     + "never binds it, so the value clients send is ignored. "
-                    + $"{BindHint(input.Source, input.Name)} Or remove it from the contract's input type.",
+                    + $"{BindHint(input.Source, input.Name)} {remove}",
                 handler.Locations.FirstOrDefault()
             );
         }
@@ -163,7 +167,9 @@ internal static class ContractInputBinding
         IReadOnlyList<BoundInput> inputs,
         bool readsRequest,
         bool readsWholeForm,
-        IMethodSymbol handler
+        IMethodSymbol handler,
+        ParameterBindingHost host,
+        bool infersBody
     )
     {
         var bodies = inputs.Where(input => input.Source == InputSource.Body).ToList();
@@ -188,14 +194,23 @@ internal static class ContractInputBinding
                     "request body",
                     "(not bound)",
                     "the contract declares a request body, but the handler binds none, so the "
-                        + "body clients send is ignored. Bind it with a [FromBody] parameter (an MVC "
-                        + "action without [ApiController] binds an unattributed complex parameter "
-                        + "from the route, query and form, never the body).",
+                        + "body clients send is ignored. Bind it with a [FromBody] parameter."
+                        + (
+                            host == ParameterBindingHost.Mvc && !infersBody
+                                ? " Without [ApiController] inference, MVC binds an unattributed "
+                                    + "complex parameter from the route, query and form, never the body."
+                                : ""
+                        ),
                     handler.Locations.FirstOrDefault()
                 );
                 break;
             case DeclaredBodyKind.Form:
-                if (bodies.FirstOrDefault(input => !IsRawBody(input.Type)) is { } json)
+                if (
+                    bodies.FirstOrDefault(input =>
+                        !ParameterBindingSources.IsRawBody(input.Type)
+                    ) is
+                    { } json
+                )
                 {
                     yield return new InputBindingMismatch(
                         "form body",
@@ -239,17 +254,27 @@ internal static class ContractInputBinding
     }
 
     /// <summary>
-    /// The contract's named inputs: route, query and header parameters, and the named parts
-    /// of a multipart body. Cookies are left out: ASP.NET has no attribute that binds one.
+    /// The contract's named inputs: route, query, header and cookie parameters, the named
+    /// parts of a multipart body, and the fields of a form-encoded body. Those fields are the
+    /// input type's request properties under their JSON names, less any a route token takes,
+    /// as ContractWalker lowers them into the form schema.
     /// </summary>
-    private static List<DeclaredInput> DeclaredInputs(TsEndpointDefinition endpoint) =>
-        endpoint
+    private static List<DeclaredInput> DeclaredInputs(
+        WellKnownTypes wkt,
+        TypeWalker walker,
+        IFieldSymbol field,
+        TsEndpointDefinition endpoint,
+        DeclaredBodyKind body
+    )
+    {
+        var declared = endpoint
             .Params.Select(parameter =>
                 parameter.Source switch
                 {
                     ParamSource.Route => new DeclaredInput(parameter.Name, InputSource.Route),
                     ParamSource.Query => new DeclaredInput(parameter.Name, InputSource.Query),
                     ParamSource.Header => new DeclaredInput(parameter.Name, InputSource.Header),
+                    ParamSource.Cookie => new DeclaredInput(parameter.Name, InputSource.Cookie),
                     ParamSource.File or ParamSource.FormField => new DeclaredInput(
                         parameter.Name,
                         InputSource.Form
@@ -259,6 +284,44 @@ internal static class ContractInputBinding
             )
             .OfType<DeclaredInput>()
             .ToList();
+
+        if (
+            body == DeclaredBodyKind.Form
+            && !declared.Any(input => input.Source == InputSource.Form)
+            && InputType(wkt, field) is { } inputType
+        )
+        {
+            var routeTokens = RouteParser
+                .ParseRouteParamNames(endpoint.RouteTemplate)
+                .Select(RouteParser.NormalizeForMatching)
+                .ToHashSet(StringComparer.Ordinal);
+            declared.AddRange(
+                walker
+                    .GetRequestProperties(inputType)
+                    .Where(property =>
+                        !routeTokens.Contains(RouteParser.NormalizeForMatching(property.Name))
+                    )
+                    .Select(property => new DeclaredInput(
+                        walker.GetJsonMemberName(property) ?? Naming.ToCamelCase(property.Name),
+                        InputSource.Form
+                    ))
+            );
+        }
+
+        return declared;
+    }
+
+    /// <summary>The contract's input type: the TInput its <c>.Bind(...)</c> takes.</summary>
+    private static ITypeSymbol? InputType(WellKnownTypes wkt, IFieldSymbol field) =>
+        field.Type is INamedTypeSymbol { TypeArguments: [var input, ..] } definition
+        && new[]
+        {
+            wkt.RouteDefinitionOfTInputTOutput,
+            wkt.InputRouteDefinitionOfT,
+            wkt.FileRouteDefinitionOfT,
+        }.Contains(definition.OriginalDefinition, SymbolEqualityComparer.Default)
+            ? input
+            : null;
 
     private static DeclaredBodyKind DeclaredBody(TsEndpointDefinition endpoint) =>
         endpoint.Params.Any(parameter =>
@@ -284,16 +347,43 @@ internal static class ContractInputBinding
             _ => [],
         };
 
+    /// <summary>
+    /// The apiKey schemes in the endpoint's security alternatives (its own, or the document's
+    /// when it declares none): each puts its credential in a header or query parameter.
+    /// </summary>
+    private static List<ApiKeySecurityScheme> ApiKeySchemes(
+        TsEndpointDefinition endpoint,
+        ContractSecurityMetadata? security
+    ) =>
+        (endpoint.Security ?? security?.GlobalRequirements) is { } requirements
+        && security is not null
+            ? requirements
+                .Alternatives.SelectMany(alternative => alternative.Schemes)
+                .Select(scheme => security.Schemes.GetValueOrDefault(scheme.Name))
+                .OfType<ApiKeySecurityScheme>()
+                .ToList()
+            : [];
+
     private static bool IsSecurityInput(
         TsEndpointDefinition endpoint,
+        IReadOnlyList<ApiKeySecurityScheme> apiKeys,
         InputSource source,
         string name
-    ) =>
-        source == InputSource.Header
-            && string.Equals(name, "Authorization", StringComparison.OrdinalIgnoreCase)
-        || source is InputSource.Query or InputSource.ValueProviders
-            && endpoint.QueryAuth is { ParameterName: var token }
-            && string.Equals(name, token, StringComparison.OrdinalIgnoreCase);
+    )
+    {
+        var query = source is InputSource.Query or InputSource.ValueProviders;
+        return source == InputSource.Header
+                && string.Equals(name, "Authorization", StringComparison.OrdinalIgnoreCase)
+            || query
+                && endpoint.QueryAuth is { ParameterName: var token }
+                && string.Equals(name, token, StringComparison.OrdinalIgnoreCase)
+            || apiKeys.Any(scheme =>
+                (
+                    scheme.Location == SecurityApiKeyLocation.Header && source == InputSource.Header
+                    || scheme.Location == SecurityApiKeyLocation.Query && query
+                ) && string.Equals(name, scheme.Name, StringComparison.OrdinalIgnoreCase)
+            );
+    }
 
     private static string Describe(InputSource source, string name) =>
         source switch
@@ -301,6 +391,7 @@ internal static class ContractInputBinding
             InputSource.Route => $"route value '{name}'",
             InputSource.Query => $"query parameter '{name}'",
             InputSource.Header => $"header '{name}'",
+            InputSource.Cookie => $"cookie '{name}'",
             InputSource.Form => $"form field '{name}'",
             InputSource.ValueProviders => $"route, query or form value '{name}'",
             _ => $"'{name}'",
@@ -313,22 +404,39 @@ internal static class ContractInputBinding
                 $"Bind it with [FromRoute(Name = \"{name}\")], or a parameter named '{name}'.",
             InputSource.Query => $"Bind it with [FromQuery(Name = \"{name}\")].",
             InputSource.Header => $"Bind it with [FromHeader(Name = \"{name}\")].",
+            InputSource.Cookie =>
+                $"ASP.NET has no attribute that binds a cookie, so read it from Request.Cookies[\"{name}\"] "
+                    + "(on a minimal API, through an HttpRequest or HttpContext parameter).",
             _ =>
                 $"Bind it with [FromForm(Name = \"{name}\")], or an IFormFile named '{name}' for a file.",
         };
 
-    private static bool IsRawBody(ITypeSymbol type) =>
-        type.ToDisplayString() is "System.IO.Stream" or "System.IO.Pipelines.PipeReader";
+    /// <summary>How to declare an input the handler binds but the contract doesn't.</summary>
+    private static string DeclareHint(InputSource source, string name) =>
+        source switch
+        {
+            InputSource.Route =>
+                $"The contract's route has no {{{name}}} token: add one to it, or stop binding "
+                    + "the value in the handler.",
+            InputSource.Header =>
+                "Declare it on the contract's input type with [RivetHeader], or stop binding it "
+                    + "in the handler.",
+            _ => "Declare it on the contract's input type (a property), or stop binding it in the "
+                + "handler.",
+        };
 
     /// <summary>
-    /// True when an MVC action reads <c>Request</c> or <c>HttpContext</c> off its controller,
-    /// so it can pick any input out of the request by hand.
+    /// True when the handler's body reads a property that hands over the request (one typed
+    /// HttpContext or HttpRequest): a controller's <c>Request</c>, <c>HttpContext</c> or
+    /// <c>ControllerContext.HttpContext</c>, <c>IHttpContextAccessor.HttpContext</c> on a
+    /// parameter or an injected field, or <c>context.Request</c>. It can then pick any input
+    /// out of the request by hand. Helpers the handler calls aren't followed.
     /// </summary>
-    private static bool TouchesControllerRequest(IMethodSymbol action)
+    private static bool ReadsRequestInBody(IMethodSymbol handler)
     {
         if (
-            action.ContainingAssembly is not ISourceAssemblySymbol { Compilation: var compilation }
-            || action.DeclaringSyntaxReferences is not [var reference]
+            handler.ContainingAssembly is not ISourceAssemblySymbol { Compilation: var compilation }
+            || handler.DeclaringSyntaxReferences is not [var reference]
         )
         {
             return false;
@@ -338,10 +446,6 @@ internal static class ContractInputBinding
         return compilation.GetSemanticModel(syntax.SyntaxTree).GetOperation(syntax) is { } body
             && body.Descendants()
                 .OfType<IPropertyReferenceOperation>()
-                .Any(property =>
-                    property.Property is { Name: "Request" or "HttpContext" } read
-                    && read.ContainingType.ToDisplayString()
-                        == "Microsoft.AspNetCore.Mvc.ControllerBase"
-                );
+                .Any(property => ParameterBindingSources.IsRequest(property.Property.Type));
     }
 }

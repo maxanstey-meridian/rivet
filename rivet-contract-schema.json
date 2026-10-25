@@ -141,7 +141,8 @@
                 "properties": {
                   "name": { "type": "string" },
                   "type": { "$ref": "#/$defs/tsType" },
-                  "optional": { "type": "boolean" }
+                  "optional": { "type": "boolean" },
+                  "surface": { "type": "string", "enum": ["Both", "RequestOnly", "ResponseOnly"] }
                 },
                 "required": ["name", "type"],
                 "additionalProperties": false
@@ -211,7 +212,9 @@
         "multipleOf": { "type": "number" },
         "minItems": { "type": "integer" },
         "maxItems": { "type": "integer" },
-        "uniqueItems": { "type": "boolean" }
+        "uniqueItems": { "type": "boolean" },
+        "minProperties": { "type": "integer" },
+        "maxProperties": { "type": "integer" }
       },
       "additionalProperties": false
     },
@@ -228,7 +231,12 @@
         "constraints": { "$ref": "#/$defs/tsPropertyConstraints" },
         "isNullable": { "type": "boolean" },
         "title": { "type": "string" },
-        "xml": { "$ref": "#/$defs/schemaXmlMetadata" }
+        "xml": { "$ref": "#/$defs/schemaXmlMetadata" },
+        "format": { "type": "string" },
+        "isFormatSpecified": { "type": "boolean" },
+        "required": { "type": "array", "items": { "type": "string" } },
+        "enum": { "type": "string", "description": "A named scalar's enum the C# type cannot spell (booleans, non-Int32 numbers), as a JSON array." },
+        "enumListsNull": { "type": "boolean" }
       },
       "additionalProperties": false
     },
@@ -316,7 +324,7 @@
       "properties": {
         "name": { "type": "string" },
         "type": { "$ref": "#/$defs/tsType" },
-        "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField", "header"] },
+        "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField", "header", "cookie"] },
         "isOptional": { "type": "boolean" },
         "bodyPropertyName": { "type": "string" },
         "description": { "type": "string" },
@@ -490,6 +498,89 @@
           },
           "required": ["contract", "endpoint"],
           "additionalProperties": false
+        },
+        "parameterComponentReferences": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "location": { "type": "string" },
+              "componentId": { "type": "string" }
+            },
+            "required": ["name", "location", "componentId"],
+            "additionalProperties": false
+          }
+        },
+        "responseComponentReferences": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "statusKey": { "type": "string" },
+              "componentId": { "type": "string" }
+            },
+            "required": ["statusKey", "componentId"],
+            "additionalProperties": false
+          }
+        },
+        "responseHeaderComponentReferences": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "statusKey": { "type": "string" },
+              "headerName": { "type": "string" },
+              "componentId": { "type": "string" }
+            },
+            "required": ["statusKey", "headerName", "componentId"],
+            "additionalProperties": false
+          }
+        },
+        "schemas": {
+          "type": ["object", "null"],
+          "properties": {
+            "parameters": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "location": { "type": "string" },
+                  "json": { "type": "string" }
+                },
+                "required": ["name", "location", "json"],
+                "additionalProperties": false
+              }
+            },
+            "requests": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "mediaType": { "type": "string" },
+                  "json": { "type": "string" }
+                },
+                "required": ["mediaType", "json"],
+                "additionalProperties": false
+              }
+            },
+            "responses": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "statusKey": { "type": "string" },
+                  "mediaType": { "type": "string" },
+                  "json": { "type": "string" }
+                },
+                "required": ["statusKey", "mediaType", "json"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["parameters", "requests", "responses"],
+          "additionalProperties": false
         }
       },
       "required": ["operationIdPresent", "tags", "deprecated"],
@@ -511,7 +602,8 @@
         "isBinary": { "type": "boolean" },
         "schemaType": { "type": "string", "enum": ["string", "integer", "number", "boolean"] },
         "format": { "type": "string" },
-        "isFormatSpecified": { "type": "boolean" }
+        "isFormatSpecified": { "type": "boolean" },
+        "schemaDescription": { "type": "string" }
       },
       "required": ["mediaType"],
       "additionalProperties": false

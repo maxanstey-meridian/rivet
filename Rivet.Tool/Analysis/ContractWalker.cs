@@ -60,10 +60,7 @@ public static class ContractWalker
                         wkt,
                         typeWalker
                     );
-                    if (endpoint is not null)
-                    {
-                        endpoints.Add(new ContractEndpoint(endpoint, null));
-                    }
+                    endpoints.Add(new ContractEndpoint(endpoint, null));
                 }
 
                 continue;
@@ -72,12 +69,21 @@ public static class ContractWalker
             // Static class contract: read Endpoint fields from builder chain
             foreach (var member in type.GetMembers())
             {
-                if (member is not IFieldSymbol field)
+                if (member is IPropertySymbol property && IsRivetEndpointType(property.Type))
                 {
-                    continue;
+                    throw new RivetUserException(
+                        $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
+                            + $"'{type.Name}.{property.Name}' is a property. Rivet reads the spec from a "
+                            + "field's initializer, so it can't read a property and would drop the operation. "
+                            + "Declare it as a 'public static readonly' field."
+                    );
                 }
 
-                if (!IsRivetEndpointField(field.Type))
+                // An auto-property's backing field belongs to the property refused above.
+                if (
+                    member is not IFieldSymbol { AssociatedSymbol: null } field
+                    || !IsRivetEndpointType(field.Type)
+                )
                 {
                     continue;
                 }
@@ -122,9 +128,8 @@ public static class ContractWalker
             root.StringArg("route")
             ?? throw new RivetUserException(
                 $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
-                    + $"'{field.ContainingType.Name}.{field.Name}' has a route that isn't a compile-time "
-                    + "constant, so Rivet can't read it into the spec. Use a string literal or a const "
-                    + "(const strings can be concatenated or interpolated)."
+                    + $"'{field.ContainingType.Name}.{field.Name}' has a null route, so the operation "
+                    + "has no path in the spec. Pass a route template such as \"/api/items\"."
             );
 
         var isFileEndpoint = root.TargetMethod.Name == "File";
@@ -229,11 +234,12 @@ public static class ContractWalker
                 case "ProducesContentType" when call.StringArg("contentType") is { } contentType:
                     responseContentTypeOverride = contentType;
                     break;
-                case "RequestExampleJson" or "RequestExampleRef" when IsCompleteExample(call):
+                case "RequestExampleJson" or "RequestExampleRef":
+                    RequireCompleteExample(call, field);
                     requestExampleCalls.Add(ToExampleCall(call, statusKey: null));
                     break;
-                case "ResponseExampleJson"
-                or "ResponseExampleRef" when call.Status() is { } status && IsCompleteExample(call):
+                case "ResponseExampleJson" or "ResponseExampleRef" when call.Status() is { } status:
+                    RequireCompleteExample(call, field);
                     responseExampleCalls.Add(ToExampleCall(call, status.Key));
                     break;
                 case "Returns" when call.Status() is { } status:
@@ -509,27 +515,6 @@ public static class ContractWalker
 
         ResponseStatusValidation.RejectContractDuplicates(responses, name);
         responses.Sort((a, b) => a.StatusCode.CompareTo(b.StatusCode));
-        EndpointWalker.ApplyResponseExamples(
-            responses,
-            responseExampleCalls
-                .Select(call =>
-                    (
-                        call.StatusKey!,
-                        ToEndpointExample(
-                            call,
-                            DefaultResponseExampleMediaType(
-                                ParseStatusCode(call.StatusKey!),
-                                fileContentType
-                            )
-                        )
-                    )
-                )
-                .ToList(),
-            Diagnostics.ContractExampleUndeclaredStatus,
-            $"contract endpoint '{name}'",
-            "declare the status with .Returns(...) or .Status(...)"
-        );
-        ApplyResponseHeaders(responses, responseHeaderCalls, successCode, successStatusKey, name);
         // Explicit additional representations must not erase the file factory's
         // success representation: runtime always includes the configured file format.
         var fileSuccessKey = successStatusKey ?? successCode.ToString();
@@ -552,7 +537,30 @@ public static class ContractWalker
                 (fileSuccessKey, new TsMediaTypeContent(fileContentType, null, IsBinary: true))
             );
         }
+        // Contents first: .ResponseContent(...) declares its status, so examples and
+        // headers may target a status declared only that way.
         ApplyResponseContents(responses, responseContents);
+        EndpointWalker.ApplyResponseExamples(
+            responses,
+            responseExampleCalls
+                .Select(call =>
+                    (
+                        call.StatusKey!,
+                        ToEndpointExample(
+                            call,
+                            DefaultResponseExampleMediaType(
+                                ParseStatusCode(call.StatusKey!),
+                                fileContentType
+                            )
+                        )
+                    )
+                )
+                .ToList(),
+            Diagnostics.ContractExampleUndeclaredStatus,
+            $"contract endpoint '{name}'",
+            "declare the status with .Returns(...), .Status(...) or .ResponseContent(...)"
+        );
+        ApplyResponseHeaders(responses, responseHeaderCalls, successCode, successStatusKey, name);
 
         var requestExamples =
             requestExampleCalls.Count == 0
@@ -683,7 +691,7 @@ public static class ContractWalker
     /// <summary>
     /// Attaches .WithResponseHeader(...) declarations to their responses.
     /// A null status (convenience overload) targets the success status. Headers on a
-    /// status no .Returns()/.Status() declared fail generation (RIV1017), mirroring
+    /// status no .Returns(), .Status() or .ResponseContent() declared fail generation (RIV1017), mirroring
     /// the response-example policy.
     /// </summary>
     private static void ApplyResponseHeaders(
@@ -755,7 +763,7 @@ public static class ContractWalker
                 $"error {Diagnostics.ResponseHeaderUndeclaredStatus}: contract endpoint '{endpointName}' declares "
                     + $"response header(s) {string.Join(", ", headers.Select(h => $"'{h.Name}'"))} for status "
                     + $"{group.Key}, which it does not declare, so the spec has nowhere to put them. Declare the "
-                    + "status with .Returns(...) or .Status(...), or move the header to a declared status."
+                    + "status with .Returns(...), .Status(...) or .ResponseContent(...), or move the header to a declared status."
             );
         }
     }
@@ -1006,11 +1014,19 @@ public static class ContractWalker
                 // either invents params from CLR members (Count, Keys, …) or drops the input.
                 throw new RivetUserException(
                     $"error {Diagnostics.InputTypeNotParamLowerable}: input type '{tInput.ToDisplayString()}' on "
-                        + $"{httpMethod} {route} is a dictionary, collection or scalar, but this request has no JSON "
-                        + "body to carry it (as on GET, DELETE or .AcceptsBinary()), so the input must lower to "
-                        + "route and query params, and it has no properties to lower. Model the input as a record "
-                        + "with one property per route or query parameter, or send the values as a JSON body with "
-                        + "Define.Post/Put/Patch."
+                        + $"{httpMethod} {route} is a dictionary, collection or scalar, but "
+                        + (
+                            hasBody
+                                ? "the request body carries the binary payload"
+                                : "this request has no JSON body to carry it (as on GET or DELETE)"
+                        )
+                        + ", so the input must lower to route and query params, and it has no properties to "
+                        + "lower. Model the input as a record with one property per route or query parameter"
+                        + (
+                            hasBody
+                                ? "."
+                                : ", or send the values as a JSON body with Define.Post/Put/Patch."
+                        )
                 );
             }
 
@@ -1404,8 +1420,8 @@ public static class ContractWalker
         return type is IArrayTypeSymbol { ElementType.SpecialType: SpecialType.System_Byte };
     }
 
-    private static bool IsRivetEndpointField(ITypeSymbol fieldType) =>
-        fieldType
+    private static bool IsRivetEndpointType(ITypeSymbol type) =>
+        type
             is INamedTypeSymbol
             {
                 Name: "RouteDefinition" or "InputRouteDefinition" or "FileRouteDefinition",
@@ -1492,7 +1508,7 @@ public static class ContractWalker
                 is not VariableDeclaratorSyntax { Initializer.Value: var value }
         )
         {
-            throw Unreadable(field, "has no initializer");
+            throw Unreadable(field, "has no initializer", BuilderChainRemedy);
         }
 
         var calls = new List<IInvocationOperation>();
@@ -1518,7 +1534,8 @@ public static class ContractWalker
         {
             throw Unreadable(
                 field,
-                "isn't initialised with a Define.* builder chain (a helper call or another field, say)"
+                "isn't initialised with a Define.* builder chain (a helper call or another field, say)",
+                BuilderChainRemedy
             );
         }
 
@@ -1541,7 +1558,8 @@ public static class ContractWalker
             {
                 throw Unreadable(
                     field,
-                    $"calls '{call.TargetMethod.ToDisplayString()}', which is not a Rivet builder method"
+                    $"calls '{call.TargetMethod.ToDisplayString()}', which is not a Rivet builder method",
+                    BuilderChainRemedy
                 );
             }
         }
@@ -1553,7 +1571,8 @@ public static class ContractWalker
         call.StringArg("scheme")
         ?? throw Unreadable(
             field,
-            $"passes .{call.TargetMethod.Name}() a scheme name that isn't a compile-time constant"
+            $"passes .{call.TargetMethod.Name}() a scheme name that isn't a compile-time constant",
+            ConstantRemedy
         );
 
     private static IReadOnlyList<string> SecurityScopesArg(
@@ -1579,7 +1598,8 @@ public static class ContractWalker
             ? scopes.OfType<string>().ToList()
             : throw Unreadable(
                 field,
-                $"passes .{call.TargetMethod.Name}() scopes that aren't compile-time constant strings"
+                $"passes .{call.TargetMethod.Name}() scopes that aren't compile-time constant strings",
+                "Pass an array or collection expression of literal or const strings."
             );
     }
 
@@ -1610,7 +1630,8 @@ public static class ContractWalker
 
             throw Unreadable(
                 field,
-                $"passes .{call.TargetMethod.Name}() a '{parameter.Name}' that isn't a compile-time constant"
+                $"passes .{call.TargetMethod.Name}() a '{parameter.Name}' that isn't a compile-time constant",
+                ConstantRemedy
             );
         }
     }
@@ -1629,12 +1650,22 @@ public static class ContractWalker
                 or SpecialType.System_Int32
                 or SpecialType.System_Boolean;
 
-    private static RivetUserException Unreadable(IFieldSymbol field, string reason) =>
+    private const string BuilderChainRemedy =
+        "Initialise the field with Define.* followed by Rivet builder calls only.";
+
+    private const string ConstantRemedy =
+        "Use a literal or a const (const strings can be concatenated or interpolated).";
+
+    private static RivetUserException Unreadable(
+        IFieldSymbol field,
+        string reason,
+        string remedy
+    ) =>
         new(
             $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
                 + $"'{field.ContainingType.Name}.{field.Name}' {reason}. Rivet reads the spec from the "
                 + "field's initializer statically and can't interpret this, so it would otherwise drop "
-                + "the operation. Initialise the field with Define.* followed by Rivet builder calls only."
+                + $"the operation. {remedy}"
         );
 
     private static IOperation? WithoutConversions(IOperation? operation) =>
@@ -1672,12 +1703,31 @@ public static class ContractWalker
         public string Key => DeclaredKey ?? Code.ToString();
     }
 
-    private static bool IsCompleteExample(IInvocationOperation call) =>
-        call.StringArg("json") is not null
-        || call.StringArg("componentExampleId") is not null
-            && call.StringArg("resolvedJson") is not null
-        || call.StringArg("summary") is not null
-        || call.StringArg("description") is not null;
+    /// <summary>
+    /// An example needs a JSON value, a resolved component example, a summary or a
+    /// description: one with none of them has nothing to emit, and skipping it would drop
+    /// a declared example without a word.
+    /// </summary>
+    private static void RequireCompleteExample(IInvocationOperation call, IFieldSymbol field)
+    {
+        if (
+            call.StringArg("json") is not null
+            || call.StringArg("componentExampleId") is not null
+                && call.StringArg("resolvedJson") is not null
+            || call.StringArg("summary") is not null
+            || call.StringArg("description") is not null
+        )
+        {
+            return;
+        }
+
+        throw new RivetUserException(
+            $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
+                + $"'{field.ContainingType.Name}.{field.Name}' passes .{call.TargetMethod.Name}() an "
+                + "example with nothing in it: no JSON value, summary or description. Give the example "
+                + "at least one of them, or remove the call."
+        );
+    }
 
     private static PendingEndpointExampleCall ToExampleCall(
         IInvocationOperation call,

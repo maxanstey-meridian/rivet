@@ -15,6 +15,8 @@ parameters follow the model binder instead: a nullable parameter is optional.
 | `bool` | `boolean` |
 | `int` / `uint` / `long` / `ulong` / `short` / `ushort` / `byte` / `sbyte` | `integer` with `format: int32/uint32/int64/uint64/int16/uint16/uint8/int8` (plus min/max bounds for the common widths) |
 | `float` / `double` / `decimal` | `number` with `format: float/double/decimal` |
+| `Int128` / `UInt128` | `integer` with `x-rivet-csharp-type: Int128/UInt128` (System.Text.Json writes them as JSON numbers; no OpenAPI format names them) |
+| `Half` | `number` with `x-rivet-csharp-type: Half` |
 | `Guid` | `string`, `format: uuid` |
 | `DateTime` / `DateTimeOffset` | `string`, `format: date-time` (`DateTimeOffset` additionally carries `x-rivet-csharp-type` so the import round-trip recovers the exact type) |
 | `DateOnly` | `string`, `format: date` |
@@ -25,6 +27,8 @@ parameters follow the model binder instead: a nullable parameter is optional.
 | `TimeSpan` | `string` matching System.Text.Json's invariant `"c"` format (`[-][d.]hh:mm:ss[.fffffff]`), plus `x-rivet-csharp-type: TimeSpan` |
 | `BigInteger` | refused (`RIV1010`): System.Text.Json has no converter for it, so expose a string of digits or a bounded number |
 | `object` | untyped (empty) schema — "any JSON value", emitted deliberately and with no diagnostic. openapi-typescript consumers see `unknown`; cast at the boundary. |
+| `JsonElement` / `JsonDocument` / `JsonNode` / `JsonValue` | the same untyped schema, with no diagnostic: they hold any JSON value too (`JsonNode` adds `x-rivet-csharp-type` so an import gets it back) |
+| `JsonObject` / `JsonArray` | `object` with any-valued `additionalProperties` / `array` with any-valued `items`, plus `x-rivet-csharp-type` |
 
 ## Composites
 

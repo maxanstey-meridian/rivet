@@ -403,6 +403,16 @@ public sealed class ExplicitContractTests
         "RIV1112",
         "'Holder.Value'"
     )]
+    [InlineData(
+        "[RivetType] public sealed record Holder([property: JsonNumberHandling(JsonNumberHandling.WriteAsString)] System.Int128 Value);",
+        "RIV1112",
+        "'Holder.Value'"
+    )]
+    [InlineData(
+        "[JsonNumberHandling(JsonNumberHandling.WriteAsString)] public sealed record Wrapper<T>(T Value); [RivetType] public sealed record Holder(Wrapper<int> Inner);",
+        "RIV1112",
+        "type 'Wrapper<T>'"
+    )]
     public void Unmodelled_Serializer_Settings_Refuse(string declarations, string id, string named)
     {
         var compilation = CompilationHelper.CreateCompilation(SerializerFixtures + declarations);

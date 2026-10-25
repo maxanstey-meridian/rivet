@@ -44,10 +44,10 @@ STANDARD_KEYWORDS = {
     "propertyName", "propertyNames", "readOnly", "refreshUrl", "requestBodies", "requestBody", "required", "responses",
     "schema", "schemas", "scheme", "schemes", "scopes", "security", "securityDefinitions", "securitySchemes",
     "servers", "source", "style", "summary", "swagger", "tags", "termsOfService", "title", "tokenUrl",
-    "type", "unevaluatedItems", "unevaluatedProperties", "uniqueItems", "url", "value", "variables", "version",
+    "type", "unevaluatedItems", "unevaluatedProperties", "uniqueItems", "url", "variables", "version",
     "webhooks", "wrapped", "writeOnly", "xml",
 }
-OPAQUE_KEYS = {"const", "default", "enum", "example", "value"}
+OPAQUE_KEYS = {"const", "default", "enum", "example"}
 MAP_KEYS = {
     "$defs", "callbacks", "content", "definitions", "dependentSchemas", "encoding", "headers", "links",
     "pathItems", "paths", "patternProperties", "properties", "requestBodies", "schemas",
@@ -195,7 +195,11 @@ class Walker:
                     self.unknown.append(child_pointer)
                 else:
                     self.keywords[name] += 1
-                    self.walk(item, child_pointer, "map")
+                    self.walk(item, child_pointer, "examples" if name == "examples" else "map")
+            return
+        if mode == "examples":
+            for name, item in sorted(value.items()):
+                self.walk(item, f"{pointer}/{pointer_token(name)}", "example")
             return
 
         for name, item in sorted(value.items()):
@@ -203,11 +207,13 @@ class Walker:
             if name.lower().startswith("x-"):
                 self._extension(name, item, child_pointer)
                 continue
-            if name not in STANDARD_KEYWORDS and name not in METHODS:
+            # An Example Object's value is its payload; nowhere else is 'value' a keyword.
+            example_value = mode == "example" and name == "value"
+            if name not in STANDARD_KEYWORDS and name not in METHODS and not example_value:
                 self.unknown.append(child_pointer)
                 continue
             self.keywords[name] += 1
-            if name in OPAQUE_KEYS or name == "examples":
+            if name in OPAQUE_KEYS or name == "examples" or example_value:
                 self.walk(item, child_pointer, "opaque")
             elif name == "components":
                 self.walk(item, child_pointer, "components")

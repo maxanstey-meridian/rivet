@@ -43,6 +43,12 @@ internal enum InputSource
     /// <summary>IFormCollection or IFormFileCollection: every form field or file at once.</summary>
     WholeForm,
 
+    /// <summary>
+    /// A cookie. Only a contract declares one: ASP.NET has no attribute that binds a cookie,
+    /// so a handler reads it from the request itself.
+    /// </summary>
+    Cookie,
+
     /// <summary>A service, a CancellationToken, a ClaimsPrincipal: nothing from the request.</summary>
     NotRequest,
 }
@@ -187,8 +193,20 @@ internal static class ParameterBindingSources
         {
             // A [FromForm] complex type (.NET 8+) goes through the form mapper, which binds
             // each member by name, nested ones with a prefix, and parses enums ignoring case.
-            return type is INamedTypeSymbol complex && IsComplex(wkt, type)
-                ? ComplexMembers(wkt, parameter, path, prefix: null, complex, InputSource.Form, [])
+            return
+                type is INamedTypeSymbol complex
+                && IsComplex(wkt, type, ParameterBindingHost.MinimalApi)
+                ? ComplexMembers(
+                    wkt,
+                    parameter,
+                    path,
+                    prefix: null,
+                    complex,
+                    InputSource.Form,
+                    ParameterBindingHost.MinimalApi,
+                    nested: false,
+                    []
+                )
                 : [Leaf(InputSource.Form, form)];
         }
         if (topLevel && attributes.Any(attribute => attribute.Is(wkt.AsParameters)))
@@ -231,17 +249,21 @@ internal static class ParameterBindingSources
         {
             return [Leaf(InputSource.WholeRequest)];
         }
-        if (IsSimple(type))
+        if (IsSimple(type, ParameterBindingHost.MinimalApi))
         {
             return [Leaf(RouteOrQuery(name, routeParameters))];
         }
 
-        // An array of simple values comes from the query on a body-less verb and is a JSON
-        // body otherwise. Any other collection, List<T> included, is a body, and on a body-less
-        // verb ASP.NET refuses the endpoint when it builds it ("Body was inferred but the
-        // method does not allow inferred body parameters"). A complex type is a body or a
-        // registered service.
-        if (type is IArrayTypeSymbol { ElementType: var element } && IsSimple(element))
+        // An array of simple values, or StringValues, comes from the query on a body-less verb
+        // and is a JSON body otherwise. Any other collection, List<T> included, is a body, and
+        // on a body-less verb ASP.NET refuses the endpoint when it builds it ("Body was
+        // inferred but the method does not allow inferred body parameters"). A complex type is
+        // a body or a registered service.
+        if (
+            IsStringValues(type)
+            || type is IArrayTypeSymbol { ElementType: var element }
+                && IsSimple(element, ParameterBindingHost.MinimalApi)
+        )
         {
             return [Leaf(infersBody ? InputSource.Body : InputSource.Query)];
         }
@@ -270,16 +292,32 @@ internal static class ParameterBindingSources
                 parameter,
                 ReachesEnumParser(source) ? EnumParser.IgnoreCase : EnumParser.None
             );
-        IEnumerable<BoundInput> Members(INamedTypeSymbol complex, InputSource source) =>
-            ComplexMembers(wkt, parameter, parameter.Name, prefix: null, complex, source, []);
+        IEnumerable<BoundInput> Members(
+            INamedTypeSymbol complex,
+            InputSource source,
+            string? prefix = null
+        ) =>
+            ComplexMembers(
+                wkt,
+                parameter,
+                parameter.Name,
+                prefix,
+                complex,
+                source,
+                ParameterBindingHost.Mvc,
+                nested: false,
+                []
+            );
 
+        // On a complex parameter, Name= is the model name its members are prefixed with:
+        // [FromQuery(Name = "f")] SearchRecord f reads ?f.Search=, never ?Search=.
         if (MvcOwnSource(wkt, parameter.GetAttributes(), type) is { } own)
         {
             return
                 own.Inherited is { } inherited
                 && type is INamedTypeSymbol complex
-                && IsComplex(wkt, type)
-                ? Members(complex, inherited)
+                && IsComplex(wkt, type, ParameterBindingHost.Mvc)
+                ? Members(complex, inherited, NameOverride(own.Attribute))
                 : [Leaf(own.Source, own.Attribute)];
         }
 
@@ -287,7 +325,8 @@ internal static class ParameterBindingSources
         {
             // No binding source: model binding asks every value provider (form, route and
             // query) by name, and binds a complex type member by member from them.
-            return type is INamedTypeSymbol complex && IsComplex(wkt, type)
+            return
+                type is INamedTypeSymbol complex && IsComplex(wkt, type, ParameterBindingHost.Mvc)
                 ? Members(complex, InputSource.ValueProviders)
                 : [Leaf(InputSource.ValueProviders)];
         }
@@ -297,14 +336,14 @@ internal static class ParameterBindingSources
         // complex type (collections included) is the body, unless it's a service, or one of the
         // properties it binds carries a binding source of its own; then it gets none and is
         // bound member by member from the value providers.
-        if (IsSimple(type))
+        if (IsSimple(type, ParameterBindingHost.Mvc))
         {
             return [Leaf(RouteOrQuery(parameter.Name, routeParameters))];
         }
 
         return
             type is INamedTypeSymbol withSources
-            && IsComplex(wkt, type)
+            && IsComplex(wkt, type, ParameterBindingHost.Mvc)
             && BoundMembers(withSources)
                 .Any(member => MvcOwnSource(wkt, member.Attributes, member.Type) is not null)
             ? Members(withSources, InputSource.ValueProviders)
@@ -385,6 +424,9 @@ internal static class ParameterBindingSources
     /// names, and then recursed into with that prefix, the way MVC's ComplexObjectModelBinder
     /// and the minimal-API form mapper bind nested types. Both parse an enum member ignoring
     /// case. A type already being expanded on the path stops the recursion.
+    /// <paramref name="prefix"/> is the model name the members' keys start with (an MVC
+    /// <c>Name =</c> on the parameter, or the outer member's key); <paramref name="nested"/>
+    /// marks members of a complex member.
     /// </summary>
     private static IEnumerable<BoundInput> ComplexMembers(
         WellKnownTypes wkt,
@@ -393,6 +435,8 @@ internal static class ParameterBindingSources
         string? prefix,
         INamedTypeSymbol type,
         InputSource source,
+        ParameterBindingHost host,
+        bool nested,
         HashSet<INamedTypeSymbol> expanding
     )
     {
@@ -417,10 +461,14 @@ internal static class ParameterBindingSources
                 memberType,
                 parameter,
                 reaches ? EnumParser.IgnoreCase : EnumParser.None,
-                Nested: prefix is not null
+                Nested: nested
             );
 
-            if (reaches && memberType is INamedTypeSymbol complex && IsComplex(wkt, memberType))
+            if (
+                reaches
+                && memberType is INamedTypeSymbol complex
+                && IsComplex(wkt, memberType, host)
+            )
             {
                 foreach (
                     var input in ComplexMembers(
@@ -430,6 +478,8 @@ internal static class ParameterBindingSources
                         wireName,
                         complex,
                         own?.Inherited ?? source,
+                        host,
+                        nested: true,
                         expanding
                     )
                 )
@@ -504,7 +554,9 @@ internal static class ParameterBindingSources
     /// or an object initializer. ApiBehaviorApplicationModelProvider then never adds
     /// InferParameterBindingInfoConvention, so an unattributed parameter has no binding source
     /// and is bound from the value providers, as on a controller without [ApiController]. A
-    /// value that isn't a constant can't be read statically and is taken as not suppressing.
+    /// value that isn't a constant can't be read statically, and every RIV1110, RIV4005 and
+    /// RIV4006 answer for an MVC action depends on it, so it stops the run with RIV4007
+    /// rather than guessing.
     /// </summary>
     public static bool SuppressesInferredBindingSources(Compilation compilation) =>
         _suppressedInference
@@ -514,6 +566,7 @@ internal static class ParameterBindingSources
     private static bool ScanForSuppression(Compilation compilation)
     {
         const string property = "SuppressInferBindingSourcesForParameters";
+        var suppressed = false;
         foreach (var tree in compilation.SyntaxTrees)
         {
             if (!tree.GetText().ToString().Contains(property, StringComparison.Ordinal))
@@ -522,29 +575,47 @@ internal static class ParameterBindingSources
             }
 
             var semanticModel = compilation.GetSemanticModel(tree);
-            if (
-                tree.GetRoot()
+            foreach (
+                var assignment in tree.GetRoot()
                     .DescendantNodes()
                     .OfType<AssignmentExpressionSyntax>()
-                    .Any(assignment =>
-                        semanticModel.GetOperation(assignment)
-                            is ISimpleAssignmentOperation
+                    .Select(syntax => semanticModel.GetOperation(syntax))
+                    .OfType<IAssignmentOperation>()
+                    .Where(assignment =>
+                        assignment.Target
+                            is IPropertyReferenceOperation
                             {
-                                Target: IPropertyReferenceOperation
-                                {
-                                    Property: { Name: property, ContainingType: var options },
-                                },
-                                Value.ConstantValue: { HasValue: true, Value: true },
+                                Property: { Name: property, ContainingType: var options },
                             }
                         && FullName(options) == "Microsoft.AspNetCore.Mvc.ApiBehaviorOptions"
                     )
             )
             {
-                return true;
+                if (
+                    assignment
+                    is not ISimpleAssignmentOperation
+                    {
+                        Value.ConstantValue: { HasValue: true, Value: bool value },
+                    }
+                )
+                {
+                    var span = assignment.Syntax.GetLocation().GetLineSpan();
+                    throw new RivetUserException(
+                        $"error {Diagnostics.CoverageBindingInferenceUnreadable}: "
+                            + $"{span.Path}({span.StartLinePosition.Line + 1},{span.StartLinePosition.Character + 1}): "
+                            + $"ApiBehaviorOptions.{property} is set to a value that isn't a compile-time "
+                            + "constant, so Rivet can't tell whether MVC infers binding sources for "
+                            + "[ApiController] actions, and every input and enum binding check on an MVC "
+                            + "action depends on that. Assign the constant true or false (a const bool "
+                            + "works too)."
+                    );
+                }
+
+                suppressed |= value;
             }
         }
 
-        return false;
+        return suppressed;
     }
 
     private static bool ReachesEnumParser(InputSource source) =>
@@ -601,17 +672,39 @@ internal static class ParameterBindingSources
     private static Special Classify(WellKnownTypes wkt, ITypeSymbol type) =>
         FullName(type) switch
         {
-            "Microsoft.AspNetCore.Http.HttpContext" or "Microsoft.AspNetCore.Http.HttpRequest" =>
-                Special.Request,
+            _ when IsRequest(type) => Special.Request,
             "Microsoft.AspNetCore.Http.HttpResponse"
             or "System.Security.Claims.ClaimsPrincipal"
             or "System.Threading.CancellationToken" => Special.NotRequest,
             "Microsoft.AspNetCore.Http.IFormCollection"
             or "Microsoft.AspNetCore.Http.IFormFileCollection" => Special.WholeForm,
-            "System.IO.Stream" or "System.IO.Pipelines.PipeReader" => Special.RawBody,
+            _ when IsRawBody(type) => Special.RawBody,
             _ when IsFormFile(wkt, type) => Special.FormFile,
             _ => Special.None,
         };
+
+    /// <summary>HttpContext or HttpRequest: the request itself, from which anything can be read.</summary>
+    public static bool IsRequest(ITypeSymbol type) =>
+        FullName(type)
+            is "Microsoft.AspNetCore.Http.HttpContext"
+                or "Microsoft.AspNetCore.Http.HttpRequest";
+
+    /// <summary>Stream or PipeReader: the raw request body, whatever its media type.</summary>
+    public static bool IsRawBody(ITypeSymbol type) =>
+        FullName(type) is "System.IO.Stream" or "System.IO.Pipelines.PipeReader";
+
+    /// <summary>StringValues or <c>StringValues?</c>, which minimal APIs bind like a string array.</summary>
+    private static bool IsStringValues(ITypeSymbol type) =>
+        FullName(
+            type
+                is INamedTypeSymbol
+                {
+                    OriginalDefinition.SpecialType: SpecialType.System_Nullable_T,
+                    TypeArguments: [var inner],
+                }
+                ? inner
+                : type
+        ) == "Microsoft.Extensions.Primitives.StringValues";
 
     /// <summary>An IFormFile, or a collection of them (anything assignable to IEnumerable&lt;IFormFile&gt;).</summary>
     private static bool IsFormFile(WellKnownTypes wkt, ITypeSymbol type) =>
@@ -630,12 +723,13 @@ internal static class ParameterBindingSources
         || type.AllInterfaces.Contains(target, SymbolEqualityComparer.Default);
 
     /// <summary>
-    /// A type both hosts bind from one string: a primitive, string, decimal, DateTime, an enum,
-    /// a type with a public static TryParse (Guid, DateTimeOffset, DateOnly, any
-    /// IParsable&lt;T&gt;), Uri, a type carrying a [TypeConverter] (MVC's IsComplexType test),
-    /// or <c>T?</c> of one.
+    /// A type <paramref name="host"/> binds from one string: a primitive, string, decimal,
+    /// DateTime, an enum, a type with a public static TryParse (Guid, DateTimeOffset, DateOnly,
+    /// any IParsable&lt;T&gt;), Uri, or <c>T?</c> of one. MVC also counts a type carrying a
+    /// [TypeConverter] (its IsComplexType test); minimal APIs never consult a TypeConverter, so
+    /// for them such a type is a body or a service.
     /// </summary>
-    private static bool IsSimple(ITypeSymbol type)
+    private static bool IsSimple(ITypeSymbol type, ParameterBindingHost host)
     {
         if (
             type is INamedTypeSymbol
@@ -645,7 +739,7 @@ internal static class ParameterBindingSources
             }
         )
         {
-            return IsSimple(inner);
+            return IsSimple(inner, host);
         }
 
         return type.SpecialType is >= SpecialType.System_Boolean and <= SpecialType.System_String
@@ -656,18 +750,23 @@ internal static class ParameterBindingSources
             || type.AllInterfaces.Any(candidate =>
                 FullName(candidate.OriginalDefinition) == "System.IParsable<TSelf>"
             )
-            || type.GetAttributes()
-                .Any(attribute =>
-                    FullName(attribute.AttributeClass)
-                    == "System.ComponentModel.TypeConverterAttribute"
-                );
+            || host == ParameterBindingHost.Mvc
+                && type.GetAttributes()
+                    .Any(attribute =>
+                        FullName(attribute.AttributeClass)
+                        == "System.ComponentModel.TypeConverterAttribute"
+                    );
     }
 
     /// <summary>A class or struct bound member by member: not simple, not a collection, not special.</summary>
-    private static bool IsComplex(WellKnownTypes wkt, ITypeSymbol type) =>
+    private static bool IsComplex(
+        WellKnownTypes wkt,
+        ITypeSymbol type,
+        ParameterBindingHost host
+    ) =>
         type is INamedTypeSymbol { TypeKind: TypeKind.Class or TypeKind.Struct } named
         && named.SpecialType == SpecialType.None
-        && !IsSimple(type)
+        && !IsSimple(type, host)
         && !named.AllInterfaces.Any(candidate =>
             candidate.OriginalDefinition.SpecialType
             == SpecialType.System_Collections_Generic_IEnumerable_T

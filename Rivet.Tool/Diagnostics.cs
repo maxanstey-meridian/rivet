@@ -14,8 +14,8 @@ namespace Rivet.Tool;
 /// The prefix is RIV, deliberately not "RV" — the sibling tool plumb owns the
 /// RV-xxx rule namespace.
 ///
-/// Most entries are non-fatal warnings. Fatal error diagnostics abort the operation
-/// and return a non-zero exit code. Every ID must have a row in
+/// Each entry is either a warning, which lets the operation carry on, or a fatal error,
+/// which aborts it with a non-zero exit code. Every ID must have a row in
 /// docs/reference/diagnostics.md — DiagnosticsTests cross-checks the registry
 /// against that page in both directions.
 /// </summary>
@@ -56,7 +56,10 @@ public static class Diagnostics
     public const string InvalidRequestBodyProvenance = "RIV1022";
     public const string ImportedSchemaProvenanceConflict = "RIV1023";
     public const string UnresolvedBindingSource = "RIV1100";
-    public const string JsonIncludeFieldNotRepresented = "RIV1101";
+
+    // RIV1101 (JsonIncludeFieldNotRepresented) retired: registered in 0.42.0 as a reserved
+    // slot for [JsonInclude] shapes the walker couldn't prove, but every shape was already
+    // determined and nothing ever emitted it. The number is never reused.
     public const string BodyForbiddenStatusExample = "RIV1102";
     public const string InvalidRivetScalarShape = "RIV1103";
     public const string MixedFormFileParameters = "RIV1104";
@@ -117,6 +120,7 @@ public static class Diagnostics
     // properties plus extension data. The number is never reused.
     public const string ImportDictionaryKeyDropped = "RIV3014";
     public const string ImportNamedScalarAlgebraUnsupported = "RIV3015";
+    public const string ImportSwaggerServerNotProjected = "RIV3019";
     public const string ImportEmptyParameterNameDropped = "RIV3020";
     public const string ImportReservedContentTypeHeaderDropped = "RIV3021";
     public const string ImportReservedAuthorizationHeaderDropped = "RIV3022";
@@ -134,6 +138,7 @@ public static class Diagnostics
     public const string CoverageOrphanedBinding = "RIV4004";
     public const string CoverageUnbindableEnumParameter = "RIV4005";
     public const string CoverageInputBindingMismatch = "RIV4006";
+    public const string CoverageBindingInferenceUnreadable = "RIV4007";
 
     /// <summary>
     /// Registry of every diagnostic ID with a one-line trigger description.
@@ -187,8 +192,6 @@ public static class Diagnostics
             "Imported generated C# changed while raw schema provenance still targets its original typed shape — extraction fails instead of emitting stale OpenAPI.",
         [UnresolvedBindingSource] =
             "A parameter's binding source cannot be established from explicit declarations or the retained narrow conventions — the contract is refused, not silently completed.",
-        [JsonIncludeFieldNotRepresented] =
-            "Reserved unsupported-[JsonInclude]-shape diagnostic: a [JsonInclude] accessor shape System.Text.Json supports but the extractor cannot prove statically would be reported and excluded here rather than guessed. Currently dormant — the mixed-accessor and field cases are now determined.",
         [BodyForbiddenStatusExample] =
             "A response example or content is authored on a body-forbidden status (1xx, 204, 205, 304) — HTTP forbids a message body there; generation fails instead of emitting body content the host cannot send.",
         [InvalidRivetScalarShape] =
@@ -208,7 +211,7 @@ public static class Diagnostics
         [UnmodelledNumberHandling] =
             "[JsonNumberHandling] with WriteAsString or AllowNamedFloatingPointLiterals on a walked type or member puts strings on the number's wire — generation fails unless [RivetSchemaType] pins the member's schema (AllowReadingFromString alone is accepted: it only widens what the host reads).",
         [UnreadableContractEndpoint] =
-            "A contract endpoint field can't be read statically (no initializer, an initializer that isn't a Define.* builder chain, a call that isn't a Rivet builder method, or a non-constant route, security scheme or scope) — generation fails instead of dropping the operation or its security from the spec.",
+            "A contract endpoint can't be read statically: a field with no initializer or one that isn't a Define.* builder chain, an endpoint declared as a property, a call that isn't a Rivet builder method, an example with nothing in it, or any string, int or bool builder argument (route, status, summary, media type, scheme, scope...) that isn't a compile-time constant — generation fails instead of dropping the operation or quietly defaulting the value; use a literal or a const.",
         [InvalidSecurityDeclaration] =
             "A contract endpoint's security calls contradict each other (.Anonymous() alongside .Secure() or .OrAnonymous(), or .AndSecure() with no .Secure() alternative to join) — generation fails instead of guessing which one was meant.",
         [TaggedUnionComponentCollision] =
@@ -220,7 +223,7 @@ public static class Diagnostics
         [MultipartInputTypeMissing] =
             "Multipart input type is absent from the contract's type definitions — the request schema is built inline from the endpoint's params.",
         [UnknownTypeUntypedSchema] =
-            "A type with no schema mapping (an 'unknown' primitive whose csharpType is not object/JsonElement/JsonNode/JsonObject/JsonArray), or a $ref to a schema component nothing defines — generation fails instead of emitting an untyped stand-in.",
+            "A type with no schema mapping (an 'unknown' primitive whose csharpType isn't one of the any-JSON types), or a $ref to a schema component nothing defines — generation fails instead of emitting an untyped stand-in. The any-JSON types (TypeScript unknown, object, JsonElement, JsonDocument, JsonNode, JsonObject, JsonArray, JsonValue) map to {} with no diagnostic.",
         [UnresolvedTypeParameter] =
             "A generic type parameter reaches the OpenAPI schema unbound — generation fails instead of emitting it as object.",
         [GenericTemplateMissing] =
@@ -241,7 +244,7 @@ public static class Diagnostics
         [ImportOperationMethodDropped] =
             "TRACE operation dropped — the HTTP method has no contract representation.",
         [ImportDiscriminatorDropped] =
-            "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics.",
+            "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics; or a discriminator mapping entry that points into another file — that entry is dropped and the rest of the discriminator kept.",
         [ImportAliasTargetMissing] =
             "Alias schema references a missing schema — consumers fall back to JsonElement.",
         [ImportUnresolvableAliasReference] =
@@ -256,6 +259,8 @@ public static class Diagnostics
             "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [ImportNamedScalarAlgebraUnsupported] =
             "Named scalar uses schema algebra outside primitive/flat-enum preservation — existing fallback mapping retained.",
+        [ImportSwaggerServerNotProjected] =
+            "Swagger 2 document declares a host without schemes, or schemes without a host — no server URL is invented from half of one, so no server is imported.",
         [ImportEmptyParameterNameDropped] =
             "Parameter has an empty name — the invalid parameter is dropped while the operation and its other parameters are preserved.",
         [ImportReservedContentTypeHeaderDropped] =
@@ -283,6 +288,8 @@ public static class Diagnostics
             "A handler binds a string-wire enum from route, query, header or form, and the host's enum parser (minimal API: exact member name; MVC: member name ignoring case; Azure Functions: JSON, so no name at all) would refuse an advertised wire value.",
         [CoverageInputBindingMismatch] =
             "A handler's bound inputs disagree with its contract's: it binds an input the contract doesn't declare, never binds one it does, or binds one from a different source (route, query, header, body, form).",
+        [CoverageBindingInferenceUnreadable] =
+            "ApiBehaviorOptions.SuppressInferBindingSourcesForParameters is assigned a value that isn't a compile-time constant, so whether MVC infers binding sources can't be read; the run stops.",
     };
 
     /// <summary>

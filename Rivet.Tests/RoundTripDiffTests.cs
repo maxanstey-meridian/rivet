@@ -993,6 +993,43 @@ public sealed class RoundTripDiffTests
                 .Summary.GetProperty("missingOperations")
                 .GetInt32()
         );
+
+        // Like the import, no merge when the earlier path has its own fields or either
+        // template repeats a parameter name: both paths stay, and nothing is a defect.
+        foreach (
+            var (earlierPath, laterPath, earlierFields) in new[]
+            {
+                (
+                    "/deployments/{idOrUrl}",
+                    "/deployments/{id}",
+                    "\"servers\": [{ \"url\": \"https://a.example.com\" }],"
+                ),
+                ("/deployments/{a}/x/{b}", "/deployments/{c}/x/{c}", ""),
+                ("/deployments/{c}/x/{c}", "/deployments/{a}/x/{b}", ""),
+            }
+        )
+        {
+            var unmergeable = JsonNode
+                .Parse(
+                    $$"""
+                    {
+                      "openapi": "3.0.3",
+                      "info": { "title": "Deployments", "version": "1.0.0" },
+                      "paths": {
+                        "{{earlierPath}}": { {{earlierFields}} "get": { "operationId": "get", "responses": { "204": { "description": "Found" } } } },
+                        "{{laterPath}}": { "delete": { "operationId": "delete", "responses": { "204": { "description": "Deleted" } } } }
+                      }
+                    }
+                    """
+                )!
+                .AsObject();
+            var kept = RoundTripDiff.Run(unmergeable, unmergeable.DeepClone().AsObject());
+            Assert.DoesNotContain(
+                kept.Details.GetProperty("sourceDefects").EnumerateArray(),
+                defect => defect.GetProperty("reason").GetString()!.Contains("template")
+            );
+            Assert.Equal(0, kept.Summary.GetProperty("missingOperations").GetInt32());
+        }
     }
 
     [Fact]
@@ -1003,22 +1040,30 @@ public sealed class RoundTripDiffTests
             """
             {
               "oneOf": [{ "$ref": "#/components/schemas/Shape" }],
-              "discriminator": { "propertyName": "kind", "mapping": { "self": "Shape", "far": "models/far.yml#/Far" } }
+              "discriminator": { "propertyName": "kind", "mapping": { "self": "Shape", "far": "models/far.yml#/Far", "cat": "Cat.yaml" } }
             }
             """
         );
         var dropped = original.DeepClone().AsObject();
-        dropped["components"]!["schemas"]!["Shape"]!["discriminator"]!["mapping"]!
-            .AsObject()
-            .Remove("far");
+        var mapping = dropped["components"]!["schemas"]!["Shape"]!["discriminator"]![
+            "mapping"
+        ]!.AsObject();
+        mapping.Remove("far");
+        mapping.Remove("cat");
 
         var result = RoundTripDiff.Run(original, dropped);
 
         Assert.Equal(0, result.ExitCode);
-        var defect = Assert.Single(result.Details.GetProperty("sourceDefects").EnumerateArray());
+        // 'Shape' names a schema component; 'Cat.yaml' names none, so it is a reference.
         Assert.Equal(
-            "#/components/schemas/Shape/discriminator/mapping/far",
-            defect.GetProperty("path").GetString()
+            [
+                "#/components/schemas/Shape/discriminator/mapping/far",
+                "#/components/schemas/Shape/discriminator/mapping/cat",
+            ],
+            result
+                .Details.GetProperty("sourceDefects")
+                .EnumerateArray()
+                .Select(defect => defect.GetProperty("path").GetString())
         );
     }
 

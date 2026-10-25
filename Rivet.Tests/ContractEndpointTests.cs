@@ -76,45 +76,75 @@ public sealed class ContractEndpointTests
     [Theory]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Routes.Get<TaskDto>(\"/api/fake\");",
-        "isn't initialised with a Define.* builder chain"
+        "isn't initialised with a Define.* builder chain",
+        "Initialise the field with Define.*"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(Routes.Prefix + \"/tasks\");",
-        "isn't a compile-time constant"
+        "isn't a compile-time constant",
+        "Use a literal or a const"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask; static TasksContract() { GetTask = Define.Get<TaskDto>(\"/api/tasks\"); }",
-        "has no initializer"
+        "has no initializer",
+        "Initialise the field with Define.*"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Secure(Routes.Prefix);",
-        "passes .Secure() a 'scheme' that isn't a compile-time constant"
+        "passes .Secure() a 'scheme' that isn't a compile-time constant",
+        "Use a literal or a const"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Summary(Routes.Prefix);",
-        "passes .Summary() a 'summary' that isn't a compile-time constant"
+        "passes .Summary() a 'summary' that isn't a compile-time constant",
+        "Use a literal or a const"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Status(Routes.Code);",
-        "passes .Status() a 'statusCode' that isn't a compile-time constant"
+        "passes .Status() a 'statusCode' that isn't a compile-time constant",
+        "Use a literal or a const"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").QueryAuth(Routes.Prefix);",
-        "passes .QueryAuth() a 'parameterName' that isn't a compile-time constant"
+        "passes .QueryAuth() a 'parameterName' that isn't a compile-time constant",
+        "Use a literal or a const"
     )]
     [InlineData(
         "public static readonly FileRouteDefinition GetTask = Define.File(\"/api/tasks\").ProducesFile(Routes.Prefix);",
-        "passes .ProducesFile() a 'contentType' that isn't a compile-time constant"
+        "passes .ProducesFile() a 'contentType' that isn't a compile-time constant",
+        "Use a literal or a const"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Secure(\"oauth\").AndSecure(\"key\", \"read\", Routes.Prefix);",
-        "passes .AndSecure() scopes that aren't compile-time constant strings"
+        "passes .AndSecure() scopes that aren't compile-time constant strings",
+        "literal or const strings"
     )]
     [InlineData(
         "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").Secure(\"oauth\", Routes.Scopes);",
-        "passes .Secure() scopes that aren't compile-time constant strings"
+        "passes .Secure() scopes that aren't compile-time constant strings",
+        "literal or const strings"
     )]
-    public void Unreadable_Endpoint_Field_Is_Refused(string field, string reason)
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(null!);",
+        "has a null route",
+        "Pass a route template"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").ResponseExampleJson(200, null);",
+        "passes .ResponseExampleJson() an example with nothing in it",
+        "Give the example at least one of them"
+    )]
+    [InlineData(
+        "public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>(\"/api/tasks\").RequestExampleJson(null, name: \"empty\");",
+        "passes .RequestExampleJson() an example with nothing in it",
+        "Give the example at least one of them"
+    )]
+    [InlineData(
+        "public static RouteDefinition<TaskDto> GetTask { get; } = Define.Get<TaskDto>(\"/api/tasks\");",
+        "is a property",
+        "'public static readonly' field"
+    )]
+    public void Unreadable_Endpoint_Field_Is_Refused(string field, string reason, string remedy)
     {
         var source = $$"""
             using Rivet;
@@ -143,6 +173,7 @@ public sealed class ContractEndpointTests
         Assert.Contains("error RIV1113", error.Message);
         Assert.Contains("TasksContract.GetTask", error.Message);
         Assert.Contains(reason, error.Message);
+        Assert.Contains(remedy, error.Message);
     }
 
     [Theory]
@@ -549,6 +580,70 @@ public sealed class ContractEndpointTests
             exception.Message
         );
         Assert.Contains(".Returns(...)", exception.Message);
+    }
+
+    // On .AcceptsBinary() the body is taken by the payload, so RIV1020 must not suggest
+    // sending the input as a JSON body.
+    [Fact]
+    public void Unlowerable_Input_Beside_A_Binary_Body_Names_The_Payload()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            [RivetContract]
+            public static class ThingsContract
+            {
+                public static readonly RouteDefinition<string, ThingDto> Thing =
+                    Define.Post<string, ThingDto>("/things").AcceptsBinary();
+            }
+            """;
+
+        var message = Assert.Throws<RivetUserException>(() => Generate(source)).Message;
+
+        Assert.StartsWith("error RIV1020:", message);
+        Assert.Contains("the request body carries the binary payload", message);
+        Assert.DoesNotContain("JSON body", message);
+    }
+
+    // .ResponseContent(...) declares its status on its own, so an example or a header may
+    // target a status declared no other way.
+    [Fact]
+    public void Examples_And_Headers_Reach_A_Status_Declared_Only_By_ResponseContent()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetType]
+            public sealed record Problem(string Title);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .ResponseContent<Problem>(404, "application/problem+json")
+                        .ResponseExampleJson(404, "{\"title\":\"Not found\"}", mediaType: "application/problem+json")
+                        .WithResponseHeader(404, "X-Trace-Id");
+            }
+            """;
+
+        var notFound = Assert.Single(
+            Assert.Single(Generate(source)).Responses,
+            response => response.StatusCode == 404
+        );
+        Assert.Equal("application/problem+json", Assert.Single(notFound.Contents!).MediaType);
+        Assert.Equal("{\"title\":\"Not found\"}", Assert.Single(notFound.Examples!).Json);
+        Assert.Equal("X-Trace-Id", Assert.Single(notFound.Headers!).Name);
     }
 
     [Theory]
@@ -1872,6 +1967,34 @@ public sealed class ContractEndpointTests
         Assert.Equal("/api/tasks", ep.RouteTemplate);
         Assert.Equal("tasks", ep.ControllerName);
         Assert.True(ep.ReturnType is TsType.TypeRef { Name: "TaskDto" });
+    }
+
+    [Fact]
+    public void AbstractContract_Method_Without_Route_Is_Refused()
+    {
+        var source = """
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public abstract class TasksContract : ControllerBase
+            {
+                [HttpGet]
+                [ProducesResponseType(typeof(TaskDto), 200)]
+                public abstract Task<IActionResult> List();
+            }
+            """;
+
+        var message = Assert.Throws<RivetUserException>(() => Generate(source)).Message;
+
+        Assert.StartsWith("error RIV1100: contract endpoint 'TasksContract.List'", message);
+        Assert.Contains("has no route template", message);
     }
 
     [Fact]

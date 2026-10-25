@@ -143,8 +143,8 @@ public sealed record TsMediaTypeContent(
 );
 
 /// <summary>
-/// A declared response header. Spec-only: Rivet never sets or
-/// validates response headers at runtime. Required is an explicit opt-in promise.
+/// A declared response header. Rivet never sets one; Required is an explicit opt-in
+/// promise the adapters check, refusing a response that leaves the header out.
 /// </summary>
 public sealed record TsResponseHeader(
     string Name,
@@ -184,6 +184,7 @@ public sealed record TsEndpointParam(
         string? BodyPropertyName = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? Description = null,
+    [property: JsonPropertyName("deprecated")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool IsDeprecated = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

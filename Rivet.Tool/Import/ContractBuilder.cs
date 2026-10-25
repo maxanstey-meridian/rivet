@@ -1626,8 +1626,9 @@ internal static class ContractBuilder
 
         var summary = string.IsNullOrEmpty(example.Summary) ? null : example.Summary;
         var description = string.IsNullOrEmpty(example.Description) ? null : example.Description;
-        // An Example Object with neither value nor externalValue is complete: OpenAPI makes
-        // the value optional, and its summary/description still document the operation.
+        // OpenAPI makes an example's value optional, so one with only a summary or description
+        // still documents the operation. An example needs at least one of the three: an
+        // empty {} says nothing and keeps the missing-value marker.
         var documentationOnly =
             resolvedJson is null
             && example.ExternalValue is null

@@ -130,6 +130,45 @@ public sealed class PolymorphismTests
         Assert.Equal("email", tagEnum[0].GetString());
     }
 
+    // A variant field is a member like any other: [RivetSchemaType] pins its wire type,
+    // and the same pin lifts the number-handling refusal it would otherwise hit.
+    [Fact]
+    public void Variant_Field_Honours_RivetSchemaType()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [JsonPolymorphic]
+            [JsonDerivedType(typeof(Coupon), "coupon")]
+            public abstract record Discount;
+
+            public sealed record Coupon(
+                [property: JsonNumberHandling(JsonNumberHandling.WriteAsString), RivetSchemaType("string")]
+                long Cents) : Discount;
+
+            [RivetContract]
+            public static class DiscountsContract
+            {
+                public static readonly RouteDefinition<Discount> GetDiscount =
+                    Define.Get<Discount>("/api/discounts/{id}");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var cents = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Discount_Coupon")
+            .GetProperty("properties")
+            .GetProperty("cents");
+
+        Assert.Equal("string", cents.GetProperty("type").GetString());
+    }
+
     [Fact]
     public void Derived_Type_Referenced_Directly_Stays_Untagged()
     {

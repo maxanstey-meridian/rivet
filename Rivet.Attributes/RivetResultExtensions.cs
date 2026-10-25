@@ -32,7 +32,14 @@ public static class RivetResultExtensions
                     IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>
                 >()
                 .Value.SerializerOptions;
-            if (!BeginResponse(httpContext, result, options, RivetHostJsonOptions.MinimalApi))
+            if (
+                !BeginResponse(
+                    httpContext.Response,
+                    result,
+                    options,
+                    RivetHostJsonOptions.MinimalApi
+                )
+            )
             {
                 return Task.CompletedTask;
             }
@@ -74,7 +81,7 @@ public static class RivetResultExtensions
     /// refused stream file is disposed: the host never takes it over.
     /// </summary>
     internal static bool BeginResponse(
-        HttpContext httpContext,
+        HttpResponse response,
         RivetResult result,
         JsonSerializerOptions options,
         string registration
@@ -83,7 +90,6 @@ public static class RivetResultExtensions
         try
         {
             RivetHostJsonOptions.Ensure(options, registration);
-            var response = httpContext.Response;
             var writes = SetStatus(response, result);
             if (writes && result is RivetFileResult file)
             {
@@ -131,8 +137,9 @@ public static class RivetResultExtensions
 
     /// <summary>
     /// Headers the handler sets on the response before returning count, and so do the ones
-    /// the result itself writes: the content type, and for a file the validators,
-    /// disposition, range support and length its arguments ask for. A header a middleware
+    /// the result itself writes: the content type, a text body's length, and for a file the
+    /// validators, disposition, range support and length its arguments ask for. JSON goes out
+    /// unbuffered, so it carries no length. A header a middleware
     /// adds in <c>OnStarting</c> arrives after this check and doesn't count.
     /// </summary>
     private static void EnsureRequiredHeaders(HttpResponse response, RivetResult result)
@@ -165,7 +172,11 @@ public static class RivetResultExtensions
     private static bool Writes(RivetResult result, string name) =>
         result switch
         {
-            RivetBodyResult body => body.HasBody && Is(name, HeaderNames.ContentType),
+            RivetBodyResult body => body.HasBody
+                && (
+                    Is(name, HeaderNames.ContentType)
+                    || Is(name, HeaderNames.ContentLength) && !body.IsJson && body.Value is not null
+                ),
             RivetFileResult file => Is(name, HeaderNames.ContentType)
                 || Is(name, HeaderNames.ETag) && file.EntityTag is not null
                 || Is(name, HeaderNames.LastModified) && file.LastModified is not null

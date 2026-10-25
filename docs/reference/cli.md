@@ -51,8 +51,9 @@ dotnet rivet --project path/to/Api.csproj --output ./generated \
   default and the remaining schemes are available to endpoint-level `.Secure()` and
   `.AndSecure()` calls, which carry their own scopes and alternatives. The flag only
   defines schemes and that one default; a document-level requirement with
-  alternatives or scopes comes from imported `[assembly: RivetGlobalSecurity...]`
-  attributes, and an explicit `--security` replaces those wholesale.
+  alternatives or scopes comes from the `[assembly: RivetGlobalSecurity(...)]` and
+  `[assembly: RivetGlobalSecurityScheme(...)]` attributes an import writes, and an
+  explicit `--security` replaces those wholesale.
 
 With `--from-openapi`, `--security` retains its importer override behavior and
 accepts one existing OpenAPI component name, such as `--security admin`. Emit-time
@@ -79,10 +80,11 @@ dotnet rivet --project path/to/Api.csproj --check
 dotnet rivet --project path/to/Api.csproj --routes
 ```
 
-`--check` verifies contract coverage (missing implementations, route/method
-mismatches, enum parameters the host can't bind — see
-[Contract Coverage](/guides/contract-coverage)); any warning
-exits with code `1`, with or without `--output`. `--routes` lists every discovered
+`--check` verifies contract coverage: missing implementations, route and method
+mismatches, inputs the handler binds somewhere other than where the contract declares
+them (`RIV4006`), and enum parameters the host can't bind (`RIV4005`) — see
+[Contract Coverage](/guides/contract-coverage). Any finding, warning or error, exits
+with code `1`, with or without `--output`. `--routes` lists every discovered
 endpoint (method, route, handler) and exits. `-q`/`--quiet` suppresses generation
 output (useful with `--check` in CI). `-h`/`--help` prints usage to stdout and
 exits `0`, whatever else is on the command line.
@@ -107,9 +109,9 @@ with, or the comparison will (correctly) flag the metadata difference.
 
 ## Diagnostics
 
-Every warning the tool writes to stderr carries a stable `RIV`-prefixed ID in
-the canonical format `warning RIV1019: <message>` — grep or baseline by ID,
-never by message text. See the [Diagnostics Reference](/reference/diagnostics)
+Every warning and error the tool writes to stderr carries a stable `RIV`-prefixed ID
+in the canonical format `warning RIV1019: <message>` or `error RIV2002: <message>` —
+grep or baseline by ID, never by message text. See the [Diagnostics Reference](/reference/diagnostics)
 for the full table of IDs, triggers, and remediations.
 
 ## Import (onboarding scaffold)

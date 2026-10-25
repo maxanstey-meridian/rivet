@@ -19,7 +19,11 @@ that takes a body and returns 204).
 
 ## Builder methods
 
-All return the definition for chaining.
+All return the definition for chaining. Rivet reads the chain from source rather than
+running it, so every string, int or bool you pass (route, summary, status code, media
+type, scheme, scope, `required:`) has to be a literal or a `const`. A variable stops
+generation with `RIV1113`: Rivet can't tell it from an argument you left out, and
+guessing the default would put the wrong value in the spec.
 
 | Method | Effect |
 |---|---|
@@ -29,7 +33,7 @@ All return the definition for chaining.
 | `.Returns(status[, description])` | Same, without a payload type. |
 | `.WithResponseHeader<T>(status, name[, description][, required:])` | Declare a typed response header on a status (`responses[status].headers`). The non-generic overload declares a string header. Rivet never sets it: emitting the header is handler code. `required: true` is a promise the adapters hold you to, so a response at that status written without the header throws `RivetContractViolationException` (see [Runtime responses](#runtime-responses)). Each (status, name) pair may be declared once. |
 | `.WithResponseHeader<T>(name[, description][, required:])` | Same, targeting the endpoint's success status; omit `<T>` for a string header. |
-| `.Secure(scheme[, scopes...])` | One way in: the named scheme, granting these scopes. Call it again for another way in; OpenAPI ORs them. Define the scheme with `--security`. See [Security](#security). |
+| `.Secure(scheme[, scopes...])` | One way in: the named scheme, granting these scopes. Call it again for another way in; OpenAPI ORs them. Define the scheme with `--security` or `[assembly: RivetSecurityScheme(...)]`. See [Security](#security). |
 | `.AndSecure(scheme[, scopes...])` | Adds a scheme to the alternative the previous `.Secure()` started: the caller needs both. |
 | `.OrAnonymous()` | Adds a no-credentials alternative (`{}`), so authentication is optional. |
 | `.Anonymous()` | No auth required (`security: []`). Stands alone. |
@@ -73,8 +77,8 @@ An endpoint with none of these inherits the document's security: the first
 
 These are spec-only: Rivet writes them into the OpenAPI document and nothing at
 runtime checks a token. Authorization stays with ASP.NET (`RequireAuthorization`,
-`[Authorize]`). Rivet reads the calls from source, so scheme names and scopes must
-be literals or `const`s (`RIV1113`), and the calls have to agree with each other:
+`[Authorize]`). Scheme names and scopes follow the literal-or-`const` rule above
+(`RIV1113`), and the calls have to agree with each other:
 `.Anonymous()` stands alone, and `.AndSecure()` joins the alternative a `.Secure()`
 started (`RIV1114`).
 

@@ -102,12 +102,39 @@ public static class JsonContractReader
         }
 
         var endpoints = (contract.Endpoints ?? []).Select(NormalizeResponses).ToList();
+        foreach (var endpoint in endpoints)
+        {
+            RejectRepeatedSecuritySchemes(endpoint);
+        }
 
         // The contract JSON has no top-level brands dictionary: brands exist only as inline
         // kind:"brand" nodes, and the OpenAPI emitter $refs every brand by name.
         var brands = CollectBrands(contract.Types, endpoints);
 
         return (contract.Types, enums, endpoints, brands);
+    }
+
+    /// <summary>
+    /// A security alternative is one OpenAPI Security Requirement Object, keyed by scheme
+    /// name, so a scheme can appear in it once; its scopes all go in that one entry.
+    /// </summary>
+    private static void RejectRepeatedSecuritySchemes(TsEndpointDefinition endpoint)
+    {
+        var repeated = (endpoint.Security?.Alternatives ?? [])
+            .SelectMany(alternative =>
+                alternative
+                    .Schemes.GroupBy(scheme => scheme.Name, StringComparer.Ordinal)
+                    .Where(group => group.Skip(1).Any())
+            )
+            .FirstOrDefault();
+        if (repeated is not null)
+        {
+            throw new JsonException(
+                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate}) "
+                    + $"lists security scheme '{repeated.Key}' more than once in one security alternative; "
+                    + "list each scheme once per alternative, with all its scopes in that entry"
+            );
+        }
     }
 
     private static TsEndpointDefinition NormalizeResponses(TsEndpointDefinition endpoint) =>

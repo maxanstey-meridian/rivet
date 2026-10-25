@@ -131,7 +131,7 @@ honest degradation, not full support.
 - **Parameters**: path, query, header, and cookie parameters retain their exact
   name, location, requiredness, schema/reference identity, descriptions,
   deprecation, defaults, examples, constraints, and represented serialization
-  metadata (including query `allowEmptyValue`) through explicit
+  metadata (including query `allowReserved` and `allowEmptyValue`) through explicit
   `.Parameter<T>(...)` provenance. Parameters and request bodies remain
   independent on the same operation, so query/cookie/body locations are not
   inferred from a merged input record or erased.
@@ -232,6 +232,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3014` | `dictionary-key-dropped` | A `propertyNames` schema has no C# dictionary-key representation; keys degrade to `string`. |
 | `RIV3015` | `named-scalar-algebra-unsupported` | A named scalar component uses const/composition/heterogeneous leaves outside bounded scalar preservation; its fallback mapping is retained. |
 | `RIV3003` | `operation-method-dropped` | TRACE operation dropped — the HTTP method has no contract representation. |
+| `RIV3019` | `swagger-server-not-projected` | A Swagger 2 document has a `host` without `schemes`, or `schemes` without a `host`; no server URL is invented from half of one. |
 | `RIV3020` | `empty-parameter-name-dropped` | Parameter name is empty, which OpenAPI forbids; the parameter is dropped. |
 | `RIV3021` | `reserved-content-type-header-dropped` | `Content-Type` is declared as a header parameter instead of request-body content. |
 | `RIV3022` | `reserved-authorization-header-dropped` | `Authorization` is declared as a header parameter instead of a security scheme. |
