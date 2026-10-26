@@ -166,12 +166,8 @@ public sealed class ScalarMetadataRoundTripTests
         Assert.Contains("[RivetReadOnly]", generated);
         Assert.Contains("[RivetWriteOnly]", generated);
 
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = JsonNode.Parse(
-            OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null)
-        )!;
+        using var document = CompilationHelper.EmitImported(imported);
+        var emitted = JsonNode.Parse(document.RootElement.GetRawText())!;
 
         var expected = JsonNode.Parse(spec)!["components"]!["schemas"]!["ScalarDto"]!;
         var actual = emitted["components"]!["schemas"]!["ScalarDto"]!;

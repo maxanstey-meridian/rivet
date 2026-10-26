@@ -274,9 +274,18 @@ public static class ContractWalker
                                 : new TsType.Primitive("string"),
                             call.StringArg("description"),
                             call.BoolArg("required") ?? false,
-                            ParseJsonArgument(call.StringArg("schemaExamplesJson")),
-                            ParseJsonArgument(call.StringArg("exampleJson")),
-                            ParseJsonArgument(call.StringArg("examplesJson")),
+                            ParseJsonArgument(
+                                call.StringArg("schemaExamplesJson"),
+                                $"schemaExamplesJson of response header '{headerName}' on endpoint '{name}'"
+                            ),
+                            ParseJsonArgument(
+                                call.StringArg("exampleJson"),
+                                $"exampleJson of response header '{headerName}' on endpoint '{name}'"
+                            ),
+                            ParseExamplesArgument(
+                                call.StringArg("examplesJson"),
+                                $"examplesJson of response header '{headerName}' on endpoint '{name}'"
+                            ),
                             call.BoolArg("deprecated") ?? false,
                             call.StringArg("style"),
                             call.BoolArg("explode"),
@@ -1282,7 +1291,10 @@ public static class ContractWalker
                 $"Endpoint '{endpointName}' declares unsupported parameter location '{parameterLocation}'."
             ),
         };
-        var metadata = ParseParameterMetadata(call.StringArg("metadataJson"));
+        var metadata = ParseParameterMetadata(
+            call.StringArg("metadataJson"),
+            $"metadataJson of parameter '{parameterName}' on endpoint '{endpointName}'"
+        );
         var schemaType = call.StringArg("schemaType");
         var format = call.StringArg("format");
         var parameterType = typeWalker.ApplyGeneratedSchemaRef(
@@ -1316,15 +1328,31 @@ public static class ContractWalker
         );
     }
 
-    private static ParameterMetadata ParseParameterMetadata(string? json)
+    private static ParameterMetadata ParseParameterMetadata(string? json, string what)
     {
         if (json is null)
         {
             return new ParameterMetadata();
         }
 
+        try
+        {
+            return ReadParameterMetadata(json, what);
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+        {
+            throw new RivetUserException(
+                $"error: {what} must be a JSON object of parameter metadata, got '{json}' ({exception.Message})"
+            );
+        }
+    }
+
+    private static ParameterMetadata ReadParameterMetadata(string json, string what)
+    {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
+        var examples = CloneProperty(root, "examples");
+        RequireExamplesMap(examples, what);
         return new ParameterMetadata(
             root.TryGetProperty("description", out var description)
                 ? description.GetString()
@@ -1336,7 +1364,7 @@ public static class ContractWalker
                 : null,
             CloneProperty(root, "schemaExamples"),
             CloneProperty(root, "example"),
-            CloneProperty(root, "examples"),
+            examples,
             root.TryGetProperty("style", out var style) ? style.GetString() : null,
             root.TryGetProperty("explode", out var explode) ? explode.GetBoolean() : null,
             root.TryGetProperty("itemMetadata", out var itemMetadata)
@@ -1355,15 +1383,45 @@ public static class ContractWalker
     private static JsonElement? CloneProperty(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) ? value.Clone() : null;
 
-    private static JsonElement? ParseJsonArgument(string? json)
+    private static JsonElement? ParseJsonArgument(string? json, string what)
     {
         if (json is null)
         {
             return null;
         }
 
-        using var document = JsonDocument.Parse(json);
-        return document.RootElement.Clone();
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException exception)
+        {
+            throw new RivetUserException(
+                $"error: {what} must be a JSON literal, got '{json}' ({exception.Message})"
+            );
+        }
+    }
+
+    /// <summary>
+    /// A header's or parameter's <c>examples</c> is a map of Example objects by name, unlike
+    /// a schema's <c>examples</c> array.
+    /// </summary>
+    private static JsonElement? ParseExamplesArgument(string? json, string what)
+    {
+        var examples = ParseJsonArgument(json, what);
+        RequireExamplesMap(examples, what);
+        return examples;
+    }
+
+    private static void RequireExamplesMap(JsonElement? examples, string what)
+    {
+        if (examples is { ValueKind: not JsonValueKind.Object } value)
+        {
+            throw new RivetUserException(
+                $"error: examples in {what} must be a JSON object mapping names to Example objects, got '{value.GetRawText()}'"
+            );
+        }
     }
 
     /// <summary>[RivetRequestBody(typeof(T), required)] on a contract field.</summary>

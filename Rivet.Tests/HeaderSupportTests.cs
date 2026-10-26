@@ -398,6 +398,79 @@ public sealed class HeaderSupportTests
         Assert.Equal("string", etag.GetProperty("schema").GetProperty("type").GetString());
     }
 
+    [Theory]
+    // `examples` on a schema is a JSON array; anything else is no schema at all.
+    [InlineData("schemaExamplesJson: \"{}\"", "must be a JSON array")]
+    [InlineData("schemaExamplesJson: \"[1\"", "must be a JSON literal")]
+    [InlineData("exampleJson: \"{\"", "must be a JSON literal")]
+    [InlineData("examplesJson: \"nope\"", "must be a JSON literal")]
+    // A header's `examples` is a map of Example objects by name.
+    [InlineData("examplesJson: \"[1]\"", "must be a JSON object mapping names to Example objects")]
+    public void Emitter_Refuses_Response_Header_Json_It_Cannot_Emit(
+        string argument,
+        string expected
+    )
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> GetTask =
+                    Define.Get<TaskDto>("/api/tasks/{id}")
+                        .WithResponseHeader<int>("X-Rate-Limit", {{argument}});
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source)
+        );
+
+        Assert.Contains(expected, exception.Message);
+        Assert.Contains("response header 'X-Rate-Limit' on endpoint '", exception.Message);
+        Assert.Contains("getTask'", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("{", "must be a JSON object of parameter metadata")]
+    [InlineData("{\\\"deprecated\\\":\\\"yes\\\"}", "must be a JSON object of parameter metadata")]
+    [InlineData("{\\\"examples\\\":[1]}", "must be a JSON object mapping names to Example objects")]
+    public void Walker_Refuses_Parameter_Metadata_It_Cannot_Read(
+        string metadataJson,
+        string expected
+    )
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                public static readonly RouteDefinition<TaskDto> ListTasks =
+                    Define.Get<TaskDto>("/api/tasks")
+                        .Parameter<string>("X-Trace", "header", false, metadataJson: "{{metadataJson}}");
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source)
+        );
+
+        Assert.Contains(expected, exception.Message);
+        Assert.Contains("parameter 'X-Trace' on endpoint 'listTasks'", exception.Message);
+    }
+
     [Fact]
     public void Imported_Response_Header_Leaf_Metadata_Survives_Generated_CSharp_And_Emitters()
     {

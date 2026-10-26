@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -6,8 +7,20 @@ namespace Rivet.Tool.Analysis;
 /// Enforces authored-contract response invariants and normalizes external IR
 /// (controller metadata and <c>--from</c> contract JSON), refusing a repeated status in both.
 /// </summary>
-internal static class ResponseStatusValidation
+internal static partial class ResponseStatusValidation
 {
+    /// <summary>
+    /// A response key: <c>default</c>, a range (<c>4XX</c> or <c>4xx</c>, as the runtime's
+    /// ResponseStatusKey.Parse reads it and OpenAPI documents spell it) or a three-digit code.
+    /// rivet-contract-schema.json's statusKey pattern is this text.
+    /// </summary>
+    internal const string StatusKeyPattern = "^(default|[1-5](?:[0-9]{2}|[Xx]{2}))$";
+
+    internal static bool IsStatusKey(string key) => StatusKeyRegex().IsMatch(key);
+
+    [GeneratedRegex(StatusKeyPattern)]
+    private static partial Regex StatusKeyRegex();
+
     internal static void RejectContractDuplicates(
         IEnumerable<TsResponseType> responses,
         string endpointName

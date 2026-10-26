@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Json.Schema;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -569,6 +570,19 @@ public sealed class ContractSchemaTests
                 .Where(property => AdmitsNull(schemaProperties[property.Name]!))
                 .Where(property => !property.IsSetNullable)
                 .Select(property => property.Name)
+        );
+    }
+
+    [Fact]
+    public void Reader_Accepts_The_StatusKeys_The_Schema_Allows()
+    {
+        var responseType = JsonNode.Parse(File.ReadAllText(_schemaPath))!["$defs"]![
+            "responseType"
+        ]!;
+
+        Assert.Equal(
+            ResponseStatusValidation.StatusKeyPattern,
+            responseType["properties"]!["statusKey"]!["pattern"]!.GetValue<string>()
         );
     }
 

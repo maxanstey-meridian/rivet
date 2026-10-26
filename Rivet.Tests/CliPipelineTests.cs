@@ -111,26 +111,18 @@ public sealed class CliPipelineTests
         var outDir = Path.Combine(workDir.FullName, "out");
         using var sourceDocument = JsonDocument.Parse(File.ReadAllText(SpecPath(spec)));
         var emitArgs = new List<string> { srcDir, "--openapi", "--output", outDir };
-        var securitySchemeNames = new HashSet<string>(StringComparer.Ordinal);
-        var sourceSecuritySchemes = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-        if (
+        var sourceSecuritySchemes =
             sourceDocument.RootElement.TryGetProperty("components", out var components)
             && components.TryGetProperty("securitySchemes", out var securitySchemes)
-        )
-        {
-            foreach (var securityScheme in securitySchemes.EnumerateObject())
-            {
-                securitySchemeNames.Add(securityScheme.Name);
-                sourceSecuritySchemes[securityScheme.Name] = securityScheme.Value;
-            }
-        }
-        var degradedSchemes = new List<string>();
-        foreach (var securitySchemeName in securitySchemeNames.Order(StringComparer.Ordinal))
+                ? securitySchemes
+                    .EnumerateObject()
+                    .OrderBy(scheme => scheme.Name, StringComparer.Ordinal)
+                    .ToList()
+                : [];
+        foreach (var securityScheme in sourceSecuritySchemes)
         {
             emitArgs.Add("--security");
-            emitArgs.Add(
-                ToCliSecuritySpec(securitySchemeName, sourceSecuritySchemes, degradedSchemes)
-            );
+            emitArgs.Add(ToCliSecuritySpec(securityScheme.Name, securityScheme.Value));
         }
         var emit = RunCli(workDir.FullName, emitArgs);
         Assert.True(emit.ExitCode == 0, $"compile/emit failed:\n{emit.StdErr}");
@@ -141,14 +133,24 @@ public sealed class CliPipelineTests
         var specPath = Path.Combine(outDir, "openapi.json");
         Assert.True(File.Exists(specPath), $"expected {specPath} to exist");
         using var document = JsonDocument.Parse(File.ReadAllText(specPath));
-        foreach (var degradedScheme in degradedSchemes)
+        foreach (var sourceScheme in sourceSecuritySchemes)
         {
             var emittedScheme = document
                 .RootElement.GetProperty("components")
                 .GetProperty("securitySchemes")
-                .GetProperty(degradedScheme);
-            Assert.Equal("http", emittedScheme.GetProperty("type").GetString());
-            Assert.Equal("bearer", emittedScheme.GetProperty("scheme").GetString());
+                .GetProperty(sourceScheme.Name);
+            string[] keywords = sourceScheme.Value.GetProperty("type").GetString() switch
+            {
+                "http" => ["type", "scheme"],
+                _ => ["type", "in", "name"],
+            };
+            foreach (var keyword in keywords)
+            {
+                Assert.Equal(
+                    sourceScheme.Value.GetProperty(keyword).GetString(),
+                    emittedScheme.GetProperty(keyword).GetString()
+                );
+            }
         }
         Assert.DoesNotContain(
             JsonRefs.Collect(document.RootElement),
@@ -379,39 +381,31 @@ public sealed class CliPipelineTests
         }
     }
 
-    private static string ToCliSecuritySpec(
-        string name,
-        IReadOnlyDictionary<string, JsonElement> sourceSchemes,
-        List<string> degradedSchemes
-    )
+    private static string ToCliSecuritySpec(string name, JsonElement scheme)
     {
+        var type = scheme.GetProperty("type").GetString();
         if (
-            sourceSchemes.TryGetValue(name, out var scheme)
-            && scheme.TryGetProperty("type", out var type)
+            type == "http"
+            && scheme.TryGetProperty("scheme", out var httpScheme)
+            && httpScheme.GetString() == "bearer"
         )
         {
-            if (
-                type.GetString() == "http"
-                && scheme.TryGetProperty("scheme", out var httpScheme)
-                && httpScheme.GetString() == "bearer"
-            )
-            {
-                return $"{name}=bearer";
-            }
-
-            if (
-                type.GetString() == "apiKey"
-                && scheme.TryGetProperty("in", out var location)
-                && scheme.TryGetProperty("name", out var parameterName)
-            )
-            {
-                return $"{name}=apikey:{location.GetString()}:{parameterName.GetString()}";
-            }
+            return $"{name}=bearer";
         }
 
-        // The public CLI cannot express OAuth2, OpenID Connect, or HTTP basic definitions.
-        // Keep the reference resolvable and pin the deliberate loss instead of claiming fidelity.
-        degradedSchemes.Add(name);
-        return $"{name}=bearer";
+        if (
+            type == "apiKey"
+            && scheme.TryGetProperty("in", out var location)
+            && scheme.TryGetProperty("name", out var parameterName)
+        )
+        {
+            return $"{name}=apikey:{location.GetString()}:{parameterName.GetString()}";
+        }
+
+        // --security only spells bearer and apiKey. A corpus with OAuth2, OpenID Connect or
+        // HTTP basic needs a CLI that can express it, not a silent swap to bearer.
+        throw new InvalidOperationException(
+            $"--security cannot express source scheme '{name}': {scheme.GetRawText()}"
+        );
     }
 }

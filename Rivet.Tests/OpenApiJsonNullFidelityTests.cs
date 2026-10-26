@@ -1,5 +1,4 @@
 using System.Text.Json.Nodes;
-using Rivet.Tool.Emit;
 
 namespace Rivet.Tests;
 
@@ -34,7 +33,8 @@ public sealed class OpenApiJsonNullFidelityTests
                 )
                 .Select(file => file.FileName)
         );
-        var emitted = CompileAndEmit(imported);
+        using var document = CompilationHelper.EmitImported(imported);
+        var emitted = JsonNode.Parse(document.RootElement.GetRawText())!;
         var property = emitted["components"]!["schemas"]!["Item"]!["properties"]![
             "value"
         ]!.AsObject();
@@ -142,7 +142,8 @@ public sealed class OpenApiJsonNullFidelityTests
                 )
                 .Select(file => file.FileName)
         );
-        var emitted = CompileAndEmit(imported);
+        using var document = CompilationHelper.EmitImported(imported);
+        var emitted = JsonNode.Parse(document.RootElement.GetRawText())!;
         var schemas = emitted["components"]!["schemas"]!;
         AssertExplicitNull(schemas["Scalar"]!, "example");
         AssertExampleControls(schemas["ExampleSet"]!["examples"]!);
@@ -192,16 +193,5 @@ public sealed class OpenApiJsonNullFidelityTests
             control["literal"] is { } literal && literal.GetValue<string>() == LiteralSentinel,
             examples.ToJsonString()
         );
-    }
-
-    private static JsonNode CompileAndEmit(Rivet.Tool.Import.ImportResult imported)
-    {
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-
-        return JsonNode.Parse(
-            OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null)
-        )!;
     }
 }

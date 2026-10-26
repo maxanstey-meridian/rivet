@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Rivet.Tests;
 
 /// <summary>
@@ -68,18 +66,8 @@ public sealed class NullableComponentImportTests
         var result = CompilationHelper.Import(
             CompilationHelper.BuildSpec(schemas: Schemas, paths: Paths, title: "API")
         );
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = JsonSerializer.Deserialize<JsonElement>(
-            Rivet.Tool.Emit.OpenApiEmitter.Emit(
-                endpoints,
-                walker.Definitions,
-                walker.Brands,
-                walker.Enums,
-                null
-            )
-        );
+        using var document = CompilationHelper.EmitImported(result);
+        var emitted = document.RootElement;
 
         var item = emitted.GetProperty("components").GetProperty("schemas").GetProperty("ItemDto");
         var required = item.GetProperty("required")

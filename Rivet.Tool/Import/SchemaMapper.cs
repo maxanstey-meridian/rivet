@@ -1818,10 +1818,12 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapEnum);
             }
 
-            // Items say what each value is; the enum still rides as generated metadata.
-            if (schema.Items is not null)
+            // Items say what each array value is; the enum still rides as generated metadata.
+            // A non-array member (true, 1, {}) lies outside what items constrains, so only an
+            // all-array enum is a list.
+            if (schema.Items is not null && schema.Enum.All(value => value is JsonArray))
             {
-                return ResolveArrayType(schema, context);
+                return ResolveArrayType(schema, context) + (EnumListsNull(schema) ? "?" : "");
             }
 
             return LiteralEnumType(schema) is { } inferred

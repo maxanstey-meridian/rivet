@@ -781,18 +781,25 @@ public sealed class ComponentProvenanceTests
         }
     }
 
-    [Fact]
-    public void Untyped_literal_enum_with_items_is_a_list_of_its_items()
+    [Theory]
+    [InlineData("[[]]", " List<Item> Value")]
+    [InlineData("[[], null]", " List<Item>? Value")]
+    // `items` only constrains arrays, so `true` is outside it and only JsonElement holds both.
+    [InlineData("[[], true]", " System.Text.Json.JsonElement Value")]
+    public void Untyped_literal_enum_with_items_is_a_list_of_its_items(
+        string enumJson,
+        string expectedProperty
+    )
     {
-        // `items` says what each value is, so `{items: Item, enum: [[]]}` is a List<Item>,
-        // not the JsonElement its enum alone would infer; the values still survive.
+        // `items` says what each array value is, so `{items: Item, enum: [[]]}` is a
+        // List<Item>, not the JsonElement its enum alone would infer; the values still survive.
         var spec = CompilationHelper.BuildSpec(
-            schemas: """
+            schemas: $$"""
             "Item": { "type": "object", "properties": { "id": { "type": "string" } } },
             "Envelope": {
                 "type": "object",
                 "properties": {
-                    "value": { "items": { "$ref": "#/components/schemas/Item" }, "enum": [[]] }
+                    "value": { "items": { "$ref": "#/components/schemas/Item" }, "enum": {{enumJson}} }
                 },
                 "required": ["value"]
             }
@@ -816,7 +823,7 @@ public sealed class ComponentProvenanceTests
 
         var imported = CompilationHelper.Import(spec, "LiteralEnum");
         Assert.Empty(imported.Warnings);
-        Assert.Contains(" List<Item> Value", CompilationHelper.FindFile(imported, "Envelope.cs"));
+        Assert.Contains(expectedProperty, CompilationHelper.FindFile(imported, "Envelope.cs"));
 
         using var emitted = CompilationHelper.EmitImported(imported);
         var value = emitted
@@ -825,11 +832,17 @@ public sealed class ComponentProvenanceTests
             .GetProperty("Envelope")
             .GetProperty("properties")
             .GetProperty("value");
-        Assert.Equal("[[]]", JsonNode.Parse(value.GetRawText())!["enum"]!.ToJsonString());
         Assert.Equal(
-            "#/components/schemas/Item",
-            value.GetProperty("items").GetProperty("$ref").GetString()
+            JsonNode.Parse(enumJson)!.ToJsonString(),
+            JsonNode.Parse(value.GetRawText())!["enum"]!.ToJsonString()
         );
+        if (expectedProperty.Contains("List<"))
+        {
+            Assert.Equal(
+                "#/components/schemas/Item",
+                value.GetProperty("items").GetProperty("$ref").GetString()
+            );
+        }
     }
 
     [Fact]

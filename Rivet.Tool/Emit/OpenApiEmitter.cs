@@ -1048,13 +1048,15 @@ public sealed class OpenApiEmitter
                         headerObj["examples"] = Node(examples);
                     }
 
-                    var headerSchema = MapTsTypeToJsonSchema(
-                        header.Type,
-                        $"response header '{header.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'"
-                    );
+                    var headerContext =
+                        $"response header '{header.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'";
+                    var headerSchema = MapTsTypeToJsonSchema(header.Type, headerContext);
                     if (header.SchemaExamples is { } schemaExamples)
                     {
-                        headerSchema["examples"] = Node(schemaExamples);
+                        headerSchema["examples"] = SchemaEnricher.ParseJsonArray(
+                            schemaExamples.GetRawText(),
+                            $"schema examples of {headerContext}"
+                        );
                     }
                     if (header.ContentType is not null)
                     {
@@ -1307,7 +1309,10 @@ public sealed class OpenApiEmitter
         SchemaEnricher.EnrichConstraints(schema, parameter.Constraints);
         if (parameter.SchemaExamples is { } schemaExamples)
         {
-            schema["examples"] = Node(schemaExamples);
+            schema["examples"] = SchemaEnricher.ParseJsonArray(
+                schemaExamples.GetRawText(),
+                $"schema examples of {context}"
+            );
         }
 
         var result = new JsonObject

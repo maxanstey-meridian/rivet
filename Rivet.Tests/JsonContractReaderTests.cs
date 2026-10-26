@@ -1106,10 +1106,16 @@ public sealed class JsonContractReaderTests
         "type 'Id' has both 'type' and 'properties'"
     )]
     [InlineData(
+        """[{ "name": "Id", "typeParameters": [], "type": { "kind": "primitive", "type": "string" }, "properties": [] }]""",
+        "[]",
+        "type 'Id' has both 'type' and 'properties'"
+    )]
+    [InlineData(
         """[{ "name": "Dto", "typeParameters": [] }]""",
         "[]",
         "type 'Dto' has neither 'type' nor 'properties'"
     )]
+    [InlineData("[null]", "[]", "'types[0]' is null")]
     public void Malformed_Declarations_Are_Refused(string types, string enums, string expected)
     {
         var json = $$"""{ "types": {{types}}, "enums": {{enums}}, "endpoints": [] }""";
@@ -1184,6 +1190,14 @@ public sealed class JsonContractReaderTests
     [InlineData(
         $$"""{ {{GetEndpoint}}, "responses": [{ "statusKey": "ok" }] }""",
         "endpoint 'things.get' has a response with statusKey 'ok'"
+    )]
+    [InlineData(
+        """{ "name": "get", "httpMethod": "GET", "routeTemplate": "/api/things", "params": [null], "controllerName": "things", "responses": [{ "statusCode": 200 }] }""",
+        "'params[0]' is null; contract lists and maps hold no nulls, so remove the entry or write its value. Path: $.endpoints[0]"
+    )]
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "examples": [{ "mediaType": "application/json", "json": "{}", "referencedComponents": { "Thing": null } }] }] }""",
+        "'referencedComponents.Thing' is null"
     )]
     public void Malformed_Endpoints_Are_Refused(string endpoint, string expected)
     {

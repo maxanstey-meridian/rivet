@@ -1,6 +1,7 @@
+using System.Collections;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
+using System.Text.Json.Serialization.Metadata;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
@@ -10,7 +11,7 @@ namespace Rivet.Tool.Emit;
 /// Reads Rivet contract JSON (<c>--from</c>; the shape rivet-ts produces and
 /// <c>rivet-contract-schema.json</c> describes) straight into the IR records.
 /// </summary>
-public static partial class JsonContractReader
+public static class JsonContractReader
 {
     internal static readonly JsonSerializerOptions Options = new()
     {
@@ -25,6 +26,9 @@ public static partial class JsonContractReader
         // [JsonRequired] is satisfied by an explicit null, so a non-nullable member written as
         // null ("responses": null) would otherwise reach the IR and crash far from the input.
         RespectNullableAnnotations = true,
+        // RespectNullableAnnotations stops at generic arguments, so it lets "types": [null]
+        // through; no IR collection holds nulls.
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { RefuseNullElements } },
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
@@ -46,6 +50,66 @@ public static partial class JsonContractReader
         TsScalarMetadata? ScalarMetadata = null,
         string? NamingPolicy = null
     );
+
+    /// <summary>
+    /// Refuses a null element in an object's list or dictionary members once the object is
+    /// read. The check sits on the owner because a converter on the collection would read its
+    /// elements through a nested serializer call, which loses the path of every error inside
+    /// them; the owner's path comes with the exception and the message names the element.
+    /// </summary>
+    private static void RefuseNullElements(JsonTypeInfo typeInfo)
+    {
+        if (typeInfo.Kind != JsonTypeInfoKind.Object)
+        {
+            return;
+        }
+
+        var collections = typeInfo
+            .Properties.Where(property =>
+                property.Get is not null
+                && property.PropertyType.IsGenericType
+                && property.PropertyType.GetGenericTypeDefinition() is var definition
+                && (
+                    definition == typeof(IReadOnlyList<>)
+                    || definition == typeof(IReadOnlyDictionary<,>)
+                )
+                && !property.PropertyType.GetGenericArguments()[^1].IsValueType
+            )
+            .ToList();
+        if (collections.Count == 0)
+        {
+            return;
+        }
+
+        var previous = typeInfo.OnDeserialized;
+        typeInfo.OnDeserialized = owner =>
+        {
+            previous?.Invoke(owner);
+            foreach (var property in collections)
+            {
+                var element = property.Get!(owner) switch
+                {
+                    IList list => Enumerable
+                        .Range(0, list.Count)
+                        .Where(index => list[index] is null)
+                        .Select(index => $"[{index}]")
+                        .FirstOrDefault(),
+                    IDictionary map => map
+                        .Keys.Cast<object>()
+                        .Where(key => map[key] is null)
+                        .Select(key => $".{key}")
+                        .FirstOrDefault(),
+                    _ => null,
+                };
+                if (element is not null)
+                {
+                    throw new JsonException(
+                        $"'{property.Name}{element}' is null; contract lists and maps hold no nulls, so remove the entry or write its value."
+                    );
+                }
+            }
+        };
+    }
 
     public static (
         IReadOnlyList<TsTypeDefinition> Types,
@@ -178,18 +242,19 @@ public static partial class JsonContractReader
 
     /// <summary>
     /// A response is keyed by its statusCode or its statusKey (default, a 1XX-5XX range or a
-    /// three-digit code); with neither it would be emitted under status "0".
+    /// three-digit code, as <see cref="ResponseStatusValidation.StatusKeyPattern"/> spells
+    /// it); with neither it would be emitted under status "0".
     /// </summary>
     private static TsResponseType ResolveStatus(
         TsEndpointDefinition endpoint,
         TsResponseType response
     )
     {
-        if (response.StatusKey is { } key && !StatusKeyPattern().IsMatch(key))
+        if (response.StatusKey is { } key && !ResponseStatusValidation.IsStatusKey(key))
         {
             throw new JsonException(
                 $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' has a response with statusKey '{key}'; "
-                    + "a statusKey is 'default', a range like '4XX' or a three-digit status code"
+                    + "a statusKey is 'default', a range like '4XX' or '4xx', or a three-digit status code"
             );
         }
 
@@ -213,10 +278,6 @@ public static partial class JsonContractReader
             }
             : response;
     }
-
-    // rivet-contract-schema.json's statusKey pattern.
-    [GeneratedRegex("^(default|[1-5](?:[0-9]{2}|XX))$")]
-    private static partial Regex StatusKeyPattern();
 
     private static Dictionary<string, TsType.Brand> CollectBrands(
         IReadOnlyList<TsTypeDefinition> types,

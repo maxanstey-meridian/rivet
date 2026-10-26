@@ -126,12 +126,7 @@ public sealed class FormatRoundTripTests
         Assert.Contains("string StringId", generated);
         Assert.Contains("long NumericId", generated);
 
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        using var emitted = JsonDocument.Parse(
-            OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null)
-        );
+        using var emitted = CompilationHelper.EmitImported(imported);
         var properties = emitted
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
