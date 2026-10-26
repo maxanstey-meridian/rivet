@@ -282,7 +282,7 @@ public static class ContractWalker
                                 call.StringArg("exampleJson"),
                                 $"exampleJson of response header '{headerName}' on endpoint '{name}'"
                             ),
-                            ParseExamplesArgument(
+                            ParseJsonArgument(
                                 call.StringArg("examplesJson"),
                                 $"examplesJson of response header '{headerName}' on endpoint '{name}'"
                             ),
@@ -1337,7 +1337,7 @@ public static class ContractWalker
 
         try
         {
-            return ReadParameterMetadata(json, what);
+            return ReadParameterMetadata(json);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
@@ -1347,12 +1347,10 @@ public static class ContractWalker
         }
     }
 
-    private static ParameterMetadata ReadParameterMetadata(string json, string what)
+    private static ParameterMetadata ReadParameterMetadata(string json)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
-        var examples = CloneProperty(root, "examples");
-        RequireExamplesMap(examples, what);
         return new ParameterMetadata(
             root.TryGetProperty("description", out var description)
                 ? description.GetString()
@@ -1364,7 +1362,7 @@ public static class ContractWalker
                 : null,
             CloneProperty(root, "schemaExamples"),
             CloneProperty(root, "example"),
-            examples,
+            CloneProperty(root, "examples"),
             root.TryGetProperty("style", out var style) ? style.GetString() : null,
             root.TryGetProperty("explode", out var explode) ? explode.GetBoolean() : null,
             root.TryGetProperty("itemMetadata", out var itemMetadata)
@@ -1399,27 +1397,6 @@ public static class ContractWalker
         {
             throw new RivetUserException(
                 $"error: {what} must be a JSON literal, got '{json}' ({exception.Message})"
-            );
-        }
-    }
-
-    /// <summary>
-    /// A header's or parameter's <c>examples</c> is a map of Example objects by name, unlike
-    /// a schema's <c>examples</c> array.
-    /// </summary>
-    private static JsonElement? ParseExamplesArgument(string? json, string what)
-    {
-        var examples = ParseJsonArgument(json, what);
-        RequireExamplesMap(examples, what);
-        return examples;
-    }
-
-    private static void RequireExamplesMap(JsonElement? examples, string what)
-    {
-        if (examples is { ValueKind: not JsonValueKind.Object } value)
-        {
-            throw new RivetUserException(
-                $"error: examples in {what} must be a JSON object mapping names to Example objects, got '{value.GetRawText()}'"
             );
         }
     }

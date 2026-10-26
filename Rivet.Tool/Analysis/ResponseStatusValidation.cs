@@ -10,9 +10,9 @@ namespace Rivet.Tool.Analysis;
 internal static partial class ResponseStatusValidation
 {
     /// <summary>
-    /// A response key: <c>default</c>, a range (<c>4XX</c> or <c>4xx</c>, as the runtime's
-    /// ResponseStatusKey.Parse reads it and OpenAPI documents spell it) or a three-digit code.
-    /// rivet-contract-schema.json's statusKey pattern is this text.
+    /// A response key: <c>default</c> (lowercase, as OpenAPI names the field), a range
+    /// (<c>4XX</c> or <c>4xx</c>; imported keys keep the source's spelling) or a three-digit
+    /// code. rivet-contract-schema.json's statusKey pattern is this text.
     /// </summary>
     internal const string StatusKeyPattern = "^(default|[1-5](?:[0-9]{2}|[Xx]{2}))$";
 

@@ -468,7 +468,51 @@ public sealed class HeaderSupportTests
         );
 
         Assert.Contains(expected, exception.Message);
-        Assert.Contains("parameter 'X-Trace' on endpoint 'listTasks'", exception.Message);
+        Assert.Contains("'X-Trace' on endpoint '", exception.Message);
+        Assert.Contains("listTasks'", exception.Message);
+    }
+
+    // --from reaches the emitter without the walker, so the shape rules live where both meet.
+    [Theory]
+    [InlineData("\"examples\": [1]", false)]
+    [InlineData("\"examples\": { \"first\": 1 }", false)]
+    [InlineData("\"examples\": [1]", true)]
+    [InlineData("\"examples\": { \"first\": 1 }", true)]
+    public void Contract_Json_Header_Param_Examples_Must_Be_A_Map_Of_Example_Objects(
+        string examples,
+        bool onResponseHeader
+    )
+    {
+        var header =
+            $$"""{ "name": "X-Trace", "type": { "kind": "primitive", "type": "string" }, {{examples}} }""";
+        var param =
+            $$"""{ "name": "X-Trace", "type": { "kind": "primitive", "type": "string" }, "source": "header", {{examples}} }""";
+        var json = $$"""
+            {
+              "types": [],
+              "enums": [],
+              "endpoints": [{
+                "name": "list",
+                "httpMethod": "GET",
+                "routeTemplate": "/api/items",
+                "params": [{{(onResponseHeader ? "" : param)}}],
+                "controllerName": "items",
+                "responses": [{ "statusCode": 204{{(
+                onResponseHeader ? $", \"headers\": [{header}]" : ""
+            )}} }]
+              }]
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApiFromJson(json)
+        );
+
+        Assert.Contains(
+            "must be a JSON object mapping names to Example objects",
+            exception.Message
+        );
+        Assert.Contains("'X-Trace' on endpoint 'items.list'", exception.Message);
     }
 
     [Fact]

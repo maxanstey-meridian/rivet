@@ -1176,6 +1176,8 @@ public sealed class ContractSchemaTests
             ["Alias"] = new("Alias", [], new TsType.Primitive("string"), "d", component, scalar),
         };
         var json = JsonDocument.Parse("\"x\"").RootElement.Clone();
+        var schemaExamples = JsonDocument.Parse("[\"x\"]").RootElement.Clone();
+        var exampleMap = JsonDocument.Parse("{\"a\":{\"value\":\"x\"}}").RootElement.Clone();
         var examples = new List<TsEndpointExample>
         {
             new("application/json", "inline", Json: "\"x\"", Summary: "s", Description: "d"),
@@ -1216,9 +1218,9 @@ public sealed class ContractSchemaTests
                     IsDeprecated: true,
                     DefaultValue: "\"x\"",
                     Constraints: new TsPropertyConstraints(MinLength: 1),
-                    SchemaExamples: json,
+                    SchemaExamples: schemaExamples,
                     Example: json,
-                    Examples: json,
+                    Examples: exampleMap,
                     Style: "form",
                     Explode: true,
                     SchemaType: "string",
@@ -1243,9 +1245,9 @@ public sealed class ContractSchemaTests
                             "d",
                             Required: true,
                             IsDeprecated: true,
-                            SchemaExamples: json,
+                            SchemaExamples: schemaExamples,
                             Example: json,
-                            Examples: json,
+                            Examples: exampleMap,
                             Style: "simple",
                             Explode: true,
                             AllowReserved: true,

@@ -345,6 +345,34 @@ public static class CompilationHelper
         string ns = "Test"
     ) => EmitImported(Import(spec, ns));
 
+    /// <summary>
+    /// Like <see cref="EmitImported"/>, but the walked contract goes out as contract JSON and
+    /// back through <see cref="JsonContractReader"/> first, the way <c>--from</c> sees it.
+    /// </summary>
+    public static System.Text.Json.JsonDocument EmitImportedThroughContractJson(
+        ImportResult imported
+    )
+    {
+        var compilation = CompileImportResult(imported);
+        var (discovered, walker) = DiscoverAndWalk(compilation);
+        var endpoints = WalkContracts(compilation, discovered, walker);
+        var contractJson = ContractEmitter.Emit(
+            walker.Definitions.ToDictionary(),
+            walker.Enums.ToDictionary(),
+            endpoints
+        );
+        var read = JsonContractReader.Read(contractJson);
+        return System.Text.Json.JsonDocument.Parse(
+            OpenApiEmitter.Emit(
+                read.Endpoints,
+                read.Types.ToDictionary(type => type.Name),
+                read.Brands,
+                read.Enums,
+                security: null
+            )
+        );
+    }
+
     public static string FindFile(ImportResult result, string fileName)
     {
         var file = result.Files.FirstOrDefault(f => f.FileName.EndsWith(fileName));

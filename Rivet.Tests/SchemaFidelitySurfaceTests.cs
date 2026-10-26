@@ -28,7 +28,7 @@ public sealed class SchemaFidelitySurfaceTests
             paths: ResponsePath("PasswordChange")
         );
 
-        using var emitted = CompileWalkContractJsonAndEmit(
+        using var emitted = CompilationHelper.EmitImportedThroughContractJson(
             CompilationHelper.Import(spec, "OktaSchemaTrace")
         );
 
@@ -72,7 +72,7 @@ public sealed class SchemaFidelitySurfaceTests
             paths: ResponsePath("Token")
         );
 
-        using var emitted = CompileWalkContractJsonAndEmit(
+        using var emitted = CompilationHelper.EmitImportedThroughContractJson(
             CompilationHelper.Import(spec, "TwilioSchemaTrace")
         );
         var iceServer = TraceSchema(
@@ -128,7 +128,7 @@ public sealed class SchemaFidelitySurfaceTests
             paths: ResponsePath("SquareSurface")
         );
 
-        using var emitted = CompileWalkContractJsonAndEmit(
+        using var emitted = CompilationHelper.EmitImportedThroughContractJson(
             CompilationHelper.Import(spec, "SquareSchemaTrace")
         );
         var item = TraceSchema(
@@ -170,7 +170,7 @@ public sealed class SchemaFidelitySurfaceTests
             """,
             paths: ResponsePath("Node")
         );
-        using var emitted = CompileWalkContractJsonAndEmit(
+        using var emitted = CompilationHelper.EmitImportedThroughContractJson(
             CompilationHelper.Import(spec, "CycleSchemaTrace")
         );
 
@@ -257,7 +257,7 @@ public sealed class SchemaFidelitySurfaceTests
         Assert.Contains("\"/items/items\"", source);
         Assert.Contains("\"/additionalProperties\"", source);
 
-        using var emitted = CompileWalkContractJsonAndEmit(imported);
+        using var emitted = CompilationHelper.EmitImportedThroughContractJson(imported);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
         var surface = schemas.GetProperty("Surface");
         Assert.Equal("Schema surface", surface.GetProperty("title").GetString());
@@ -402,28 +402,6 @@ public sealed class SchemaFidelitySurfaceTests
         Assert.Equal(2, item.GetProperty("examples").GetArrayLength());
         Assert.Equal(2, item.GetProperty("minLength").GetInt32());
         Assert.Equal("value", item.GetProperty("xml").GetProperty("name").GetString());
-    }
-
-    private static JsonDocument CompileWalkContractJsonAndEmit(ImportResult imported)
-    {
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var contractJson = ContractEmitter.Emit(
-            walker.Definitions.ToDictionary(),
-            walker.Enums.ToDictionary(),
-            endpoints
-        );
-        var read = JsonContractReader.Read(contractJson);
-        return JsonDocument.Parse(
-            OpenApiEmitter.Emit(
-                read.Endpoints,
-                read.Types.ToDictionary(type => type.Name),
-                read.Brands,
-                read.Enums,
-                security: null
-            )
-        );
     }
 
     private static string ResponsePath(string schema) =>

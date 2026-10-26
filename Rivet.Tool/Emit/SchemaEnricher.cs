@@ -108,4 +108,24 @@ internal static class SchemaEnricher
     public static JsonArray ParseJsonArray(string json, string what) =>
         ParseJsonLiteral(json, what) as JsonArray
         ?? throw new RivetUserException($"error: {what} must be a JSON array, got '{json}'");
+
+    /// <summary>
+    /// A header's or parameter's <c>examples</c>: a map of Example objects by name, unlike a
+    /// schema's <c>examples</c> array. Anything else would be written into the spec as-is.
+    /// </summary>
+    public static JsonObject ExampleMap(JsonElement examples, string what)
+    {
+        if (
+            examples.ValueKind != JsonValueKind.Object
+            || examples
+                .EnumerateObject()
+                .Any(entry => entry.Value.ValueKind != JsonValueKind.Object)
+        )
+        {
+            throw new RivetUserException(
+                $"error: {what} must be a JSON object mapping names to Example objects, got '{examples.GetRawText()}'"
+            );
+        }
+        return JsonNode.Parse(examples.GetRawText())!.AsObject();
+    }
 }

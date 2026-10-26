@@ -1043,13 +1043,15 @@ public sealed class OpenApiEmitter
                     {
                         headerObj["example"] = Node(example);
                     }
-                    if (header.Examples is { } examples)
-                    {
-                        headerObj["examples"] = Node(examples);
-                    }
-
                     var headerContext =
                         $"response header '{header.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'";
+                    if (header.Examples is { } examples)
+                    {
+                        headerObj["examples"] = SchemaEnricher.ExampleMap(
+                            examples,
+                            $"examples of {headerContext}"
+                        );
+                    }
                     var headerSchema = MapTsTypeToJsonSchema(header.Type, headerContext);
                     if (header.SchemaExamples is { } schemaExamples)
                     {
@@ -1336,7 +1338,7 @@ public sealed class OpenApiEmitter
         }
         if (parameter.Examples is { } examples)
         {
-            result["examples"] = Node(examples);
+            result["examples"] = SchemaEnricher.ExampleMap(examples, $"examples of {context}");
         }
         if (parameter.Style is not null)
         {

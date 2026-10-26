@@ -1842,7 +1842,8 @@ internal sealed class SchemaMapper
         // the only runtime collection shape compatible with an authored items schema.
         if (schema.Items is not null)
         {
-            return ResolveArrayType(schema, context);
+            // An enum that lists only null arrives here with its members stripped.
+            return ResolveArrayType(schema, context) + (EnumListsNull(schema) ? "?" : "");
         }
 
         // const without type — infer from the const value

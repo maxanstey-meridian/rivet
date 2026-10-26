@@ -784,6 +784,7 @@ public sealed class ComponentProvenanceTests
     [Theory]
     [InlineData("[[]]", " List<Item> Value")]
     [InlineData("[[], null]", " List<Item>? Value")]
+    [InlineData("[null]", " List<Item>? Value")]
     // `items` only constrains arrays, so `true` is outside it and only JsonElement holds both.
     [InlineData("[[], true]", " System.Text.Json.JsonElement Value")]
     public void Untyped_literal_enum_with_items_is_a_list_of_its_items(
@@ -1199,26 +1200,8 @@ public sealed class ComponentProvenanceTests
         );
     }
 
-    private static JsonDocument ImportCompileWalkContractJsonAndEmit(string spec)
-    {
-        var imported = CompilationHelper.Import(spec, "ScalarContractJson");
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var contractJson = ContractEmitter.Emit(
-            walker.Definitions.ToDictionary(),
-            walker.Enums.ToDictionary(),
-            endpoints
+    private static JsonDocument ImportCompileWalkContractJsonAndEmit(string spec) =>
+        CompilationHelper.EmitImportedThroughContractJson(
+            CompilationHelper.Import(spec, "ScalarContractJson")
         );
-        var read = JsonContractReader.Read(contractJson);
-        return JsonDocument.Parse(
-            OpenApiEmitter.Emit(
-                read.Endpoints,
-                read.Types.ToDictionary(type => type.Name),
-                read.Brands,
-                read.Enums,
-                security: null
-            )
-        );
-    }
 }
