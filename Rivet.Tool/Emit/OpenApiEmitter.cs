@@ -120,14 +120,7 @@ public sealed class OpenApiEmitter
                 .ToHashSet(StringComparer.Ordinal),
             headerComponents.Select(component => component.Name).ToHashSet(StringComparer.Ordinal)
         );
-        var schemas = BuildSchemas();
-        foreach (var schema in documentInfo.Provenance?.ComponentSchemas ?? [])
-        {
-            schemas[schema.Name] = ParseSchemaObject(
-                schema.Json,
-                $"preserved component schema '{schema.Name}'"
-            );
-        }
+        var schemas = BuildSchemas(documentInfo.Provenance?.ComponentSchemas ?? []);
         var examples = BuildComponentExamples(
             endpoints,
             documentInfo.Provenance?.ComponentExamples ?? [],
@@ -1584,13 +1577,7 @@ public sealed class OpenApiEmitter
     )
     {
         var shape = new TsType.InlineObject(
-            properties
-                .Select(property => new TsType.InlineObjectField(
-                    property.Name,
-                    property.Type,
-                    property.IsOptional
-                ))
-                .ToList()
+            properties.Select(TsType.InlineObjectField.FromProperty).ToList()
         );
         return endpoint.ControllerName
             + "\0"
@@ -2120,18 +2107,7 @@ public sealed class OpenApiEmitter
 
         foreach (var field in obj.Fields)
         {
-            var fieldSchema = MapTsTypeToJsonSchema(field.Type, context);
-            // Polymorphic-variant surface asymmetry becomes readOnly/writeOnly.
-            if (field.Surface is TsType.InlineObjectFieldSurface.ResponseOnly)
-            {
-                fieldSchema["readOnly"] = true;
-            }
-            else if (field.Surface is TsType.InlineObjectFieldSurface.RequestOnly)
-            {
-                fieldSchema["writeOnly"] = true;
-            }
-
-            properties[field.Name] = fieldSchema;
+            properties[field.Name] = BuildPropertySchema(field.ToProperty(), context);
             if (!field.Optional)
             {
                 required.Add(field.Name);
@@ -2153,49 +2129,13 @@ public sealed class OpenApiEmitter
         // OpenAPI `discriminator` is only meaningful on a oneOf of $ref'd named schemas with
         // a tag→$ref mapping — consumers reject or ignore a discriminator over inline schemas.
         // Each inline variant becomes a named component schema referenced via $ref.
-        var unionHash = InlineTypeExtractor.CanonicalHash(tu);
-        var baseName = _taggedUnionNames.GetValueOrDefault(unionHash) ?? TsType.GetNameSuffix(tu);
-
+        var baseName = TaggedUnionBaseName(tu);
         var oneOf = new JsonArray();
         var mapping = new JsonObject();
 
         foreach (var variant in tu.Variants)
         {
-            var variantSchema = MapTsTypeToJsonSchema(variant.Type, context);
-
-            string refPath;
-            if (variantSchema.Count == 1 && variantSchema["$ref"] is JsonValue existingRef)
-            {
-                // Variant is already a named schema (TypeRef/Generic/Brand) — ref it directly.
-                refPath = existingRef.GetValue<string>();
-            }
-            else if (
-                variant.Metadata?.ComponentId is { } preserved
-                && _preservedSchemaNames.Contains(preserved)
-            )
-            {
-                // The producer pinned the variant to a component it also preserved verbatim:
-                // that copy is the variant's schema, and the shape re-derived from the C# type
-                // (no member annotations, a synthesized tag enum) is only an approximation of it.
-                refPath = $"#/components/schemas/{JsonPointer.Escape(preserved)}";
-            }
-            else
-            {
-                var componentName = VariantComponentName(unionHash, baseName, variant);
-                var origin = $"variant '{variant.Tag}' of the tagged union '{baseName}'";
-                if (!_extraComponents.TryGetValue(componentName, out var claimed))
-                {
-                    _extraComponents[componentName] = (variantSchema, origin);
-                }
-                else if (!JsonNode.DeepEquals(claimed.Schema, variantSchema))
-                {
-                    // Synthesized names are unique per (union, tag), so only two pinned
-                    // componentIds can meet here.
-                    throw PinnedVariantCollision(componentName, origin, claimed.Origin);
-                }
-                refPath = $"#/components/schemas/{JsonPointer.Escape(componentName)}";
-            }
-
+            var refPath = VariantReference(tu, variant, baseName, context);
             oneOf.Add(new JsonObject { ["$ref"] = refPath });
             mapping[variant.Tag] = refPath;
         }
@@ -2209,6 +2149,133 @@ public sealed class OpenApiEmitter
                 ["mapping"] = mapping,
             },
         };
+    }
+
+    private string TaggedUnionBaseName(TsType.TaggedUnion tu) =>
+        _taggedUnionNames.GetValueOrDefault(InlineTypeExtractor.CanonicalHash(tu))
+        ?? TsType.GetNameSuffix(tu);
+
+    /// <summary>
+    /// A tagged-union base whose source schema was preserved verbatim stands as the source
+    /// wrote it, so its own schema is never built. The variants it names are source components
+    /// all the same (Jira's <c>oneOf</c> over <c>$ref</c>s), so a variant pinned to a component
+    /// id still gets that component; one with no id would be the emitter's own
+    /// <c>{Base}_{Tag}</c> invention, which the preserved schema never refs.
+    /// </summary>
+    private void BuildPinnedVariants(TsTypeDefinition definition)
+    {
+        if (definition.Type is not TsType.TaggedUnion tu)
+        {
+            return;
+        }
+
+        var baseName = TaggedUnionBaseName(tu);
+        foreach (
+            var variant in tu.Variants.Where(variant => variant.Metadata?.ComponentId is not null)
+        )
+        {
+            VariantReference(tu, variant, baseName, $"type '{definition.Name}'");
+        }
+    }
+
+    /// <summary>The $ref a variant is reached by, registering its component when it needs one.</summary>
+    private string VariantReference(
+        TsType.TaggedUnion tu,
+        TsType.TaggedUnionVariant variant,
+        string baseName,
+        string? context
+    )
+    {
+        var variantSchema = MapTsTypeToJsonSchema(variant.Type, context);
+        ApplyVariantAnnotations(variantSchema, tu.Discriminator, baseName, variant);
+
+        if (variantSchema.Count == 1 && variantSchema["$ref"] is JsonValue existingRef)
+        {
+            // Variant is already a named schema (TypeRef/Generic/Brand) — ref it directly.
+            return existingRef.GetValue<string>();
+        }
+
+        if (
+            variant.Metadata?.ComponentId is { } preserved
+            && _preservedSchemaNames.Contains(preserved)
+        )
+        {
+            // The producer pinned the variant to a component it also preserved verbatim
+            // because the C# type can't carry all of it: that copy is the variant's schema,
+            // and the shape built from the C# type is only an approximation of it.
+            return $"#/components/schemas/{JsonPointer.Escape(preserved)}";
+        }
+
+        var componentName = VariantComponentName(
+            InlineTypeExtractor.CanonicalHash(tu),
+            baseName,
+            variant
+        );
+        var origin = $"variant '{variant.Tag}' of the tagged union '{baseName}'";
+        if (!_extraComponents.TryGetValue(componentName, out var claimed))
+        {
+            _extraComponents[componentName] = (variantSchema, origin);
+        }
+        else if (!JsonNode.DeepEquals(claimed.Schema, variantSchema))
+        {
+            // Synthesized names are unique per (union, tag), so only two pinned
+            // componentIds can meet here.
+            throw PinnedVariantCollision(componentName, origin, claimed.Origin);
+        }
+        return $"#/components/schemas/{JsonPointer.Escape(componentName)}";
+    }
+
+    /// <summary>
+    /// Writes what the derived type says about the variant as a whole: its description and
+    /// type-level schema metadata, as its own component would carry them, and its tag property
+    /// as the source authored it in place of the synthesized single-value <c>enum</c>. Only an
+    /// inline variant is a schema of its own to write them on; on a reference to another
+    /// component they would describe nothing.
+    /// </summary>
+    private static void ApplyVariantAnnotations(
+        JsonObject variantSchema,
+        string discriminator,
+        string baseName,
+        TsType.TaggedUnionVariant variant
+    )
+    {
+        var authoredTag = variant.Metadata?.DiscriminatorSchema;
+        if (variant is { Description: null, ScalarMetadata: null } && authoredTag is null)
+        {
+            return;
+        }
+
+        var origin = $"variant '{variant.Tag}' of the tagged union '{baseName}'";
+        if (
+            variant.Type is not TsType.InlineObject
+            || variantSchema["properties"] is not JsonObject properties
+            || !properties.ContainsKey(discriminator)
+        )
+        {
+            throw new RivetUserException(
+                $"error: {origin} carries a description, scalarMetadata or metadata.discriminatorSchema, "
+                    + $"but it isn't an inline object with a '{discriminator}' property to put them on. "
+                    + "Give the variant an inline object type with the tag property, or move the "
+                    + "annotations to the component it refers to"
+            );
+        }
+
+        if (variant.Description is not null)
+        {
+            variantSchema["description"] = variant.Description;
+        }
+        EnrichScalarSchema(variantSchema, variant.ScalarMetadata);
+        if (authoredTag is not null)
+        {
+            properties[discriminator] =
+                SchemaEnricher.ParseJsonLiteral(
+                    authoredTag,
+                    $"the discriminator schema of {origin}"
+                ) as JsonObject
+                ?? throw new RivetUserException(
+                    $"error: the discriminator schema of {origin} must be a JSON object, got '{authoredTag}'"
+                );
+        }
     }
 
     /// <summary>
@@ -2762,11 +2829,33 @@ public sealed class OpenApiEmitter
         return name;
     }
 
-    private JsonObject BuildSchemas()
+    /// <summary>
+    /// Every component schema: a preserved verbatim copy stands at its id in place of what
+    /// the contract entry there would build, and is never built itself. Building it would
+    /// leave behind what the build invents on the way, such as <c>{Base}_{Tag}</c> variants
+    /// beside the <c>allOf</c> hierarchy or <c>oneOf</c> its source wrote; only the source
+    /// variant components it names are built (<see cref="BuildPinnedVariants"/>).
+    /// </summary>
+    private JsonObject BuildSchemas(IReadOnlyList<OpenApiRawComponentProvenance> preserved)
     {
+        var preservedById = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var schema in preserved)
+        {
+            preservedById[schema.Name] = schema.Json;
+        }
         var schemas = new JsonObject();
         foreach (var (componentId, source) in _componentSources)
         {
+            if (preservedById.ContainsKey(componentId))
+            {
+                if (source is ComponentSource.Definition(var preservedName))
+                {
+                    BuildPinnedVariants(_definitions[preservedName]);
+                }
+                schemas[componentId] = null;
+                continue;
+            }
+
             schemas[componentId] = source switch
             {
                 ComponentSource.Definition(var name) => BuildDefinitionSchema(_definitions[name]),
@@ -2778,6 +2867,12 @@ public sealed class OpenApiEmitter
                 ComponentSource.Enum(var name) => BuildEnumSchema(name),
                 _ => throw new UnreachableException($"Unknown component source {source}."),
             };
+        }
+
+        // A contract entry's slot keeps its place; the rest follow in the source's order.
+        foreach (var (name, json) in preservedById)
+        {
+            schemas[name] = ParseSchemaObject(json, $"preserved component schema '{name}'");
         }
 
         return schemas;
@@ -3070,13 +3165,10 @@ public sealed class OpenApiEmitter
 
         foreach (var prop in propertiesDefinition)
         {
-            var propSchema = MapTsTypeToJsonSchema(
-                prop.Type,
+            properties[prop.Name] = BuildPropertySchema(
+                prop,
                 typeName is null ? $"property '{prop.Name}'" : $"property '{typeName}.{prop.Name}'"
             );
-            SchemaEnricher.EnrichPropertySchema(propSchema, prop);
-            EnrichScalarSchema(propSchema, prop.ScalarMetadata);
-            properties[prop.Name] = propSchema;
 
             if (!prop.IsOptional)
             {
@@ -3103,6 +3195,15 @@ public sealed class OpenApiEmitter
 
         EnrichScalarSchema(schema, metadata);
 
+        return schema;
+    }
+
+    /// <summary>A property's schema with every annotation it carries: a record's or an inline object's.</summary>
+    private JsonObject BuildPropertySchema(TsPropertyDefinition property, string? context)
+    {
+        var schema = MapTsTypeToJsonSchema(property.Type, context);
+        SchemaEnricher.EnrichPropertySchema(schema, property);
+        EnrichScalarSchema(schema, property.ScalarMetadata);
         return schema;
     }
 

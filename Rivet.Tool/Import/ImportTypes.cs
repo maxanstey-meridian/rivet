@@ -41,15 +41,19 @@ internal sealed record GeneratedRecord(
     bool IsUnion = false,
     string? ComponentId = null,
     IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null,
-    bool HasExtensionData = false
+    bool HasExtensionData = false,
+    // On a polymorphic variant: the tag property's schema as the source authored it, when
+    // it is not the single-value enum the emitter would synthesize.
+    string? DiscriminatorSchemaJson = null
 );
 
 internal sealed record GeneratedSchemaMetadata(string Pointer, TsScalarMetadata Metadata);
 
 /// <summary>
-/// Reversal of an emitted oneOf + discriminator + mapping union: the record becomes an
-/// abstract base carrying [JsonPolymorphic(TypeDiscriminatorPropertyName = ...)] plus one
-/// [JsonDerivedType(typeof(Variant), "tag")] per mapping entry.
+/// A polymorphic base: [JsonPolymorphic(TypeDiscriminatorPropertyName = ...)] plus one
+/// [JsonDerivedType(typeof(Variant), "tag")] per variant. A oneOf + mapping union reverses to
+/// an abstract base; an allOf hierarchy member registers every concrete descendant, and
+/// itself when it is concrete (a type registered as its own variant can't be abstract).
 /// </summary>
 internal sealed record PolymorphismInfo(
     string DiscriminatorPropertyName,
@@ -85,7 +89,10 @@ internal sealed record RecordProperty(
     IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null,
     // Named scalar components referenced inside the property schema (/items,
     // /additionalProperties), whose $ref the C# element type alone cannot carry.
-    IReadOnlyList<(string Pointer, string Name)>? NestedSchemaRefs = null
+    IReadOnlyList<(string Pointer, string Name)>? NestedSchemaRefs = null,
+    // An allOf hierarchy member redeclaring a property its parent's record carries with
+    // another type or requiredness (Bitbucket's user.links): written with `new`.
+    bool HidesInherited = false
 );
 
 internal sealed record GeneratedEnumMember(

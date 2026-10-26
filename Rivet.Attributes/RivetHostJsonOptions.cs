@@ -1,5 +1,6 @@
 namespace Rivet;
 
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -12,7 +13,9 @@ using System.Text.Json.Serialization.Metadata;
 /// make it refuse a request the spec admits, would ship a spec that disagrees with the wire, so
 /// the adapters refuse them. Settings that only loosen reading (case-insensitive names, trailing
 /// commas, comments, numbers in strings) or only change formatting (indenting, escaping, depth)
-/// leave every spec-conforming exchange unchanged and are not compared.
+/// leave every spec-conforming exchange unchanged and are not compared. One reading setting is
+/// required rather than refused: a contract whose input is polymorphic needs the discriminator
+/// read wherever it is (<see cref="EnsureInput"/>).
 /// </summary>
 internal static class RivetHostJsonOptions
 {
@@ -25,6 +28,11 @@ internal static class RivetHostJsonOptions
         + "Configure<JsonOptions>)";
 
     private static readonly ConditionalWeakTable<JsonSerializerOptions, string[]> _verdicts = new();
+
+    private static readonly ConditionalWeakTable<
+        JsonSerializerOptions,
+        ConcurrentDictionary<Type, PolymorphicInput?>
+    > _inputVerdicts = new();
 
     /// <summary>
     /// The host resolves these options from <c>IOptions</c> once every <c>Configure</c> has run,
@@ -51,6 +59,157 @@ internal static class RivetHostJsonOptions
                     + "[JsonConverter], [JsonPropertyName], [JsonIgnore] and [JsonPolymorphic] are read into the spec."
             );
         }
+    }
+
+    /// <summary>
+    /// System.Text.Json recognises a polymorphic type's discriminator only as the first
+    /// property of its object. The spec can't say that (JSON objects are unordered), so a
+    /// client that follows it is refused whenever the tag comes later. .NET 9's
+    /// <c>AllowOutOfOrderMetadataProperties</c> reads it wherever it is; .NET 8 has no such
+    /// setting. A form, multipart or route-and-query input never reaches the serializer:
+    /// ASP.NET's model binding has no discriminator, so no setting helps there either.
+    /// Responses are unaffected: the serializer writes the discriminator first.
+    /// Runs after <see cref="Ensure"/>, which froze the options, and walks the resolver's
+    /// type info, so the graph is the one the host reads. One verdict per options and type.
+    /// </summary>
+    internal static void EnsureInput(
+        JsonSerializerOptions options,
+        string registration,
+        EndpointContract contract
+    )
+    {
+        if (contract.InputType is not { } inputType)
+        {
+            return;
+        }
+
+#if NET9_0_OR_GREATER
+        if (contract.InputBinding == InputBinding.Json && options.AllowOutOfOrderMetadataProperties)
+        {
+            return;
+        }
+#endif
+
+        var found = _inputVerdicts
+            .GetValue(options, static _ => new())
+            .GetOrAdd(inputType, FindPolymorphicInput, options);
+        if (found is null)
+        {
+            return;
+        }
+
+        var where =
+            found.Path.Length == 0
+                ? $"is the polymorphic type '{found.Type.FullName}'"
+                : $"reaches the polymorphic type '{found.Type.FullName}' at {found.Path}";
+        var takes =
+            $"Route '{contract.Method} {contract.Route}' takes input '{inputType.FullName}', which {where}. ";
+        if (contract.InputBinding != InputBinding.Json)
+        {
+            var source =
+                contract.InputBinding == InputBinding.Form
+                    ? "a form, not a JSON body"
+                    : "the route and query, since the body is raw bytes";
+            throw new RivetContractViolationException(
+                takes
+                    + $"ASP.NET binds it from {source}, and model binding has no '{found.Discriminator}' discriminator: "
+                    + "it builds the declared type and never a variant, so a request the spec admits can't arrive as what it names. "
+                    + "No JSON setting changes that; take an input that isn't polymorphic, or a JSON body."
+            );
+        }
+
+        var prefix =
+            takes
+            + $"System.Text.Json recognises its '{found.Discriminator}' discriminator only as the first property of the object";
+#if NET9_0_OR_GREATER
+        throw new RivetContractViolationException(
+            prefix
+                + $" unless AllowOutOfOrderMetadataProperties is on, so a request the spec admits, with '{found.Discriminator}' later, would be refused. "
+                + $"Set AllowOutOfOrderMetadataProperties = true in {registration}."
+        );
+#else
+        throw new RivetContractViolationException(
+            prefix
+                + $", and .NET 8 has no setting that changes it, so a request the spec admits, with '{found.Discriminator}' later, would be refused. "
+                + $"Run the host on .NET 9 or later and set AllowOutOfOrderMetadataProperties = true in {registration}, "
+                + "or take an input that isn't polymorphic."
+        );
+#endif
+    }
+
+    private sealed record PolymorphicInput(Type Type, string Discriminator, string Path);
+
+    private static PolymorphicInput? FindPolymorphicInput(Type root, JsonSerializerOptions options)
+    {
+        var seen = new HashSet<Type>();
+        var pending = new Queue<(Type Type, string Path)>();
+        pending.Enqueue((root, ""));
+        while (pending.TryDequeue(out var next))
+        {
+            if (!seen.Add(next.Type))
+            {
+                continue;
+            }
+
+            var info = options.GetTypeInfo(next.Type);
+            if (info.PolymorphismOptions is { } polymorphism)
+            {
+                return new(next.Type, polymorphism.TypeDiscriminatorPropertyName, next.Path);
+            }
+
+            switch (info.Kind)
+            {
+                case JsonTypeInfoKind.Object:
+                    foreach (var property in info.Properties)
+                    {
+                        pending.Enqueue(
+                            (
+                                property.PropertyType,
+                                next.Path.Length == 0
+                                    ? property.Name
+                                    : $"{next.Path}.{property.Name}"
+                            )
+                        );
+                    }
+
+                    break;
+                case JsonTypeInfoKind.Enumerable:
+                case JsonTypeInfoKind.Dictionary:
+                    foreach (var item in ItemTypes(next.Type))
+                    {
+                        pending.Enqueue((item, $"{next.Path}[]"));
+                    }
+
+                    break;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// A collection's element type, or a dictionary's key and value types, from the
+    /// <c>IEnumerable&lt;T&gt;</c> it implements. (.NET 9 exposes these on the type info,
+    /// .NET 8 doesn't.)
+    /// </summary>
+    private static Type[] ItemTypes(Type type)
+    {
+        static bool IsEnumerable(Type candidate) =>
+            candidate.IsGenericType
+            && candidate.GetGenericTypeDefinition() == typeof(IEnumerable<>);
+
+        var enumerable = IsEnumerable(type)
+            ? type
+            : type.GetInterfaces().FirstOrDefault(IsEnumerable);
+        if (enumerable is null)
+        {
+            return [];
+        }
+
+        var item = enumerable.GetGenericArguments()[0];
+        return item.IsGenericType && item.GetGenericTypeDefinition() == typeof(KeyValuePair<,>)
+            ? item.GetGenericArguments()
+            : [item];
     }
 
     private static string[] Compare(JsonSerializerOptions options)

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.50.0 — unreleased
+
+### Part 1: polymorphism done properly
+
+A polymorphic variant used to be a throwaway inline object built beside the derived type, so it lost every annotation on the way, and imported hierarchies came back as shapes their source never wrote. Variants are now the derived record itself with the tag in front, imported hierarchies keep the schemas they came with, and the settings that make the host read or write what the spec can't describe are refused.
+
+#### Breaking
+
+- CLI: `RIV1015` is an error. A `[JsonPolymorphic]` type with no `[JsonDerivedType]` used to be flattened with a warning, but System.Text.Json refuses to serialize such a type at all ("should specify at least one derived type"), on .NET 8, 9 and 10. Register a derived type or remove the attribute.
+- CLI: `RIV1016` is an error, and covers both directions. `UnknownDerivedTypeHandling = FallBackToBaseType`/`FallBackToNearestAncestor` writes an unregistered type as a base the `oneOf` doesn't admit; `IgnoreUnrecognizedTypeDiscriminators = true` reads an unknown tag as the base, which the `oneOf` rejects. An explicit `FailSerialization` is the default and is fine. The constant is now `Diagnostics.PolymorphicUnknownHandling`.
+- `Rivet.Attributes`: `.ToResult()`/`.ToActionResult()` refuse a bound contract whose input reaches a polymorphic type, with a `RivetContractViolationException` naming the route, the input, the type, the path to it and the fix. System.Text.Json reads the discriminator only as the first property, and a JSON body can't promise that. On .NET 9+ setting `AllowOutOfOrderMetadataProperties = true` on the host's JSON options lifts it; on .NET 8 nothing does. A `.FormEncoded()`, `.AcceptsFile()` or `.AcceptsBinary()` input that reaches a polymorphic type is refused on every runtime, because model binding has no discriminator at all. Responses are unaffected.
+- Contract JSON (`--from`): an inline-object field's `surface` is gone; write `readOnly`/`writeOnly`, the names a type's properties already use. The strict reader rejects `surface`.
+- Import: a discriminator on a base extended through `allOf` (Bitbucket's `object`) becomes a hierarchy of inheriting `[JsonPolymorphic]` records, each registering every concrete descendant, with the tag property stripped (System.Text.Json writes it). Members are non-sealed, a base that is its own variant is non-abstract, records with members use init-only properties, and a redeclared member is `new`. An unknown tag fails to read.
+- Import: a `oneOf` + discriminator whose sibling `required` names anything beyond the discriminator falls back to a union wrapper with `RIV3005`; it used to be reversed as if the sibling weren't there.
+
+#### Fixes
+
+- CLI: a hand-written variant's `{Base}_{Tag}` component carries everything its record says: the type's description, and on every field the description, constraints, default, example, format, `deprecated` and `readOnly`/`writeOnly`. A `[RivetHeader]` member of a derived type is left out of its variant, as it is from the record.
+- CLI: an imported variant keeps its component id and the tag schema its source wrote (Jira's `{ "type": "string", "description": … }`) instead of a synthesized `enum: [tag]`, and its type-level description.
+- CLI: a component preserved verbatim is never rebuilt, so an imported `allOf` hierarchy or `oneOf` base is emitted as its source wrote it, with no orphan `{Base}_{Tag}` components beside it.
+- Import: a `oneOf` whose sibling `properties`/`required` only restate the discriminator is reversed (Jira's last `RIV3005`), and a `oneOf` variant written as an `allOf` of a `$ref` and an object is flattened (six of Cloudflare's).
+- Import: a `$ref` to a property-less hierarchy root resolves to its record instead of a `Dictionary`.
+
+#### New
+
+- Contract JSON: inline-object fields take every property annotation, tagged-union variants take `description` and `scalarMetadata`, and `typeMetadata` takes `discriminatorSchema`.
+- `Rivet.Attributes`: `RivetGeneratedTypeAttribute.DiscriminatorSchemaJson`.
+- Corpus gate: Bitbucket is verified (22 of 25), with its 14 `RIV3024` source defects pinned.
+
 ## 0.49.0 — 2026-10-26
 
 The gap-audit release. Every place where Rivet knew it was wrong and wrote it up in the docs instead of fixing it, it now either gets right or refuses. That means a lot of former warnings now stop generation, so expect `dotnet-rivet` to fail on contracts it used to wave through. Each error names the thing and says what to do instead. It comes in three parts: wrong specs that used to ship silently, promises nothing checked, and the binding, security and corpus work that finishes the job.

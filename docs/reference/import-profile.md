@@ -1,15 +1,15 @@
 # Import profile (`--from-openapi`)
 
-> **Round-trip status (2026-10-25): 21/25 verified.** The hardened real-disk gate
-> covers 4,895 operations and 6,233 normalized component identities: 5,649
-> schemas, 73 request bodies, 345 parameters, 140 responses, and 26 security
+> **Round-trip status (2026-10-26): 22/25 verified.** The hardened real-disk gate
+> covers 5,198 operations and 6,435 normalized component identities: 5,843
+> schemas, 78 request bodies, 345 parameters, 140 responses, and 29 security
 > schemes, plus 12 header and 504 example components. All valid finding
 > categories, unsupported markers, compilation, integrity, fixed-point,
 > generated-carrier shape-class behavior, and recomputed source-to-first findings
-> are empty. What the source documents themselves get wrong (259 sites: an empty
+> are empty. What the source documents themselves get wrong (273 sites: an empty
 > parameter name, reserved headers, bodies on body-forbidden statuses, and paths
 > that repeat a template under other parameter names) is bound by hash, pointer,
-> diagnostic, and count in the profile. The four corpora still outside the gate,
+> diagnostic, and count in the profile. The three corpora still outside the gate,
 > and exactly what keeps each one out, are listed under
 > [Outside the gate](#outside-the-gate).
 > The 25 source documents are committed under `openapi/`, pinned by SHA-256 in
@@ -115,6 +115,34 @@ honest degradation, not full support.
   wire name intact. Schema names that collide case-insensitively after
   sanitization are numeric-suffixed (emitted files live on case-insensitive
   filesystems).
+- **Discriminated `oneOf`** with a `mapping` that names every variant: an
+  abstract `[JsonPolymorphic]` base with one `[JsonDerivedType]` per tag, and each
+  variant a record deriving from it, its tag property stripped because
+  System.Text.Json writes the tag itself. A variant may be a plain object or an
+  `allOf` of a `$ref`'d base and its own object (Cloudflare's rulesets); its parts
+  are flattened in, and the union base stays its only parent. A tag the source
+  wrote as something richer than a one-value enum (Jira's described
+  `{ "type": "string" }`) travels on the variant as `DiscriminatorSchemaJson`, so
+  the spec comes back as written. `properties`/`required` beside the `oneOf` are
+  fine when they only restate the discriminator; anything more is a base-plus-union
+  shape STJ can't express, and stays a `RIV3005`.
+- **`allOf` inheritance under a discriminator** (OpenAPI 3.0's style, Bitbucket's
+  `object`): a base with a `discriminator` and no `oneOf`, extended by components
+  whose `allOf` names it. The tag is the `mapping` entry, or else the component's
+  own name. Every member becomes a `[JsonPolymorphic]` record deriving from its
+  parent's record and registering every concrete descendant, so a property typed
+  `account` reads a `user`. A concrete member also registers itself and is never
+  `abstract`, and leaves are polymorphic too, which is what makes a `User` you
+  return directly still write `"type": "user"`. Children declare only what their
+  parent's record doesn't already carry, a property redeclared with another type
+  is written with `new`, and the discriminator property is stripped everywhere.
+  An unknown tag fails to deserialize: a `type` Rivet never heard of is an error,
+  not a bare base. A component whose own tag property can never hold its tag
+  (Bitbucket's `pipeline_selector` redefines `type` as a selector kind) is named
+  by no payload, so it stays a plain record outside the hierarchy. What C# can't
+  hold (several `$ref`s in one `allOf`, a required member redeclared, two schemas
+  claiming one tag) leaves the whole hierarchy a plain record with a `RIV3005`
+  naming why.
 - **Undiscriminated `oneOf`** (no discriminator — e.g. `string | integer`):
   imported as an `As*` wrapper record carrying `[RivetUnion]`. The attribute
   doubles as a `JsonConverter`: the wire value is the BARE variant, and the
@@ -229,7 +257,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3009` | `unresolved-schema` | Schema could not be resolved to a C# type → `JsonElement`. |
 | `RIV3010` | `unsupported-schema-type` | Unhandled JSON Schema `type` → `JsonElement`. |
 | `RIV3011` | `array-missing-items` | Array schema without `items` → `List<JsonElement>`. |
-| `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — dispatch semantics dropped. |
+| `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (a plain object with neither `oneOf` nor `allOf` descendants, an `allOf` hierarchy C#'s single inheritance can't hold, or a `oneOf` whose `mapping` is absent/unusable or whose siblings go beyond the discriminator) — dispatch semantics dropped. |
 | `RIV3001`, `RIV3006`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
 | `RIV3014` | `dictionary-key-dropped` | A `propertyNames` schema has no C# dictionary-key representation; keys degrade to `string`. |
 | `RIV3015` | `named-scalar-algebra-unsupported` | A named scalar component uses `const`, schema composition, or heterogeneous leaf types; its fallback mapping is retained. |
@@ -266,9 +294,8 @@ implementation inventory, not an amendment to the verified profile:
 - `callbacks` on operations and in components (`RIV3027`), and `webhooks` and
   `components.pathItems` (`RIV3028`)
 - Parameters that carry `content` instead of a `schema` (`RIV3025`)
-- Polymorphic `discriminator` dispatch *without* a usable `oneOf` mapping
-  (imports as plain records/unions, loudly); usable mappings reverse to
-  `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies
+- Polymorphic `discriminator` dispatch with neither a usable `oneOf` mapping nor
+  an `allOf` hierarchy C# can hold (imports as plain records/unions, loudly)
 - General schema algebra beyond the generated provenance model, including
   malformed/cyclic aliases, arrays without `items`, and enum/const combinations
   that cannot become a C# type; these paths
@@ -290,30 +317,27 @@ fails. Exact invalid-source classifications are pinned by corpus hash, pointer,
 diagnostic, and cardinality; they are not tolerated valid-contract findings.
 
 The retained audit independently recompiles both generated-source passes and
-recomputes source-to-first semantics for all 21 verified corpora, 4,895
-operations, and 6,233 normalized component identities with no valid findings.
+recomputes source-to-first semantics for all 22 verified corpora, 5,198
+operations, and 6,435 normalized component identities with no valid findings.
 The source documents are committed and hash-pinned, and the gate runs in every
 release's `dotnet test`; only the generated reports are gitignored.
 
 ## Outside the gate
 
-Four corpora still fail the gate, and none of them is excused. Each failure is a
+Three corpora still fail the gate, and none of them is excused. Each failure is a
 Rivet gap with a known shape, waiting on a design decision rather than a shrug:
 
-- **Bitbucket**: its `object` base carries a `discriminator` with no `oneOf`:
-  OpenAPI 3.0's allOf-inheritance style, where subtypes extend the base and the
-  tag names the subtype. The spec survives (the base is preserved verbatim), but
-  the generated C# base is a plain record, so a base-typed property neither
-  reads nor writes the subtype. One `RIV3005` says so. Everything else (14
-  bodies on 204/304 statuses) is a source defect the profile can bind.
 - **Jira**: the discriminated variants Rivet synthesizes from the C# hierarchy
   lose their member descriptions and invent a `const`-like tag `enum` the source
-  never wrote (about 450 findings), and one union declares sibling properties
-  beside its `oneOf` (`RIV3005`).
+  never wrote (about 450 findings). Its 144 bodies on 204 statuses and two paths
+  that repeat a template are source defects the profile can bind.
 - **DigitalOcean**: it has no reusable components; it reuses by `$ref` into other
   operations (`#/paths/~1v2~11-clicks/get/responses/401`), 2,797 times. The
   importer inlines those and the reference identity is gone, which is nearly all
   of its ~10,000 findings.
-- **Cloudflare**: the largest of them, and the longest list: 15 unusable
-  discriminators (`RIV3005`), 7 scalar compositions (`RIV3015`), 5 identity-only
-  fallbacks (`RIV3010`), and 25 unreviewed extension families.
+- **Cloudflare**: the largest of them, and the longest list: 9 unusable
+  discriminators (`RIV3005`: three `oneOf`s with no mapping, two mappings that
+  send several tags to one schema, two variants whose `allOf` base enum leaves out
+  their own tag, one mapping entry that resolves nowhere, one variant two unions
+  share), 7 scalar compositions (`RIV3015`), 5 identity-only fallbacks
+  (`RIV3010`), and 25 unreviewed extension families.

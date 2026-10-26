@@ -81,11 +81,25 @@ parameters follow the model binder instead: a nullable parameter is optional.
   after the base. Each registration becomes a `{Base}_{Tag}` variant component (with a numeric suffix if that name is already taken):
   the discriminator property first (default `$type`, single-value `enum`,
   required), then the derived type's full flattened property surface — matching
-  System.Text.Json's wire output when serializing *as the base type*. A derived
+  System.Text.Json's wire output when serializing *as the base type*. A variant
+  is the derived record's own schema with the tag in front: the record's
+  description, and on every field what its property would say (description,
+  constraints, default, example, format, `deprecated`, and `readOnly`/`writeOnly`
+  for a member System.Text.Json only writes or only reads). A derived
   type referenced directly keeps its own untagged schema (STJ writes no
   discriminator for it). Int or missing tags stop generation (`RIV1014`);
-  registration-less `[JsonPolymorphic]` (`RIV1015`) falls back to plain flattening, loudly;
-  `UnknownDerivedTypeHandling` has no spec representation (`RIV1016`).
+  so does a `[JsonPolymorphic]` with no registrations (`RIV1015`), which
+  System.Text.Json refuses to serialize at all, and an `UnknownDerivedTypeHandling`
+  fallback or `IgnoreUnrecognizedTypeDiscriminators` (`RIV1016`), because the host would
+  then write or read bodies the `oneOf` doesn't admit.
+
+  Imported hierarchies keep what their source said. A variant generated with a
+  `[RivetGeneratedType]` component id is emitted under that id instead of
+  `{Base}_{Tag}`, and one whose `DiscriminatorSchemaJson` records the source's tag
+  schema gets that schema back instead of the synthesized `enum`. A base whose source
+  schema was preserved verbatim (Bitbucket's `allOf` hierarchy hanging off one
+  `object` with a bare `discriminator`, say) is emitted as exactly that schema: no
+  `oneOf`, and no `{Base}_{Tag}` variants invented beside it.
 
 ## Constraint and metadata flow
 

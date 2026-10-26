@@ -98,9 +98,41 @@ normally, and constructs a contract-owned response:
   Left alone, because no exchange that follows the spec comes out different:
   indenting, the encoder, `MaxDepth`, case-insensitive or case-sensitive property
   matching, trailing commas, comments, reading numbers from strings,
-  `RespectNullableAnnotations`, `PreferredObjectCreationHandling` and
-  `UnknownTypeHandling`. ASP.NET's own defaults pass on .NET 8, 9 and 10, including
-  the source-generated context `AddProblemDetails()` adds.
+  `RespectNullableAnnotations`, `PreferredObjectCreationHandling`,
+  `UnknownTypeHandling` and `AllowOutOfOrderMetadataProperties`. ASP.NET's own
+  defaults pass on .NET 8, 9 and 10, including the source-generated context
+  `AddProblemDetails()` adds.
+
+  One reading setting is the other way round: a contract whose input is polymorphic
+  needs it. System.Text.Json only recognises a discriminator (`$type`, or whatever
+  `TypeDiscriminatorPropertyName` says) when it's the **first** property of its
+  object. The spec can't say that, because JSON objects have no order, so a client
+  that sends `{"radius": 2, "$type": "circle"}` is following the spec and gets
+  refused for it. .NET 9 added `AllowOutOfOrderMetadataProperties`, which reads the
+  discriminator wherever it turns up. So when a bound endpoint's `TInput` reaches a
+  `[JsonPolymorphic]`/`[JsonDerivedType]` type anywhere in its graph (the body itself,
+  a list of shapes, a dictionary of them three records down), the adapter throws when
+  its result runs unless the host options switch that on, naming the type, where the
+  input reaches it, and the setting:
+
+  ```csharp
+  builder.Services.ConfigureHttpJsonOptions(o =>
+      o.SerializerOptions.AllowOutOfOrderMetadataProperties = true);   // .ToResult()
+  builder.Services.AddControllers().AddJsonOptions(o =>
+      o.JsonSerializerOptions.AllowOutOfOrderMetadataProperties = true); // .ToActionResult()
+  ```
+
+  On .NET 8 there's no such setting, so the refusal there is unconditional: move the
+  host to .NET 9 or later, or give the endpoint an input that isn't polymorphic.
+  The same goes, on every runtime, for an input that never meets the serializer at
+  all: a `.FormEncoded()` or `.AcceptsFile()` form, or the route and query of an
+  `.AcceptsBinary()` endpoint. ASP.NET's model binding has no discriminator. It
+  builds the declared type and never a variant, so no JSON setting can help, and the
+  adapter says so.
+  Responses don't care either way, since the serializer writes the discriminator
+  first. A `[JsonPolymorphic]` type with no `[JsonDerivedType]` at all never gets this
+  far: System.Text.Json won't read or write it on any runtime, so generation refuses
+  it (`RIV1015`).
 
   Want snake_case, or enums as strings everywhere? Say it on the types:
   `[JsonPropertyName]`, `[JsonIgnore]`, `[JsonConverter(typeof(RivetCamelCaseEnumConverter<T>))]`

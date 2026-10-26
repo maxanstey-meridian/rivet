@@ -726,6 +726,16 @@ internal static class SchemaClassifier
         "examples",
     ];
 
+    /// <summary>A schema's terse OpenAPI 3.1 JSON, <c>$ref</c>s kept as references.</summary>
+    internal static string SerializeAsV31(IOpenApiSchema schema)
+    {
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        schema.SerializeAsV31(
+            new OpenApiJsonWriter(writer, new OpenApiJsonWriterSettings { Terse = true })
+        );
+        return writer.ToString();
+    }
+
     /// <summary>
     /// Identity of an inline schema for synthetic-type reuse: its OpenAPI 3.1 serialisation
     /// (<c>$ref</c>s kept as references), canonicalised so that key order and
@@ -734,11 +744,7 @@ internal static class SchemaClassifier
     /// </summary>
     internal static string ComputeSchemaFingerprint(IOpenApiSchema schema)
     {
-        using var writer = new StringWriter(CultureInfo.InvariantCulture);
-        schema.SerializeAsV31(
-            new OpenApiJsonWriter(writer, new OpenApiJsonWriterSettings { Terse = true })
-        );
-        return Canonical(JsonNode.Parse(writer.ToString()), null)?.ToJsonString() ?? "null";
+        return Canonical(JsonNode.Parse(SerializeAsV31(schema)), null)?.ToJsonString() ?? "null";
 
         static JsonNode? Canonical(JsonNode? node, string? key) =>
             node switch

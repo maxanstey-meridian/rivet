@@ -821,8 +821,8 @@ public sealed class TypeWalker
 
         // A [JsonPolymorphic]/[JsonDerivedType] base type registers as a
         // TaggedUnion alias definition (oneOf + discriminator + mapping) instead of
-        // silently flattening to its own property surface. Non-string tags are
-        // refused (RIV1014); zero registrations fall through to flattening (RIV1015).
+        // silently flattening to its own property surface. Non-string tags (RIV1014)
+        // and zero registrations (RIV1015) are refused.
         // Generic polymorphic bases keep the flattening path — a generic alias has
         // no monomorphisation template the emitter could instantiate.
         if (!definition.IsGenericType && TryBuildPolymorphicUnion(definition, name) is { } union)
@@ -856,211 +856,15 @@ public sealed class TypeWalker
 
         var properties = new List<TsPropertyDefinition>();
 
-        // Include inherited members by flattening the BaseType chain. The shared
-        // per-type component schema represents accessibility-derived asymmetry via
-        // readOnly/writeOnly;
-        // explicit [RivetReadOnly]/[RivetWriteOnly] take precedence over the derived
-        // marker below.
+        // Include inherited members by flattening the BaseType chain.
         foreach (var member in GetEffectiveProperties(definition))
         {
-            var memberSurface = member switch
-            {
-                IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol, definition),
-                IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
-                _ => JsonPropertySurface.Excluded,
-            };
-            if (memberSurface == JsonPropertySurface.Excluded)
-            {
-                continue;
-            }
-
-            if (IsJsonIgnored(member))
-            {
-                continue;
-            }
-
-            // [RivetHeader] properties are request header params, never part
-            // of a JSON schema — ContractWalker/EndpointWalker surface them as
-            // ParamSource.Header params instead.
-            if (member is IPropertySymbol headerCheck && GetHeaderName(headerCheck) is not null)
-            {
-                continue;
-            }
-
-            // [JsonPropertyName("x")] → use "x" instead of camelCase(Name)
-            var jsonPropertyName = GetJsonMemberName(member);
-
-            var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
-            var tsType = MapTypeCore(GetMemberType(member), $"{name}.{member.Name}");
-            var isOptional = CanOmitOnWire(member);
-            var isDeprecated = member.HasAttribute(_types.Obsolete);
-
-            // Read metadata attributes
-            string? format = null;
-            var isFormatSpecified = false;
-            string? schemaType = null;
-            string? schemaRef = null;
-            var nestedSchemaRefs = new List<(string Pointer, string Name)>();
-            string? defaultValue = null;
-            string? description = null;
-            string? example = null;
-            var isReadOnly = false;
-            var isWriteOnly = false;
-            var attributes = GetWireMemberAttributes(member, definition);
-            var constraints = ReadConstraints(
-                attributes,
-                tsType is TsType.Array or TsType.Nullable { Inner: TsType.Array }
-            );
-            var daFormat = ReadDataAnnotationFormat(attributes);
-            foreach (var attr in attributes)
-            {
-                if (attr.Is(_types.RivetFormat))
-                {
-                    isFormatSpecified = true;
-                    format =
-                        attr.ConstructorArguments.Length > 0
-                        && attr.ConstructorArguments[0].Value is string fmt
-                            ? fmt
-                            : null;
-                }
-                else if (
-                    attr.Is(_types.RivetSchemaType)
-                    && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string primitiveType
-                )
-                {
-                    schemaType = primitiveType;
-                }
-                else if (
-                    attr.Is(_types.RivetSchemaRef)
-                    && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string refName
-                )
-                {
-                    var refPointer =
-                        attr.ConstructorArguments.Length > 1
-                            ? attr.ConstructorArguments[1].Value as string ?? ""
-                            : "";
-                    if (refPointer.Length == 0)
-                    {
-                        schemaRef = refName;
-                    }
-                    else
-                    {
-                        nestedSchemaRefs.Add((refPointer, refName));
-                    }
-                }
-                else if (
-                    attr.Is(_types.RivetDefault)
-                    && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string def
-                )
-                {
-                    defaultValue = def;
-                }
-                else if (
-                    attr.Is(_types.RivetDescription)
-                    && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string desc
-                )
-                {
-                    description = desc;
-                }
-                else if (
-                    attr.Is(_types.RivetExample)
-                    && attr.ConstructorArguments.Length > 0
-                    && attr.ConstructorArguments[0].Value is string ex
-                )
-                {
-                    example = ex;
-                }
-                else if (attr.Is(_types.RivetReadOnly))
-                {
-                    isReadOnly = true;
-                }
-                else if (attr.Is(_types.RivetWriteOnly))
-                {
-                    isWriteOnly = true;
-                }
-            }
-
-            // Accessibility-derived asymmetry becomes readOnly/writeOnly on the shared
-            // component schema;
-            // explicit [RivetReadOnly]/[RivetWriteOnly] attributes take precedence
-            // (their assignment above wins because the derived marker only fills false).
-            if (!isReadOnly && memberSurface == JsonPropertySurface.ResponseOnly)
-            {
-                isReadOnly = true;
-            }
-            else if (!isWriteOnly && memberSurface == JsonPropertySurface.RequestOnly)
-            {
-                isWriteOnly = true;
-            }
-
-            // DA format is a fallback — explicit [RivetFormat] takes precedence.
-            if (!isFormatSpecified)
-            {
-                format = daFormat;
-            }
-
-            // An explicit [RivetFormat] (even an empty one) replaces the inferred format;
-            // a DataAnnotations format only fills a leaf that has none.
-            tsType = tsType.WithLeaf(schemaType, isFormatSpecified ? format ?? "" : null);
             if (
-                !isFormatSpecified
-                && format is not null
-                && tsType
-                    is TsType.Primitive { Format: null }
-                        or TsType.Nullable { Inner: TsType.Primitive { Format: null } }
+                BuildPropertyDefinition(member, definition, $"{name}.{member.Name}") is { } property
             )
             {
-                tsType = tsType.WithLeaf(null, format);
+                properties.Add(property);
             }
-
-            RefuseUnmodelledMemberSerialization(
-                member,
-                definition,
-                tsType,
-                $"{name}.{member.Name}"
-            );
-
-            if (schemaRef is not null)
-            {
-                tsType = ApplyGeneratedSchemaRef(
-                    tsType,
-                    schemaRef,
-                    $"Property '{name}.{member.Name}'"
-                );
-            }
-            foreach (var (refPointer, refName) in nestedSchemaRefs)
-            {
-                tsType = ApplyGeneratedSchemaRefAt(
-                    tsType,
-                    refPointer,
-                    refName,
-                    $"Property '{name}.{member.Name}' at '{refPointer}'"
-                );
-            }
-
-            var generatedSchemaMetadata = ReadGeneratedSchemaMetadata(member);
-            tsType = ApplyGeneratedSchemaMetadata(tsType, "", generatedSchemaMetadata);
-
-            properties.Add(
-                new TsPropertyDefinition(
-                    tsName,
-                    tsType,
-                    isOptional,
-                    isDeprecated,
-                    format,
-                    defaultValue,
-                    constraints,
-                    description,
-                    example,
-                    isReadOnly,
-                    isWriteOnly,
-                    generatedSchemaMetadata.GetValueOrDefault("")
-                )
-            );
         }
 
         // Read type-level [RivetDescription] attribute
@@ -1074,6 +878,207 @@ public sealed class TypeWalker
             typeDescription,
             GetTypeMetadata(definition),
             ReadGeneratedSchemaMetadata(definition).GetValueOrDefault("")
+        );
+    }
+
+    /// <summary>
+    /// The wire property <paramref name="member"/> contributes to <paramref name="owner"/>'s
+    /// schema, with every annotation a record property carries; null when System.Text.Json
+    /// neither writes nor reads it, or it binds a header. Records and polymorphic variants
+    /// both describe their members through it, so a variant says what its record would.
+    /// </summary>
+    private TsPropertyDefinition? BuildPropertyDefinition(
+        ISymbol member,
+        INamedTypeSymbol owner,
+        string context
+    )
+    {
+        var memberSurface = member switch
+        {
+            IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol, owner),
+            IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
+            _ => JsonPropertySurface.Excluded,
+        };
+        if (memberSurface == JsonPropertySurface.Excluded)
+        {
+            return null;
+        }
+
+        if (IsJsonIgnored(member))
+        {
+            return null;
+        }
+
+        // [RivetHeader] properties are request header params, never part
+        // of a JSON schema — ContractWalker/EndpointWalker surface them as
+        // ParamSource.Header params instead.
+        if (member is IPropertySymbol headerCheck && GetHeaderName(headerCheck) is not null)
+        {
+            return null;
+        }
+
+        // [JsonPropertyName("x")] → use "x" instead of camelCase(Name)
+        var jsonPropertyName = GetJsonMemberName(member);
+
+        var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
+        var tsType = MapTypeCore(GetMemberType(member), context);
+        var isOptional = CanOmitOnWire(member);
+        var isDeprecated = member.HasAttribute(_types.Obsolete);
+
+        // Read metadata attributes
+        string? format = null;
+        var isFormatSpecified = false;
+        string? schemaType = null;
+        string? schemaRef = null;
+        var nestedSchemaRefs = new List<(string Pointer, string Name)>();
+        string? defaultValue = null;
+        string? description = null;
+        string? example = null;
+        var isReadOnly = false;
+        var isWriteOnly = false;
+        var attributes = GetWireMemberAttributes(member, owner);
+        var constraints = ReadConstraints(
+            attributes,
+            tsType is TsType.Array or TsType.Nullable { Inner: TsType.Array }
+        );
+        var daFormat = ReadDataAnnotationFormat(attributes);
+        foreach (var attr in attributes)
+        {
+            if (attr.Is(_types.RivetFormat))
+            {
+                isFormatSpecified = true;
+                format =
+                    attr.ConstructorArguments.Length > 0
+                    && attr.ConstructorArguments[0].Value is string fmt
+                        ? fmt
+                        : null;
+            }
+            else if (
+                attr.Is(_types.RivetSchemaType)
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is string primitiveType
+            )
+            {
+                schemaType = primitiveType;
+            }
+            else if (
+                attr.Is(_types.RivetSchemaRef)
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is string refName
+            )
+            {
+                var refPointer =
+                    attr.ConstructorArguments.Length > 1
+                        ? attr.ConstructorArguments[1].Value as string ?? ""
+                        : "";
+                if (refPointer.Length == 0)
+                {
+                    schemaRef = refName;
+                }
+                else
+                {
+                    nestedSchemaRefs.Add((refPointer, refName));
+                }
+            }
+            else if (
+                attr.Is(_types.RivetDefault)
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is string def
+            )
+            {
+                defaultValue = def;
+            }
+            else if (
+                attr.Is(_types.RivetDescription)
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is string desc
+            )
+            {
+                description = desc;
+            }
+            else if (
+                attr.Is(_types.RivetExample)
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is string ex
+            )
+            {
+                example = ex;
+            }
+            else if (attr.Is(_types.RivetReadOnly))
+            {
+                isReadOnly = true;
+            }
+            else if (attr.Is(_types.RivetWriteOnly))
+            {
+                isWriteOnly = true;
+            }
+        }
+
+        // Accessibility-derived asymmetry becomes readOnly/writeOnly on the shared
+        // component schema;
+        // explicit [RivetReadOnly]/[RivetWriteOnly] attributes take precedence
+        // (their assignment above wins because the derived marker only fills false).
+        if (!isReadOnly && memberSurface == JsonPropertySurface.ResponseOnly)
+        {
+            isReadOnly = true;
+        }
+        else if (!isWriteOnly && memberSurface == JsonPropertySurface.RequestOnly)
+        {
+            isWriteOnly = true;
+        }
+
+        // DA format is a fallback — explicit [RivetFormat] takes precedence.
+        if (!isFormatSpecified)
+        {
+            format = daFormat;
+        }
+
+        // An explicit [RivetFormat] (even an empty one) replaces the inferred format;
+        // a DataAnnotations format only fills a leaf that has none.
+        tsType = tsType.WithLeaf(schemaType, isFormatSpecified ? format ?? "" : null);
+        if (
+            !isFormatSpecified
+            && format is not null
+            && tsType
+                is TsType.Primitive { Format: null }
+                    or TsType.Nullable { Inner: TsType.Primitive { Format: null } }
+        )
+        {
+            tsType = tsType.WithLeaf(null, format);
+        }
+
+        RefuseUnmodelledMemberSerialization(member, owner, tsType, context);
+
+        if (schemaRef is not null)
+        {
+            tsType = ApplyGeneratedSchemaRef(tsType, schemaRef, $"Property '{context}'");
+        }
+        foreach (var (refPointer, refName) in nestedSchemaRefs)
+        {
+            tsType = ApplyGeneratedSchemaRefAt(
+                tsType,
+                refPointer,
+                refName,
+                $"Property '{context}' at '{refPointer}'"
+            );
+        }
+
+        var generatedSchemaMetadata = ReadGeneratedSchemaMetadata(member);
+        tsType = ApplyGeneratedSchemaMetadata(tsType, "", generatedSchemaMetadata);
+
+        return new TsPropertyDefinition(
+            tsName,
+            tsType,
+            isOptional,
+            isDeprecated,
+            format,
+            defaultValue,
+            constraints,
+            description,
+            example,
+            isReadOnly,
+            isWriteOnly,
+            generatedSchemaMetadata.GetValueOrDefault("")
         );
     }
 
@@ -1093,7 +1098,11 @@ public sealed class TypeWalker
             Convert.ToInt32(attribute.ConstructorArguments[1].Value) == 0
                 ? TsTypeProvenance.Component
                 : TsTypeProvenance.Synthetic;
-        return new TsTypeMetadata(componentId, provenance);
+        return new TsTypeMetadata(
+            componentId,
+            provenance,
+            attribute.NamedArgument("DiscriminatorSchemaJson") as string
+        );
     }
 
     private Dictionary<string, TsScalarMetadata> ReadGeneratedSchemaMetadata(ISymbol symbol)
@@ -1255,9 +1264,10 @@ public sealed class TypeWalker
     /// discriminator property (default <c>$type</c>) is written first with the
     /// registration's tag, followed by the derived type's full flattened property
     /// surface. The base itself is a variant only if explicitly registered. Returns
-    /// null when the symbol carries neither attribute, or when there are zero
-    /// registrations (RIV1015) — callers then fall back to the plain flattening path.
-    /// A registration with an int or missing tag is refused (RIV1014).
+    /// null when the symbol carries neither attribute, and callers then take the plain
+    /// flattening path. [JsonPolymorphic] with no registrations is refused (RIV1015), as
+    /// are a registration with an int or missing tag (RIV1014) and an
+    /// UnknownDerivedTypeHandling fallback (RIV1016).
     /// </summary>
     private TsType.TaggedUnion? TryBuildPolymorphicUnion(INamedTypeSymbol definition, string name)
     {
@@ -1280,26 +1290,44 @@ public sealed class TypeWalker
             return null;
         }
 
-        if (
-            polymorphicAttr is not null
-            && polymorphicAttr.NamedArguments.Any(a => a.Key == "UnknownDerivedTypeHandling")
-        )
+        // FailSerialization (0) is STJ's default and what the oneOf describes; a fallback
+        // writes an unregistered derived type as its base or nearest registered ancestor,
+        // a payload the oneOf, admitting only the registered types, rejects.
+        if (polymorphicAttr?.NamedArgument("UnknownDerivedTypeHandling") is int handling and not 0)
         {
-            Diagnostics.Warn(
-                Diagnostics.PolymorphicUnknownHandlingDropped,
-                $"[JsonPolymorphic] UnknownDerivedTypeHandling on '{name}' has no spec representation — "
-                    + "the emitted oneOf admits only the registered derived types"
+            throw new RivetUserException(
+                $"error {Diagnostics.PolymorphicUnknownHandling}: [JsonPolymorphic] on '{name}' sets "
+                    + "UnknownDerivedTypeHandling to a fallback, so the host writes a derived type it never "
+                    + "registered as its base or nearest registered ancestor, and the spec's oneOf, which "
+                    + "admits only the registered [JsonDerivedType]s, can't describe that payload. Remove the "
+                    + "setting so an unregistered type fails to serialize, and register every type the API "
+                    + "sends with [JsonDerivedType]."
             );
         }
 
+        // Ignoring unrecognized discriminators reads an unknown tag as the base itself, a
+        // payload the oneOf, admitting only the registered tags, rejects.
+        if (polymorphicAttr?.NamedArgument("IgnoreUnrecognizedTypeDiscriminators") is true)
+        {
+            throw new RivetUserException(
+                $"error {Diagnostics.PolymorphicUnknownHandling}: [JsonPolymorphic] on '{name}' sets "
+                    + "IgnoreUnrecognizedTypeDiscriminators, so the host reads a body with a tag it never "
+                    + "registered as the base type, and the spec's oneOf, which admits only the registered "
+                    + "tags, rejects that body. Remove the setting so an unknown tag fails to read, and "
+                    + "register every type the API accepts with [JsonDerivedType]."
+            );
+        }
+
+        // System.Text.Json refuses the type outright once options are frozen ("should
+        // specify at least one derived type"), so no host can serve it.
         if (derivedAttrs.Count == 0)
         {
-            Diagnostics.Warn(
-                Diagnostics.PolymorphicNoDerivedTypes,
-                $"[JsonPolymorphic] on '{name}' has no [JsonDerivedType] registrations — "
-                    + "there is no variant set to emit; falling back to plain property flattening"
+            throw new RivetUserException(
+                $"error {Diagnostics.PolymorphicNoDerivedTypes}: [JsonPolymorphic] on '{name}' has no "
+                    + "[JsonDerivedType] registrations, and System.Text.Json refuses to serialize such a "
+                    + "type at all. Register each derived type with "
+                    + "[JsonDerivedType(typeof(Derived), \"tag\")], or remove [JsonPolymorphic]."
             );
-            return null;
         }
 
         var discriminator = "$type";
@@ -1350,66 +1378,33 @@ public sealed class TypeWalker
             RefuseUnmodelledTypeConverter(derivedType);
             RefuseAmbiguousJsonConstructor(derivedType);
 
-            // Synthesized discriminator property first — a single-member StringUnion,
-            // required (non-Nullable), mirroring the TS lowerer's variant shape —
-            // then the derived type's full flattened property surface.
+            // The discriminator property first: a required single-member StringUnion (the
+            // emitter writes the authored tag schema instead when the variant's metadata
+            // carries one). Then the derived type's members, each described exactly as its
+            // own record describes it; a member STJ only reads or only writes stays in the
+            // shared variant shape as writeOnly or readOnly.
             var fields = new List<TsType.InlineObjectField>
             {
                 new(discriminator, new TsType.StringUnion([tag])),
             };
-
             foreach (var member in GetEffectiveProperties(derivedType))
             {
-                if (IsJsonIgnored(member))
+                if (
+                    BuildPropertyDefinition(member, derivedType, $"{name}.{tag}.{member.Name}") is
+                    { } property
+                )
                 {
-                    continue;
+                    fields.Add(TsType.InlineObjectField.FromProperty(property));
                 }
-
-                // Variants are the shared wire shape for both directions: keep every
-                // non-Excluded member and represent RequestOnly/ResponseOnly
-                // asymmetry via the field surface marker (emitted as
-                // writeOnly/readOnly), never Both-only filtering.
-                var memberSurface = member switch
-                {
-                    IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol, derivedType),
-                    IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
-                    _ => JsonPropertySurface.Excluded,
-                };
-                if (memberSurface == JsonPropertySurface.Excluded)
-                {
-                    continue;
-                }
-
-                var fieldName = GetJsonMemberName(member) ?? Naming.ToCamelCase(member.Name);
-                var fieldContext = $"{name}.{tag}.{member.Name}";
-                var fieldType = MapTypeCore(GetMemberType(member), fieldContext)
-                    .WithLeaf(member.GetAttribute(_types.RivetSchemaType).StringArgument(), null);
-                RefuseUnmodelledMemberSerialization(member, derivedType, fieldType, fieldContext);
-
-                fields.Add(
-                    new TsType.InlineObjectField(
-                        fieldName,
-                        fieldType,
-                        CanOmitOnWire(member),
-                        memberSurface switch
-                        {
-                            JsonPropertySurface.RequestOnly => TsType
-                                .InlineObjectFieldSurface
-                                .RequestOnly,
-                            JsonPropertySurface.ResponseOnly => TsType
-                                .InlineObjectFieldSurface
-                                .ResponseOnly,
-                            _ => TsType.InlineObjectFieldSurface.Both,
-                        }
-                    )
-                );
             }
 
             variants.Add(
                 new TsType.TaggedUnionVariant(
                     tag,
                     new TsType.InlineObject(fields),
-                    GetTypeMetadata(derivedType)
+                    GetTypeMetadata(derivedType),
+                    GetTypeDescription(derivedType),
+                    ReadGeneratedSchemaMetadata(derivedType).GetValueOrDefault("")
                 )
             );
         }

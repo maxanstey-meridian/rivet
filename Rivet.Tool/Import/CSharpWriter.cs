@@ -353,7 +353,12 @@ internal static class CSharpWriter
         {
             EmitGeneratedSchemaMetadata(sb, metadata, "", "");
         }
-        sb.AppendLine(GeneratedTypeAttribute(record.ComponentId));
+        sb.AppendLine(
+            GeneratedTypeAttribute(
+                record.ComponentId,
+                discriminatorSchemaJson: record.DiscriminatorSchemaJson
+            )
+        );
         // Derived polymorphic records are not [RivetType] entry points — the walker
         // reaches them through the base's [JsonDerivedType] registrations; attributing
         // them would emit a second, untagged component alongside the union variant.
@@ -364,7 +369,16 @@ internal static class CSharpWriter
         var typeParamSuffix = record.TypeParameters is { Count: > 0 }
             ? $"<{string.Join(", ", record.TypeParameters)}>"
             : "";
-        var modifier = record.Polymorphism is not null ? "abstract" : "sealed";
+        // System.Text.Json refuses a sealed polymorphic type and can't create an abstract
+        // one, so a base registered as its own variant is neither.
+        var declaration = record.Polymorphism switch
+        {
+            null => "sealed record",
+            { } polymorphism
+                when polymorphism.Variants.Any(variant => variant.TypeName == record.Name) =>
+                "record",
+            _ => "abstract record",
+        };
 
         // The positional-record gotcha (docs/guides/runtime-validation.md): under an
         // [ApiController] host, MVC model validation throws InvalidOperationException at
@@ -373,14 +387,19 @@ internal static class CSharpWriter
         // land. Records carrying any ValidationAttribute are therefore emitted in the
         // non-positional required/init form, where the single property-level placement
         // is visible to MVC, Validator.TryValidateObject, and the Rivet walker alike.
+        //
+        // A polymorphic base with members is written the same way: its descendants inherit
+        // those members, which a positional base would make every one of them forward
+        // through its constructor, and a redeclared (`new`) member has no positional form.
         if (
             CarriesValidationAttribute(record)
             || HasRequiredNullableProperty(record)
             || HasOptionalNonNullableProperty(record)
+            || record.Polymorphism is not null && record.Properties.Count > 0
         )
         {
             var baseSuffix = record.BaseTypeName is null ? "" : $" : {record.BaseTypeName}";
-            sb.AppendLine($"public {modifier} record {record.Name}{typeParamSuffix}{baseSuffix}");
+            sb.AppendLine($"public {declaration} {record.Name}{typeParamSuffix}{baseSuffix}");
             sb.AppendLine("{");
             for (var i = 0; i < record.Properties.Count; i++)
             {
@@ -391,12 +410,13 @@ internal static class CSharpWriter
                 var prop = record.Properties[i];
                 EmitPropertyAttributes(sb, prop, target: "");
                 var requiredKeyword = prop.IsRequired ? "required " : "";
+                var newKeyword = prop.HidesInherited ? "new " : "";
                 // Optional non-nullable properties need a suppressed default — there is
                 // no constructor parameter to satisfy the nullable analysis anymore.
                 var initializer =
                     !prop.IsRequired && !prop.CSharpType.EndsWith('?') ? " = default!;" : "";
                 sb.AppendLine(
-                    $"    public {requiredKeyword}{prop.CSharpType} {prop.Name} {{ get; init; }}{initializer}"
+                    $"    public {newKeyword}{requiredKeyword}{prop.CSharpType} {prop.Name} {{ get; init; }}{initializer}"
                 );
             }
             if (record.HasExtensionData)
@@ -416,7 +436,7 @@ internal static class CSharpWriter
         {
             closeSuffix += ";";
         }
-        sb.Append($"public {modifier} record {record.Name}{typeParamSuffix}(");
+        sb.Append($"public {declaration} {record.Name}{typeParamSuffix}(");
 
         if (record.Properties.Count == 0)
         {
@@ -703,11 +723,18 @@ internal static class CSharpWriter
     }
 
     /// <summary>A type with no component id was synthesised by the importer.</summary>
-    private static string GeneratedTypeAttribute(string? componentId, string prefix = "")
+    private static string GeneratedTypeAttribute(
+        string? componentId,
+        string prefix = "",
+        string? discriminatorSchemaJson = null
+    )
     {
         var id = componentId is null ? "null" : StringLiteral(componentId);
         var provenance = componentId is null ? "Synthetic" : "Component";
-        return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance})]";
+        var tagSchema = discriminatorSchemaJson is null
+            ? ""
+            : $", DiscriminatorSchemaJson = {StringLiteral(discriminatorSchemaJson)}";
+        return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance}{tagSchema})]";
     }
 
     public static string WriteContract(GeneratedContract contract, string ns)

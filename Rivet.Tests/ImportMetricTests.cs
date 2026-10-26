@@ -318,20 +318,23 @@ public sealed class ImportMetricTests
         Assert.False(hasHyphens, "Type filenames should not contain hyphens");
 
         // P2 wave 4: oneOf + discriminator + usable mapping now reverses to a
-        // [JsonPolymorphic] hierarchy (4 bases at last audit — must not shrink),
-        // and unusable mappings drop loudly with a reason (RIV3005) instead of
-        // silently. Ratchet (count may only go DOWN): 15 drops at last audit.
+        // [JsonPolymorphic] hierarchy, and unusable mappings drop loudly with a reason
+        // (RIV3005) instead of silently. 0.50.0 flattens allOf variants (a $ref'd base plus
+        // an object): 10 bases at last audit — must not shrink. Ratchet (count may only go
+        // DOWN): 9 drops at last audit — 3 missing mappings, 2 mappings that name one schema
+        // twice, 2 allOf variants whose base enum excludes their tag, 1 unresolvable mapping
+        // entry, 1 variant shared by two unions.
         var polymorphicBases = CountPattern(r, "Types/", "[JsonPolymorphic(");
         Assert.True(
-            polymorphicBases >= 4,
-            $"Expected ≥4 polymorphic bases, got {polymorphicBases}"
+            polymorphicBases >= 10,
+            $"Expected ≥10 polymorphic bases, got {polymorphicBases}"
         );
         var discriminatorDrops = r.Warnings.Count(w =>
             DiagnosticId(w) == Diagnostics.ImportDiscriminatorDropped
         );
         Assert.True(
-            discriminatorDrops <= 15,
-            $"Expected ≤15 discriminator-dropped warnings (ratchet, was 15), got {discriminatorDrops}"
+            discriminatorDrops <= 9,
+            $"Expected ≤9 discriminator-dropped warnings (ratchet, was 9), got {discriminatorDrops}"
         );
     }
 
@@ -400,21 +403,17 @@ public sealed class ImportMetricTests
             $"Expected ≤5 body caveats (ratchet), got {BodyCaveats(r)}"
         );
 
-        // P2 wave 4: Jira's CustomFieldContextDefaultValue + WorkflowCondition unions
-        // carry complete discriminator mappings — now reversed to [JsonPolymorphic]
-        // hierarchies (2 bases at last audit — must not shrink). CustomContextVariable
-        // declares sibling properties alongside its oneOf and falls back loudly.
+        // Jira's three unions carry complete discriminator mappings and reverse to
+        // [JsonPolymorphic] hierarchies; CustomContextVariable's sibling `type` only
+        // restates the discriminator, which no longer blocks it.
         var polymorphicBases = CountPattern(r, "Types/", "[JsonPolymorphic(");
         Assert.True(
-            polymorphicBases >= 2,
-            $"Expected ≥2 polymorphic bases, got {polymorphicBases}"
+            polymorphicBases >= 3,
+            $"Expected ≥3 polymorphic bases, got {polymorphicBases}"
         );
-        var discriminatorDrops = r.Warnings.Count(w =>
-            DiagnosticId(w) == Diagnostics.ImportDiscriminatorDropped
-        );
-        Assert.True(
-            discriminatorDrops <= 1,
-            $"Expected ≤1 discriminator-dropped warning (ratchet, was 1), got {discriminatorDrops}"
+        Assert.DoesNotContain(
+            r.Warnings,
+            w => DiagnosticId(w) == Diagnostics.ImportDiscriminatorDropped
         );
     }
 

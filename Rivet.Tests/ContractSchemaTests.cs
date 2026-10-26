@@ -1140,12 +1140,31 @@ public sealed class ContractSchemaTests
                     "f",
                     new TsType.Primitive("string"),
                     Optional: true,
-                    Surface: TsType.InlineObjectFieldSurface.RequestOnly
+                    IsDeprecated: true,
+                    Format: "f",
+                    DefaultValue: "\"x\"",
+                    Constraints: new TsPropertyConstraints(MinLength: 1),
+                    Description: "d",
+                    Example: "\"x\"",
+                    IsReadOnly: true,
+                    IsWriteOnly: true,
+                    ScalarMetadata: scalar
                 ),
             ]),
             new TsType.TaggedUnion(
                 "kind",
-                [new TsType.TaggedUnionVariant("a", new TsType.TypeRef("Thing"), component)]
+                [
+                    new TsType.TaggedUnionVariant(
+                        "a",
+                        new TsType.TypeRef("Thing"),
+                        component with
+                        {
+                            DiscriminatorSchema = "{\"type\":\"string\"}",
+                        },
+                        "d",
+                        scalar
+                    ),
+                ]
             ),
         ]);
         var definitions = new Dictionary<string, TsTypeDefinition>

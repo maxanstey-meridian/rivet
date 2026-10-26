@@ -282,6 +282,116 @@ public sealed class GeneratedCarrierFidelityTests
         Assert.Equal("Show", track.GetProperty("show").GetString());
     }
 
+    [Fact]
+    public void Bitbucket_allOf_hierarchy_discriminator_dispatches_every_descendant_at_runtime()
+    {
+        // Bitbucket's `object`: a discriminator with no oneOf, descendants by allOf, each
+        // named by its component name. Every member reads and writes its tag, whichever type
+        // the caller declares, and a tag nobody registered fails rather than arriving as a
+        // bare base.
+        var generated = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
+            """
+            "object": {
+                "type": "object",
+                "additionalProperties": true,
+                "discriminator": { "propertyName": "type" },
+                "properties": { "type": { "type": "string" } },
+                "required": ["type"]
+            },
+            "account": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/object" },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "links": { "$ref": "#/components/schemas/account_links" },
+                            "display_name": { "type": "string" }
+                        }
+                    }
+                ]
+            },
+            "user": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/account" },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "links": { "$ref": "#/components/schemas/user_links" },
+                            "nickname": { "type": "string" }
+                        }
+                    }
+                ]
+            },
+            "account_links": {
+                "type": "object",
+                "properties": { "avatar": { "type": "string" } }
+            },
+            "user_links": {
+                "type": "object",
+                "properties": { "html": { "type": "string" } }
+            },
+            "Envelope": {
+                "type": "object",
+                "properties": { "owner": { "$ref": "#/components/schemas/object" } },
+                "required": ["owner"]
+            }
+            """,
+            "Envelope"
+        );
+        var envelopeType = generated.RequestType;
+        var userType = envelopeType.Assembly.GetType("Generated.User")!;
+        var accountType = envelopeType.Assembly.GetType("Generated.Account")!;
+
+        var envelope = JsonSerializer.Deserialize(
+            """{"owner":{"type":"user","display_name":"Ada","nickname":"ada","links":{"html":"h"},"extra":1}}""",
+            envelopeType,
+            JsonSerializerOptions.Web
+        );
+        var owner = envelopeType.GetProperty("Owner")!.GetValue(envelope);
+        Assert.IsType(userType, owner);
+        using (
+            var written = JsonDocument.Parse(
+                JsonSerializer.Serialize(envelope, envelopeType, JsonSerializerOptions.Web)
+            )
+        )
+        {
+            var ownerJson = written.RootElement.GetProperty("owner");
+            Assert.Equal("user", ownerJson.EnumerateObject().First().Value.GetString());
+            Assert.Equal("Ada", ownerJson.GetProperty("display_name").GetString());
+            Assert.Equal("h", ownerJson.GetProperty("links").GetProperty("html").GetString());
+            Assert.Equal(1, ownerJson.GetProperty("extra").GetInt32());
+        }
+
+        // The concrete base is its own variant, and the declared type picks no variant.
+        var account = JsonSerializer.Deserialize(
+            """{"type":"account","display_name":"Team"}""",
+            accountType,
+            JsonSerializerOptions.Web
+        );
+        Assert.IsType(accountType, account);
+        using (
+            var written = JsonDocument.Parse(
+                JsonSerializer.Serialize(owner, userType, JsonSerializerOptions.Web)
+            )
+        )
+        {
+            Assert.Equal("user", written.RootElement.GetProperty("type").GetString());
+        }
+
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize(
+                """{"owner":{"type":"repository"}}""",
+                envelopeType,
+                JsonSerializerOptions.Web
+            )
+        );
+
+        // The hierarchy is the source's own allOf shape, not a synthesized oneOf.
+        var schemas = generated.EmittedRoot.GetProperty("components").GetProperty("schemas");
+        Assert.False(schemas.GetProperty("object").TryGetProperty("oneOf", out _));
+        Assert.True(schemas.GetProperty("user").TryGetProperty("allOf", out _));
+    }
+
     private static Type ImportCompileAndLoadSpotifyPlaylistTrackType() =>
         GeneratedCarrierFixture.ImportCompileAndLoad(
             """

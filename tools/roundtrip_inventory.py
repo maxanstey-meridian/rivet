@@ -107,6 +107,9 @@ NULLABLE_COMPOSITION_PROOF = (
 DISCRIMINATOR_PROOF = (
     "GeneratedCarrierFidelityTests.Spotify_nested_track_episode_discriminator_dispatches_episode_at_runtime"
 )
+HIERARCHY_DISCRIMINATOR_PROOF = (
+    "GeneratedCarrierFidelityTests.Bitbucket_allOf_hierarchy_discriminator_dispatches_every_descendant_at_runtime"
+)
 PARAMETER_CONTENT_PROOF = "RoundTripDiffTests.Parameter_Surface_Mutations_Are_Reported"
 ENCODING_PROOF = "RoundTripDiffTests.Request_Body_Surface_Mutations_Are_Reported"
 EXTERNAL_VALUE_PROOF = (
@@ -508,11 +511,14 @@ class CarrierWalker:
 
         if isinstance(value.get("discriminator"), dict):
             nested = not is_component_schema_root(pointer)
+            # A discriminator beside oneOf/anyOf dispatches over the union; one on a plain
+            # object is the root of an allOf hierarchy, imported as polymorphic records.
+            union = isinstance(value.get("oneOf"), list) or isinstance(value.get("anyOf"), list)
             self.add(
                 pointer,
                 "nested-discriminator" if nested else "explicit-discriminator",
-                "union" if isinstance(value.get("oneOf"), list) or isinstance(value.get("anyOf"), list) else "record",
-                DISCRIMINATOR_PROOF,
+                "union" if union else "record",
+                DISCRIMINATOR_PROOF if union else HIERARCHY_DISCRIMINATOR_PROOF,
             )
 
         if (

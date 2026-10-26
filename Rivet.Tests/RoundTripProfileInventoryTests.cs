@@ -40,6 +40,7 @@ public sealed class RoundTripProfileInventoryTests
                 "vercel",
                 "github",
                 "discord",
+                "bitbucket",
             ],
             facts
                 .GetProperty("corpora")
@@ -49,22 +50,22 @@ public sealed class RoundTripProfileInventoryTests
         );
         Assert.Empty(facts.GetProperty("unknownKeywords").EnumerateArray());
         Assert.Equal(
-            5649,
+            5843,
             facts.GetProperty("normalizedComponentTotals").GetProperty("schemas").GetInt32()
         );
         Assert.Equal(
-            73,
+            78,
             facts.GetProperty("normalizedComponentTotals").GetProperty("requestBodies").GetInt32()
         );
         Assert.Equal(
-            24,
+            27,
             facts
                 .GetProperty("sourceComponentTotals")
                 .GetProperty("components.securitySchemes")
                 .GetInt32()
         );
         Assert.Equal(
-            26,
+            29,
             facts.GetProperty("normalizedComponentTotals").GetProperty("securitySchemes").GetInt32()
         );
         Assert.Equal(
@@ -135,6 +136,7 @@ public sealed class RoundTripProfileInventoryTests
                     "EmptyClosed": { "type": "object", "additionalProperties": false },
                     "PureDictionary": { "type": "object", "additionalProperties": { "type": "string" } },
                     "Nullable": { "anyOf": [{ "type": "string" }, { "type": "string", "nullable": true }] },
+                    "HierarchyRoot": { "type": "object", "discriminator": { "propertyName": "type" }, "properties": { "type": { "type": "string" } } },
                     "Envelope": {
                       "type": "object",
                       "properties": {
@@ -271,6 +273,12 @@ public sealed class RoundTripProfileInventoryTests
             "nested-discriminator",
             "#/components/schemas/Envelope/properties/item",
             "union"
+        );
+        AssertOccurrence(
+            groups,
+            "explicit-discriminator",
+            "#/components/schemas/HierarchyRoot",
+            "record"
         );
         AssertOccurrence(
             groups,
@@ -516,7 +524,7 @@ public sealed class RoundTripProfileInventoryTests
             RegexOptions.Multiline
         );
 
-        Assert.Equal(17, proofs.Count);
+        Assert.Equal(18, proofs.Count);
         foreach (Match proof in proofs)
         {
             var method = typeof(RoundTripProfileInventoryTests)

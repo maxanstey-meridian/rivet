@@ -94,6 +94,11 @@ SCHEMA_ANNOTATION_FIELDS = (
     "discriminator",
 )
 VENDOR_EXTENSION_DISPOSITIONS = {
+    "x-bb-batch-max-size": "preserve",
+    "x-bb-batch-url": "preserve",
+    "x-bb-default-fields": "preserve",
+    "x-bb-detail-fields": "preserve",
+    "x-bb-url": "preserve",
     "x-discord-union": "preserve",
     "x-ds-api-status": "preserve",
     "x-ds-examples": "preserve",

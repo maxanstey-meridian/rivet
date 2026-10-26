@@ -44,7 +44,7 @@ public static class InlineTypeExtractor
                     ",",
                     obj.Fields.OrderBy(f => f.Name)
                         .Select(f =>
-                            $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}S:{(int)f.Surface}"
+                            $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}M:{FieldMetadataHash(f)}"
                             + $"T:{CanonicalHash(f.Type)}"
                         )
                 )
@@ -55,7 +55,9 @@ public static class InlineTypeExtractor
                 + string.Join(
                     ",",
                     tu.Variants.OrderBy(v => v.Tag)
-                        .Select(v => $"{Encode(v.Tag)}:{CanonicalHash(v.Type)}")
+                        .Select(v =>
+                            $"{Encode(v.Tag)}:{CanonicalHash(v.Type)}M:{VariantMetadataHash(v)}"
+                        )
                 )
                 + "]",
             TsType.Union u => "U:["
@@ -67,6 +69,17 @@ public static class InlineTypeExtractor
 
     private static string MetadataHash(TsScalarMetadata? metadata) =>
         metadata is null ? "" : Encode(JsonSerializer.Serialize(metadata));
+
+    // Every annotation a field or variant carries tells two shapes apart: two variants that
+    // differ only in a description are two component schemas, not one. The type is hashed on
+    // its own.
+    private static readonly TsType _hashedElsewhere = new TsType.TypeParam("");
+
+    private static string FieldMetadataHash(TsType.InlineObjectField field) =>
+        Encode(JsonSerializer.Serialize(field with { Type = _hashedElsewhere }));
+
+    private static string VariantMetadataHash(TsType.TaggedUnionVariant variant) =>
+        Encode(JsonSerializer.Serialize(variant with { Type = _hashedElsewhere }));
 
     public static List<(TsType.InlineObject Type, string Context)> CollectInlineObjects(
         IReadOnlyList<TsEndpointDefinition> endpoints
@@ -423,13 +436,12 @@ public static class InlineTypeExtractor
         {
             var representative = collected.First(c => CanonicalHash(c.Type) == hash).Type;
             var properties = representative
-                .Fields.Select(f => new TsPropertyDefinition(
-                    f.Name,
-                    ReplaceInType(f.Type, replacements),
-                    IsOptional: f.Optional,
-                    IsReadOnly: f.Surface == TsType.InlineObjectFieldSurface.ResponseOnly,
-                    IsWriteOnly: f.Surface == TsType.InlineObjectFieldSurface.RequestOnly
-                ))
+                .Fields.Select(f =>
+                    f.ToProperty() with
+                    {
+                        Type = ReplaceInType(f.Type, replacements),
+                    }
+                )
                 .ToList();
 
             extractedTypes.Add(new TsTypeDefinition(typeRef.Name, [], properties));

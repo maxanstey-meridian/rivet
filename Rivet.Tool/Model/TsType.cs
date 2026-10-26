@@ -106,19 +106,6 @@ public abstract record TsType
         string? Description = null
     ) : TsType;
 
-    /// <summary>
-    /// The wire surface an inline-object field participates in. Polymorphic variants are
-    /// the shared wire shape for both directions; a derived property System.Text.Json only
-    /// serializes (or only deserializes) keeps its variant presence with the asymmetry
-    /// expressed as readOnly/writeOnly on emission.
-    /// </summary>
-    public enum InlineObjectFieldSurface
-    {
-        Both,
-        RequestOnly,
-        ResponseOnly,
-    }
-
     /// <summary>Inline object: { key: string; value?: number }. Used for tuples and union variants.</summary>
     public sealed record InlineObject(
         [property: JsonRequired, JsonPropertyName("properties")]
@@ -127,22 +114,73 @@ public abstract record TsType
 
     /// <summary>
     /// One inline-object property. An absent <c>optional</c> reads as required: a nullable
-    /// type does not make the property optional.
+    /// type does not make the property optional. The annotations after <c>optional</c> are a
+    /// record property's (<see cref="TsPropertyDefinition"/>, same JSON names), so a
+    /// polymorphic variant describes its members exactly as the derived record would; a member
+    /// System.Text.Json only reads (or only writes) is writeOnly (readOnly) here too.
     /// </summary>
     public sealed record InlineObjectField(
         [property: JsonRequired] string Name,
         [property: JsonRequired] TsType Type,
         bool Optional = false,
         [property:
-            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault),
-            JsonConverter(typeof(JsonStringEnumConverter<InlineObjectFieldSurface>))
+            JsonPropertyName("deprecated"),
+            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
         ]
-            InlineObjectFieldSurface Surface = InlineObjectFieldSurface.Both
+            bool IsDeprecated = false,
+        string? Format = null,
+        string? DefaultValue = null,
+        TsPropertyConstraints? Constraints = null,
+        string? Description = null,
+        string? Example = null,
+        [property:
+            JsonPropertyName("readOnly"),
+            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
+        ]
+            bool IsReadOnly = false,
+        [property:
+            JsonPropertyName("writeOnly"),
+            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
+        ]
+            bool IsWriteOnly = false,
+        TsScalarMetadata? ScalarMetadata = null
     )
     {
         // Keep concise tuple syntax without conflating a nullable value with an absent field.
         public static implicit operator InlineObjectField((string Name, TsType Type) field) =>
             new(field.Name, field.Type, Optional: false);
+
+        public static InlineObjectField FromProperty(TsPropertyDefinition property) =>
+            new(
+                property.Name,
+                property.Type,
+                property.IsOptional,
+                property.IsDeprecated,
+                property.Format,
+                property.DefaultValue,
+                property.Constraints,
+                property.Description,
+                property.Example,
+                property.IsReadOnly,
+                property.IsWriteOnly,
+                property.ScalarMetadata
+            );
+
+        public TsPropertyDefinition ToProperty() =>
+            new(
+                Name,
+                Type,
+                Optional,
+                IsDeprecated,
+                Format,
+                DefaultValue,
+                Constraints,
+                Description,
+                Example,
+                IsReadOnly,
+                IsWriteOnly,
+                ScalarMetadata
+            );
     }
 
     /// <summary>Discriminated union of object-like variants keyed by a shared string-literal field.</summary>
@@ -154,10 +192,17 @@ public abstract record TsType
     /// <summary>An undiscriminated union (oneOf without discriminator) — [RivetUnion] wrappers.</summary>
     public sealed record Union([property: JsonRequired] IReadOnlyList<TsType> Variants) : TsType;
 
+    /// <summary>
+    /// One registration of a tagged union. <c>Description</c> and <c>ScalarMetadata</c> are the
+    /// derived type's own type-level annotations, as a <see cref="TsTypeDefinition"/> carries
+    /// them, so an inline variant's component says what the derived type's would.
+    /// </summary>
     public sealed record TaggedUnionVariant(
         [property: JsonRequired] string Tag,
         [property: JsonRequired] TsType Type,
-        TsTypeMetadata? Metadata = null
+        TsTypeMetadata? Metadata = null,
+        string? Description = null,
+        TsScalarMetadata? ScalarMetadata = null
     );
 
     /// <summary>

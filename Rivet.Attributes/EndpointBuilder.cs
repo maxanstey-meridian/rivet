@@ -118,7 +118,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         }
     }
 
-    internal EndpointContract Publish(Type? successPayloadType)
+    internal EndpointContract Publish(Type? successPayloadType, Type? inputType)
     {
         if (_publishedContract is { } published)
         {
@@ -127,11 +127,15 @@ public abstract partial class RouteDefinitionBase<TSelf>
 
         lock (_gate)
         {
-            return _publishedContract ??= BuildContract(_state, successPayloadType);
+            return _publishedContract ??= BuildContract(_state, successPayloadType, inputType);
         }
     }
 
-    private EndpointContract BuildContract(RouteState state, Type? successPayloadType)
+    private EndpointContract BuildContract(
+        RouteState state,
+        Type? successPayloadType,
+        Type? inputType
+    )
     {
         if (state.ErrorResponses.Any(response => response.Status.Exact == state.SuccessStatus))
         {
@@ -180,6 +184,13 @@ public abstract partial class RouteDefinitionBase<TSelf>
         return new EndpointContract(
             Method,
             Route,
+            inputType,
+            state switch
+            {
+                { FormEncoded: true } or { AcceptsFile: true } => InputBinding.Form,
+                { BinaryRequestContentType: not null } => InputBinding.RouteAndQuery,
+                _ => InputBinding.Json,
+            },
             success,
             new ResponseSet(exact, ranges, fallback)
         );
@@ -569,10 +580,10 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
     private protected virtual Type? SuccessPayloadType => null;
 
     public RivetResult Error(int statusCode) =>
-        RivetTerminal.Error(Publish(SuccessPayloadType), statusCode);
+        RivetTerminal.Error(Publish(SuccessPayloadType, inputType: null), statusCode);
 
     public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(Publish(SuccessPayloadType), statusCode, payload);
+        RivetTerminal.Error(Publish(SuccessPayloadType, inputType: null), statusCode, payload);
 
     public RivetResult File(
         byte[] content,
@@ -584,7 +595,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.File(
-            Publish(SuccessPayloadType),
+            Publish(SuccessPayloadType, inputType: null),
             content,
             downloadName,
             enableRangeProcessing,
@@ -604,7 +615,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.File(
-            Publish(SuccessPayloadType),
+            Publish(SuccessPayloadType, inputType: null),
             content,
             downloadName,
             enableRangeProcessing,
@@ -624,7 +635,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.PhysicalFile(
-            Publish(SuccessPayloadType),
+            Publish(SuccessPayloadType, inputType: null),
             physicalPath,
             downloadName,
             enableRangeProcessing,
@@ -643,7 +654,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.File(
-            Publish(SuccessPayloadType),
+            Publish(SuccessPayloadType, inputType: null),
             writer,
             downloadName,
             lastModified,
@@ -666,7 +677,7 @@ public sealed class RouteDefinition<TInput, TOutput>
     public BoundRouteDefinition<TOutput> Bind(TInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
-        return new BoundRouteDefinition<TOutput>(Publish(typeof(TOutput)));
+        return new BoundRouteDefinition<TOutput>(Publish(typeof(TOutput), typeof(TInput)));
     }
 }
 
@@ -681,7 +692,7 @@ public sealed class RouteDefinition<TOutput> : TerminalRouteDefinitionBase<Route
     private protected override Type? SuccessPayloadType => typeof(TOutput);
 
     public RivetResult Success(TOutput payload) =>
-        RivetTerminal.Success(Publish(typeof(TOutput)), payload);
+        RivetTerminal.Success(Publish(typeof(TOutput), inputType: null), payload);
 }
 
 /// <summary>
@@ -696,7 +707,7 @@ public sealed class InputRouteDefinition<TInput> : RouteDefinitionBase<InputRout
     public BoundRouteDefinition Bind(TInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
-        return new BoundRouteDefinition(Publish(null));
+        return new BoundRouteDefinition(Publish(null, typeof(TInput)));
     }
 }
 
@@ -708,7 +719,7 @@ public sealed class RouteDefinition : TerminalRouteDefinitionBase<RouteDefinitio
     internal RouteDefinition(string method, string route, int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
-    public RivetResult Success() => RivetTerminal.Success(Publish(null));
+    public RivetResult Success() => RivetTerminal.Success(Publish(null, inputType: null));
 
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).
@@ -744,6 +755,6 @@ public sealed class FileRouteDefinition<TInput> : RouteDefinitionBase<FileRouteD
     public BoundFileRouteDefinition Bind(TInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
-        return new BoundFileRouteDefinition(Publish(null));
+        return new BoundFileRouteDefinition(Publish(null, typeof(TInput)));
     }
 }

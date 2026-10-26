@@ -74,9 +74,10 @@ public static class RivetResultExtensions
     }
 
     /// <summary>
-    /// Everything an adapter checks before it writes: the host's JSON options match the spec,
-    /// the host hasn't committed a conflicting response, and the response carries the headers
-    /// the contract declares required. Sets the declared status and Rivet's file headers.
+    /// Everything an adapter checks before it writes: the host's JSON options match the spec
+    /// and read the contract's input the way the spec describes it, the host hasn't committed
+    /// a conflicting response, and the response carries the headers the contract declares
+    /// required. Sets the declared status and Rivet's file headers.
     /// Returns false when the response has started and there is nothing left to write. A
     /// refused stream file is disposed: the host never takes it over.
     /// </summary>
@@ -90,6 +91,7 @@ public static class RivetResultExtensions
         try
         {
             RivetHostJsonOptions.Ensure(options, registration);
+            RivetHostJsonOptions.EnsureInput(options, registration, result.Contract);
             var writes = SetStatus(response, result);
             if (writes && result is RivetFileResult file)
             {

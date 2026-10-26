@@ -18,6 +18,13 @@ Verified limits of the current tool, so you don't discover them in production.
   ignore conditions, resolver modifiers and the rest of the
   [list](/guides/runtime-validation#runtime-guarantees-contract-responses). Declare
   that behaviour on the types instead, where generation can see it.
+- A contract whose input reaches a `[JsonPolymorphic]` type needs the host to read the
+  discriminator wherever it sits in the object (`AllowOutOfOrderMetadataProperties`,
+  .NET 9+); without it the adapters refuse to serve the contract. On .NET 8 they always
+  do, because System.Text.Json there only reads the discriminator as the first property,
+  and so they do for a form, multipart or binary contract, whose input model binding
+  reads with no discriminator at all
+  ([why](/guides/runtime-validation#runtime-guarantees-contract-responses)).
 - A response header declared `required: true` has to be on the response when the
   adapter runs, which means set before the handler returns. One a middleware only
   adds in `OnStarting` arrives too late to count.

@@ -47,7 +47,7 @@ public static class Diagnostics
     public const string DictionaryKeyTypeDropped = "RIV1013";
     public const string PolymorphicNonStringTag = "RIV1014";
     public const string PolymorphicNoDerivedTypes = "RIV1015";
-    public const string PolymorphicUnknownHandlingDropped = "RIV1016";
+    public const string PolymorphicUnknownHandling = "RIV1016";
     public const string ResponseHeaderUndeclaredStatus = "RIV1017";
     public const string RivetUnionNoVariants = "RIV1018";
     public const string RouteTokenWithoutInputProperty = "RIV1019";
@@ -177,9 +177,9 @@ public static class Diagnostics
         [PolymorphicNonStringTag] =
             "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; generation fails until every registration has a string tag.",
         [PolymorphicNoDerivedTypes] =
-            "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — there is no variant set to emit; the type falls back to plain property flattening.",
-        [PolymorphicUnknownHandlingDropped] =
-            "[JsonPolymorphic] UnknownDerivedTypeHandling has no spec representation — the emitted oneOf admits only the registered derived types.",
+            "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — System.Text.Json refuses to serialize it, so generation fails until a derived type is registered or the attribute removed.",
+        [PolymorphicUnknownHandling] =
+            "[JsonPolymorphic] sets UnknownDerivedTypeHandling to a fallback or IgnoreUnrecognizedTypeDiscriminators — the host would write an unregistered derived type, or read an unknown tag, as a base the oneOf doesn't admit, so generation fails until the setting is removed.",
         [ResponseHeaderUndeclaredStatus] =
             ".WithResponseHeader() targets a status code the contract endpoint does not declare — the spec has no response to carry it; generation fails.",
         [RivetUnionNoVariants] =

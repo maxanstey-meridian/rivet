@@ -787,6 +787,48 @@ public sealed class TerminalAndAdapterTests
         await Assert.ThrowsAsync<RivetContractViolationException>(() => ExecuteAsync(result, mvc));
     }
 
+    // [JsonPolymorphic] with nothing registered can't be read or written at all: the
+    // serializer refuses the type as soon as the options build its metadata, on .NET 8, 9
+    // and 10 alike, so generation refuses it too (RIV1015) rather than flattening it.
+    [Fact]
+    public void A_polymorphic_type_with_no_derived_types_cannot_be_serialized()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        options.MakeReadOnly(populateMissingResolver: true);
+        const string refusal = "should specify at least one derived type";
+
+        Assert.Contains(
+            refusal,
+            Assert
+                .Throws<InvalidOperationException>(() =>
+                    JsonSerializer.Serialize(new Unvaried("x"), options)
+                )
+                .Message
+        );
+        Assert.Contains(
+            refusal,
+            Assert
+                .Throws<InvalidOperationException>(() =>
+                    JsonSerializer.Deserialize<Unvaried>("""{"name":"x"}""", options)
+                )
+                .Message
+        );
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_polymorphic_type_with_no_derived_types_cannot_be_served(bool mvc)
+    {
+        var result = Define.Get<Unvaried>("/unvaried").Success(new Unvaried("x"));
+
+        var refusal = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            ExecuteAsync(result, mvc)
+        );
+
+        Assert.Contains("should specify at least one derived type", refusal.Message);
+    }
+
     [Fact]
     public void Native_framework_results_cannot_be_terminal_payloads()
     {
@@ -991,6 +1033,9 @@ public sealed class TerminalAndAdapterTests
     public sealed record RegisteredCat(string Name) : UnregisteredAnimal;
 
     public sealed record UnregisteredDog(string Name) : UnregisteredAnimal;
+
+    [JsonPolymorphic]
+    public record Unvaried(string Name);
 
     public record Vehicle(string Id);
 

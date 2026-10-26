@@ -25,4 +25,10 @@ public sealed class RivetGeneratedTypeAttribute : Attribute
     public string? ComponentId { get; }
 
     public RivetGeneratedTypeProvenance Provenance { get; }
+
+    /// <summary>
+    /// On a polymorphic variant: the JSON of the tag property's schema as the source authored
+    /// it, emitted in place of the synthesized single-value <c>enum</c>.
+    /// </summary>
+    public string? DiscriminatorSchemaJson { get; set; }
 }

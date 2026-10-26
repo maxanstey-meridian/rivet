@@ -22,9 +22,10 @@
     "slack",
     "vercel",
     "github",
-    "discord"
+    "discord",
+    "bitbucket"
   ],
-  "reviewedSourceDefectsSha256": "82d86f9d664287bfcf57c27653fb92e7a0104c1452a63f55d9627aa2d1e03778",
+  "reviewedSourceDefectsSha256": "bb55ffd3b0f71dce235ca82e978dde1e72f8e015f368cef467e406e8794de94a",
   "sourceDefects": [
     {
       "corpusId": "notion",
@@ -2097,6 +2098,118 @@
       "reason": "path repeats an earlier path's template under other parameter names, which OpenAPI forbids; the import merges its operations into the earlier path and renames its path parameters",
       "diagnostic": "warning RIV3029: Path merged: '/users/{username}/attestations/{subject_digest}' repeats the template of '/users/{username}/attestations/{attestation_id}' under other parameter names, which OpenAPI forbids; its operations move to '/users/{username}/attestations/{attestation_id}', renaming path parameter 'subject_digest' to 'attestation_id' (path parameter names never reach the wire).",
       "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1vote/get/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: GET /repositories/{workspace}/{repo_slug}/issues/{issue_id}/vote (GetRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdVote) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1vote/get/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: GET /repositories/{workspace}/{repo_slug}/issues/{issue_id}/vote (GetRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdVote) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1vote/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /repositories/{workspace}/{repo_slug}/issues/{issue_id}/vote (PutRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdVote) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1vote/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /repositories/{workspace}/{repo_slug}/issues/{issue_id}/vote (PutRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdVote) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1watch/delete/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: DELETE /repositories/{workspace}/{repo_slug}/issues/{issue_id}/watch (DeleteRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdWatch) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1watch/delete/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: DELETE /repositories/{workspace}/{repo_slug}/issues/{issue_id}/watch (DeleteRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdWatch) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1watch/get/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: GET /repositories/{workspace}/{repo_slug}/issues/{issue_id}/watch (GetRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdWatch) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1watch/get/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: GET /repositories/{workspace}/{repo_slug}/issues/{issue_id}/watch (GetRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdWatch) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1watch/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /repositories/{workspace}/{repo_slug}/issues/{issue_id}/watch (PutRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdWatch) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1issues~1{issue_id}~1watch/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /repositories/{workspace}/{repo_slug}/issues/{issue_id}/watch (PutRepositoriesByWorkspaceByRepoSlugIssuesByIssueIdWatch) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1pipelines~1{pipeline_uuid}~1steps~1{step_uuid}~1log/get/responses/304/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: GET /repositories/{workspace}/{repo_slug}/pipelines/{pipeline_uuid}/steps/{step_uuid}/log (GetPipelineStepLogForRepository) authors content on body-forbidden status 304; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1repositories~1{workspace}~1{repo_slug}~1pipelines~1{pipeline_uuid}~1steps~1{step_uuid}~1log/get/responses/304/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: GET /repositories/{workspace}/{repo_slug}/pipelines/{pipeline_uuid}/steps/{step_uuid}/log (GetPipelineStepLogForRepository) authors an example on body-forbidden status 304; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1workspaces~1{workspace}~1projects~1{project_key}~1default-reviewers~1{selected_user}/put/responses/204/content",
+      "reason": "response content on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response content dropped: PUT /workspaces/{workspace}/projects/{project_key}/default-reviewers/{selected_user} (PutWorkspacesByWorkspaceProjectsByProjectKeyDefaultReviewersBySelectedUser) authors content on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
+    },
+    {
+      "corpusId": "bitbucket",
+      "sourceSha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+      "pointer": "#/paths/~1workspaces~1{workspace}~1projects~1{project_key}~1default-reviewers~1{selected_user}/put/responses/204/examples",
+      "reason": "response example on a body-forbidden status is dropped by the import; the status, its description and headers are preserved bodyless",
+      "diagnostic": "warning RIV3024: Response example dropped: PUT /workspaces/{workspace}/projects/{project_key}/default-reviewers/{selected_user} (PutWorkspacesByWorkspaceProjectsByProjectKeyDefaultReviewersBySelectedUser) authors an example on body-forbidden status 204; HTTP forbids a message body on 1xx/204/205/304; the status, its description and headers are preserved.",
+      "cardinality": 1
     }
   ],
   "facts": {
@@ -2485,16 +2598,35 @@
           "securitySchemes": 2
         },
         "unknownKeywordCount": 0
+      },
+      {
+        "id": "bitbucket",
+        "sha256": "f41a6949a8b64b022f53c0791ef599768c5b45a5ed48dc6e7057ea04594759d7",
+        "dialect": "3.0.0",
+        "apiVersion": "2.0",
+        "pathCount": 178,
+        "operationCount": 303,
+        "sourceComponentCounts": {
+          "components.requestBodies": 5,
+          "components.schemas": 194,
+          "components.securitySchemes": 3
+        },
+        "normalizedComponentCounts": {
+          "requestBodies": 5,
+          "schemas": 194,
+          "securitySchemes": 3
+        },
+        "unknownKeywordCount": 0
       }
     ],
     "sourceComponentTotals": {
       "components.examples": 504,
       "components.headers": 12,
       "components.parameters": 345,
-      "components.requestBodies": 73,
+      "components.requestBodies": 78,
       "components.responses": 140,
-      "components.schemas": 5643,
-      "components.securitySchemes": 24,
+      "components.schemas": 5837,
+      "components.securitySchemes": 27,
       "definitions": 6,
       "securityDefinitions": 2
     },
@@ -2502,109 +2634,109 @@
       "examples": 504,
       "headers": 12,
       "parameters": 345,
-      "requestBodies": 73,
+      "requestBodies": 78,
       "responses": 140,
-      "schemas": 5649,
-      "securitySchemes": 26
+      "schemas": 5843,
+      "securitySchemes": 29
     },
     "standardKeywordCounts": {
-      "$ref": 31507,
-      "additionalProperties": 2452,
-      "allOf": 1509,
+      "$ref": 32547,
+      "additionalProperties": 2751,
+      "allOf": 1622,
       "allowEmptyValue": 7,
       "anyOf": 2089,
-      "authorizationCode": 9,
-      "authorizationUrl": 13,
+      "authorizationCode": 10,
+      "authorizationUrl": 14,
       "basePath": 1,
       "bearerFormat": 1,
       "clientCredentials": 2,
       "collectionFormat": 2,
-      "components": 18,
+      "components": 19,
       "const": 481,
       "consumes": 9,
-      "contact": 16,
-      "content": 8957,
+      "contact": 17,
+      "content": 9670,
       "contentEncoding": 72,
-      "default": 2967,
+      "default": 2976,
       "definitions": 1,
-      "delete": 635,
-      "deprecated": 488,
-      "description": 81016,
-      "discriminator": 10,
-      "email": 9,
+      "delete": 684,
+      "deprecated": 499,
+      "description": 83624,
+      "discriminator": 11,
+      "email": 10,
       "encoding": 587,
-      "enum": 13191,
+      "enum": 13271,
       "example": 9462,
       "examples": 2480,
       "explode": 1708,
-      "externalDocs": 1287,
+      "externalDocs": 1288,
       "flow": 1,
-      "flows": 12,
-      "format": 15873,
-      "get": 2271,
+      "flows": 13,
+      "format": 16110,
+      "get": 2435,
       "head": 9,
-      "headers": 681,
+      "headers": 711,
       "host": 1,
       "identifier": 1,
       "implicit": 3,
-      "in": 9568,
-      "info": 21,
-      "items": 9001,
+      "in": 10197,
+      "info": 22,
+      "items": 9076,
       "license": 11,
       "mapping": 4,
-      "maxItems": 358,
+      "maxItems": 363,
       "maxLength": 8848,
       "maxProperties": 59,
-      "maximum": 687,
-      "minItems": 201,
+      "maximum": 688,
+      "minItems": 261,
       "minLength": 1099,
       "minProperties": 4,
-      "minimum": 556,
+      "minimum": 674,
       "multipleOf": 1,
-      "name": 10005,
+      "name": 10657,
       "not": 1,
       "nullable": 9516,
       "oneOf": 1527,
-      "openapi": 20,
-      "operationId": 4865,
+      "openapi": 21,
+      "operationId": 4955,
       "options": 8,
-      "parameters": 4779,
+      "parameters": 5026,
       "patch": 265,
-      "paths": 21,
-      "pattern": 834,
-      "post": 1289,
+      "paths": 22,
+      "pattern": 838,
+      "post": 1335,
       "produces": 20,
-      "properties": 20058,
-      "propertyName": 10,
-      "put": 418,
-      "readOnly": 307,
+      "properties": 20374,
+      "propertyName": 11,
+      "put": 462,
+      "readOnly": 323,
       "refreshUrl": 4,
-      "requestBodies": 7,
-      "requestBody": 2179,
-      "required": 17343,
-      "responses": 4901,
-      "schema": 21543,
-      "schemas": 18,
-      "scheme": 5,
+      "requestBodies": 8,
+      "requestBody": 2233,
+      "required": 18021,
+      "responses": 5204,
+      "schema": 22951,
+      "schemas": 19,
+      "scheme": 6,
       "schemes": 1,
-      "scopes": 15,
-      "security": 1820,
+      "scopes": 16,
+      "security": 2033,
       "securityDefinitions": 1,
-      "securitySchemes": 15,
-      "servers": 156,
+      "securitySchemes": 16,
+      "servers": 157,
       "style": 2667,
-      "summary": 4212,
+      "summary": 4515,
       "swagger": 1,
-      "tags": 4062,
-      "termsOfService": 13,
-      "title": 8497,
-      "tokenUrl": 11,
-      "type": 133298,
-      "uniqueItems": 1714,
-      "url": 1467,
+      "tags": 4366,
+      "termsOfService": 14,
+      "title": 8726,
+      "tokenUrl": 12,
+      "type": 135133,
+      "uniqueItems": 1752,
+      "url": 1470,
       "value": 504,
       "variables": 6,
-      "version": 21,
+      "version": 22,
       "wrapped": 4,
       "writeOnly": 1,
       "xml": 18
@@ -2655,8 +2787,9 @@
         "valuesSha256": "30a7ff3bcfa3fc83e71d639257ac5dcb5c8782e42f20638da432603f5877bd4d"
       },
       "x-apisguru-categories": {
-        "count": 12,
+        "count": 13,
         "ownerPointers": [
+          "/info",
           "/info",
           "/info",
           "/info",
@@ -2671,10 +2804,118 @@
           "/info"
         ],
         "valueShapes": {
-          "array": 12
+          "array": 13
         },
-        "distinctValueCount": 10,
-        "valuesSha256": "947d559a284482beaab87091c13387ca26f101793bf74e037273ee442b564d1c"
+        "distinctValueCount": 11,
+        "valuesSha256": "c24789990de8f9d89ed0a477c09a270929eea899460c8a59e4329114a95e15f9"
+      },
+      "x-atlassian-narrative": {
+        "count": 1,
+        "ownerPointers": [
+          "/"
+        ],
+        "valueShapes": {
+          "object": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "c294438d9ab051d8a74aa030ad2ed5f8870ec74114ab8209298f9ac6af2b580a"
+      },
+      "x-bb-batch-max-size": {
+        "count": 9,
+        "ownerPointers": [
+          "/components/schemas/deployment_environment",
+          "/components/schemas/deployment_environment_lock",
+          "/components/schemas/deployments_ddev_deployment_environment",
+          "/components/schemas/deployments_ddev_deployment_environment_lock",
+          "/components/schemas/deployments_stg_west_deployment_environment",
+          "/components/schemas/deployments_stg_west_deployment_environment_lock",
+          "/components/schemas/pipeline_step",
+          "/components/schemas/pipelines_ddev_pipeline_step",
+          "/components/schemas/pipelines_stg_west_pipeline_step"
+        ],
+        "valueShapes": {
+          "number": 9
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "ad57366865126e55649ecb23ae1d48887544976efea46a48eb5d85a6eeb4d306"
+      },
+      "x-bb-batch-url": {
+        "count": 9,
+        "ownerPointers": [
+          "/components/schemas/deployment_environment",
+          "/components/schemas/deployment_environment_lock",
+          "/components/schemas/deployments_ddev_deployment_environment",
+          "/components/schemas/deployments_ddev_deployment_environment_lock",
+          "/components/schemas/deployments_stg_west_deployment_environment",
+          "/components/schemas/deployments_stg_west_deployment_environment_lock",
+          "/components/schemas/pipeline_step",
+          "/components/schemas/pipelines_ddev_pipeline_step",
+          "/components/schemas/pipelines_stg_west_pipeline_step"
+        ],
+        "valueShapes": {
+          "string": 9
+        },
+        "distinctValueCount": 3,
+        "valuesSha256": "89911b5fefa428b0ec1dba98d182fee597700d8619ea89141bdfe8e3079dee2d"
+      },
+      "x-bb-default-fields": {
+        "count": 15,
+        "ownerPointers": [
+          "/components/schemas/ddev_report",
+          "/components/schemas/deployment_environment",
+          "/components/schemas/deployment_environment_lock",
+          "/components/schemas/deployments_ddev_deployment_environment",
+          "/components/schemas/deployments_ddev_deployment_environment_lock",
+          "/components/schemas/deployments_stg_west_deployment_environment",
+          "/components/schemas/deployments_stg_west_deployment_environment_lock",
+          "/components/schemas/jira_project",
+          "/components/schemas/jira_site",
+          "/components/schemas/pipeline_step",
+          "/components/schemas/pipelines_ddev_pipeline_step",
+          "/components/schemas/pipelines_stg_west_pipeline_step",
+          "/components/schemas/report",
+          "/components/schemas/report_annotation",
+          "/components/schemas/stg_west_report"
+        ],
+        "valueShapes": {
+          "array": 15
+        },
+        "distinctValueCount": 5,
+        "valuesSha256": "bfed4cb3ef1e2edd1bb5affa0c4fa305c8939048ec7d57c6366a49916a7a8bfd"
+      },
+      "x-bb-detail-fields": {
+        "count": 2,
+        "ownerPointers": [
+          "/components/schemas/jira_project",
+          "/components/schemas/jira_site"
+        ],
+        "valueShapes": {
+          "array": 2
+        },
+        "distinctValueCount": 2,
+        "valuesSha256": "3358cb41424065cea9bea224c2861b9f3e8c2d962c1d5a0777f99450f7997c5f"
+      },
+      "x-bb-url": {
+        "count": 12,
+        "ownerPointers": [
+          "/components/schemas/ddev_report",
+          "/components/schemas/deployment_environment",
+          "/components/schemas/deployments_ddev_deployment_environment",
+          "/components/schemas/deployments_stg_west_deployment_environment",
+          "/components/schemas/jira_project",
+          "/components/schemas/jira_site",
+          "/components/schemas/pipeline_step",
+          "/components/schemas/pipelines_ddev_pipeline_step",
+          "/components/schemas/pipelines_stg_west_pipeline_step",
+          "/components/schemas/report",
+          "/components/schemas/report_annotation",
+          "/components/schemas/stg_west_report"
+        ],
+        "valueShapes": {
+          "string": 12
+        },
+        "distinctValueCount": 6,
+        "valuesSha256": "13c035b9c4d9d47f037db2895864a07a7642dc686bbdfdd47e9c90c902896294"
       },
       "x-box-commit-hash": {
         "count": 1,
@@ -11694,8 +11935,9 @@
         "valuesSha256": "3babab6962e579ec6100aea16a45147bf90693c0177979959b69db7d992cf58e"
       },
       "x-logo": {
-        "count": 12,
+        "count": 13,
         "ownerPointers": [
+          "/info",
           "/info",
           "/info",
           "/info",
@@ -11710,10 +11952,10 @@
           "/info"
         ],
         "valueShapes": {
-          "object": 12
+          "object": 13
         },
-        "distinctValueCount": 12,
-        "valuesSha256": "9b848b0306d4a1d54c30ba42ac3a6a3a82fe7829f55d21965d9b6435b4c0f4a4"
+        "distinctValueCount": 13,
+        "valuesSha256": "12f700ba5e9b55603dd69e1332dffa4a2045e216db466d959ebe4b8ba8c239d5"
       },
       "x-ms-summary": {
         "count": 565,
@@ -12543,8 +12785,9 @@
         "valuesSha256": "25a5461ddfa0b831a8cf82ae6d255e6e88cb02134550251e4d372447323631ad"
       },
       "x-origin": {
-        "count": 12,
+        "count": 13,
         "ownerPointers": [
+          "/info",
           "/info",
           "/info",
           "/info",
@@ -12559,10 +12802,10 @@
           "/info"
         ],
         "valueShapes": {
-          "array": 12
+          "array": 13
         },
-        "distinctValueCount": 12,
-        "valuesSha256": "841526e7bd84b148e7a75054721fc287da39aedfe86290d140b88de61f238a12"
+        "distinctValueCount": 13,
+        "valuesSha256": "d12176130773fac032d1b9f7c1188a86acb6aa5d5c84da21dd8e01d086682f18"
       },
       "x-patternProperties": {
         "count": 1,
@@ -12576,8 +12819,9 @@
         "valuesSha256": "c903408894c0e1e89de9895102337babb973cde6b1df160fabb4e0da71b306f0"
       },
       "x-providerName": {
-        "count": 12,
+        "count": 13,
         "ownerPointers": [
+          "/info",
           "/info",
           "/info",
           "/info",
@@ -12592,10 +12836,10 @@
           "/info"
         ],
         "valueShapes": {
-          "string": 12
+          "string": 13
         },
-        "distinctValueCount": 12,
-        "valuesSha256": "b38a077ffad08bdf6323045cccdbd6e58c8978d7ca9cff61faea7f0ad006fe34"
+        "distinctValueCount": 13,
+        "valuesSha256": "a9f52de07972645434c968cd12b5cada747d067968f5c47900e2671ce7d8a17f"
       },
       "x-public-description": {
         "count": 1,
@@ -14137,6 +14381,17 @@
         "distinctValueCount": 164,
         "valuesSha256": "cde7757dc3bb885e64dc42042dfef5110192df85bc1a780320971e4fcf7fad70"
       },
+      "x-revision": {
+        "count": 1,
+        "ownerPointers": [
+          "/"
+        ],
+        "valueShapes": {
+          "string": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "c358a66e9812b713576f2cbf0a50ff21896a882cc18dd916e8538057d8ce156a"
+      },
       "x-serviceName": {
         "count": 3,
         "ownerPointers": [
@@ -15551,6 +15806,17 @@
         "distinctValueCount": 1,
         "valuesSha256": "38452b7ea5c6a8bc9599689a9525d310f8f05ed4142b73eebb22d856e3199df3"
       },
+      "x-tags": {
+        "count": 1,
+        "ownerPointers": [
+          "/info"
+        ],
+        "valueShapes": {
+          "array": 1
+        },
+        "distinctValueCount": 1,
+        "valuesSha256": "dfceca8e152674ef3eb21e5c6cd82ad4244a3a067492f766c72e794c7ce94693"
+      },
       "x-twilio": {
         "count": 190,
         "ownerPointers": [
@@ -16284,6 +16550,387 @@
           "#/paths/~1workspaces~1{workspace_gid}~1typeahead/get/responses/200/content/application~1json/schema",
           "#/paths/~1workspaces~1{workspace_gid}~1users/get/responses/200/content/application~1json/schema",
           "#/paths/~1workspaces~1{workspace_gid}~1workspace_memberships/get/responses/200/content/application~1json/schema"
+        ]
+      },
+      {
+        "corpusId": "bitbucket",
+        "shape": "explicit-discriminator",
+        "carrier": "record",
+        "behaviorTest": "GeneratedCarrierFidelityTests.Bitbucket_allOf_hierarchy_discriminator_dispatches_every_descendant_at_runtime",
+        "ownerPointers": [
+          "#/components/schemas/object"
+        ]
+      },
+      {
+        "corpusId": "bitbucket",
+        "shape": "object-no-properties-additional-properties-omitted",
+        "carrier": "dictionary",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Inline_free_form_carriers_preserve_valid_runtime_values_and_emitted_openness",
+        "ownerPointers": [
+          "#/components/schemas/report_data/properties/value",
+          "#/components/schemas/repository_inheritance_state/properties/override_settings"
+        ]
+      },
+      {
+        "corpusId": "bitbucket",
+        "shape": "object-no-properties-additional-properties-true",
+        "carrier": "dictionary",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Inline_free_form_carriers_preserve_valid_runtime_values_and_emitted_openness",
+        "ownerPointers": [
+          "#/components/schemas/error/properties/error/properties/data"
+        ]
+      },
+      {
+        "corpusId": "bitbucket",
+        "shape": "object-no-properties-additional-properties-true",
+        "carrier": "extension-data record",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Propertyless_named_objects_keep_open_and_closed_runtime_carriers",
+        "ownerPointers": [
+          "#/components/schemas/ddev_report/allOf/1",
+          "#/components/schemas/deployment_state/allOf/1",
+          "#/components/schemas/deployment_state_completed_status/allOf/1",
+          "#/components/schemas/jira_project/allOf/1",
+          "#/components/schemas/jira_site/allOf/1",
+          "#/components/schemas/pipeline_schedule_execution/allOf/1",
+          "#/components/schemas/pipeline_state/allOf/1",
+          "#/components/schemas/pipeline_state_completed_result/allOf/1",
+          "#/components/schemas/pipeline_state_in_progress_stage/allOf/1",
+          "#/components/schemas/pipeline_step_state/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed_result/allOf/1",
+          "#/components/schemas/pipeline_target/allOf/1",
+          "#/components/schemas/pipeline_trigger/allOf/1",
+          "#/components/schemas/pipeline_trigger_manual/allOf/1",
+          "#/components/schemas/pipeline_trigger_push/allOf/1",
+          "#/components/schemas/pipelines_ddev_pipeline_step/allOf/1",
+          "#/components/schemas/pipelines_stg_west_pipeline_step/allOf/1",
+          "#/components/schemas/stg_west_report/allOf/1"
+        ]
+      },
+      {
+        "corpusId": "bitbucket",
+        "shape": "object-properties-additional-properties-false",
+        "carrier": "record",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "ownerPointers": [
+          "#/components/schemas/base_commit/allOf/1/properties/summary",
+          "#/components/schemas/branching_model/allOf/1/properties/branch_types/items",
+          "#/components/schemas/branching_model/allOf/1/properties/development",
+          "#/components/schemas/branching_model/allOf/1/properties/production",
+          "#/components/schemas/branching_model_settings/allOf/1/properties/branch_types/items",
+          "#/components/schemas/branching_model_settings/allOf/1/properties/development",
+          "#/components/schemas/branching_model_settings/allOf/1/properties/links",
+          "#/components/schemas/branching_model_settings/allOf/1/properties/links/properties/self",
+          "#/components/schemas/branching_model_settings/allOf/1/properties/production",
+          "#/components/schemas/comment/allOf/1/properties/content",
+          "#/components/schemas/comment/allOf/1/properties/inline",
+          "#/components/schemas/comment/allOf/1/properties/links",
+          "#/components/schemas/comment/allOf/1/properties/links/properties/code",
+          "#/components/schemas/comment/allOf/1/properties/links/properties/html",
+          "#/components/schemas/comment/allOf/1/properties/links/properties/self",
+          "#/components/schemas/commitstatus/allOf/1/properties/links",
+          "#/components/schemas/commitstatus/allOf/1/properties/links/properties/commit",
+          "#/components/schemas/commitstatus/allOf/1/properties/links/properties/self",
+          "#/components/schemas/component/allOf/1/properties/links",
+          "#/components/schemas/component/allOf/1/properties/links/properties/self",
+          "#/components/schemas/deploy_key/allOf/1/properties/links",
+          "#/components/schemas/deploy_key/allOf/1/properties/links/properties/self",
+          "#/components/schemas/effective_repo_branching_model/allOf/1/properties/branch_types/items",
+          "#/components/schemas/effective_repo_branching_model/allOf/1/properties/development",
+          "#/components/schemas/effective_repo_branching_model/allOf/1/properties/production",
+          "#/components/schemas/error/properties/error",
+          "#/components/schemas/group/allOf/1/properties/links",
+          "#/components/schemas/group/allOf/1/properties/links/properties/html",
+          "#/components/schemas/group/allOf/1/properties/links/properties/self",
+          "#/components/schemas/hook_event",
+          "#/components/schemas/issue/allOf/1/properties/content",
+          "#/components/schemas/issue/allOf/1/properties/links",
+          "#/components/schemas/issue/allOf/1/properties/links/properties/attachments",
+          "#/components/schemas/issue/allOf/1/properties/links/properties/comments",
+          "#/components/schemas/issue/allOf/1/properties/links/properties/html",
+          "#/components/schemas/issue/allOf/1/properties/links/properties/self",
+          "#/components/schemas/issue/allOf/1/properties/links/properties/vote",
+          "#/components/schemas/issue/allOf/1/properties/links/properties/watch",
+          "#/components/schemas/issue_attachment/allOf/1/properties/links",
+          "#/components/schemas/issue_attachment/allOf/1/properties/links/properties/self",
+          "#/components/schemas/issue_change/properties/changes",
+          "#/components/schemas/issue_change/properties/changes/properties/assignee",
+          "#/components/schemas/issue_change/properties/changes/properties/component",
+          "#/components/schemas/issue_change/properties/changes/properties/content",
+          "#/components/schemas/issue_change/properties/changes/properties/kind",
+          "#/components/schemas/issue_change/properties/changes/properties/milestone",
+          "#/components/schemas/issue_change/properties/changes/properties/priority",
+          "#/components/schemas/issue_change/properties/changes/properties/state",
+          "#/components/schemas/issue_change/properties/changes/properties/title",
+          "#/components/schemas/issue_change/properties/changes/properties/version",
+          "#/components/schemas/issue_change/properties/links",
+          "#/components/schemas/issue_change/properties/links/properties/issue",
+          "#/components/schemas/issue_change/properties/links/properties/self",
+          "#/components/schemas/issue_change/properties/message",
+          "#/components/schemas/issue_job_status",
+          "#/components/schemas/link",
+          "#/components/schemas/milestone/allOf/1/properties/links",
+          "#/components/schemas/milestone/allOf/1/properties/links/properties/self",
+          "#/components/schemas/page",
+          "#/components/schemas/paginated_accounts",
+          "#/components/schemas/paginated_branches",
+          "#/components/schemas/paginated_branchrestrictions",
+          "#/components/schemas/paginated_changeset",
+          "#/components/schemas/paginated_commit_comments",
+          "#/components/schemas/paginated_commitstatuses",
+          "#/components/schemas/paginated_components",
+          "#/components/schemas/paginated_default_reviewer_and_type",
+          "#/components/schemas/paginated_deploy_keys",
+          "#/components/schemas/paginated_diffstats",
+          "#/components/schemas/paginated_files",
+          "#/components/schemas/paginated_hook_events",
+          "#/components/schemas/paginated_issue_attachments",
+          "#/components/schemas/paginated_issue_comments",
+          "#/components/schemas/paginated_issues",
+          "#/components/schemas/paginated_log_entries",
+          "#/components/schemas/paginated_milestones",
+          "#/components/schemas/paginated_project_deploy_keys",
+          "#/components/schemas/paginated_projects",
+          "#/components/schemas/paginated_pullrequest_comments",
+          "#/components/schemas/paginated_pullrequests",
+          "#/components/schemas/paginated_refs",
+          "#/components/schemas/paginated_repositories",
+          "#/components/schemas/paginated_repository_group_permissions",
+          "#/components/schemas/paginated_repository_permissions",
+          "#/components/schemas/paginated_repository_user_permissions",
+          "#/components/schemas/paginated_snippet_comments",
+          "#/components/schemas/paginated_snippet_commit",
+          "#/components/schemas/paginated_snippets",
+          "#/components/schemas/paginated_ssh_user_keys",
+          "#/components/schemas/paginated_tags",
+          "#/components/schemas/paginated_treeentries",
+          "#/components/schemas/paginated_versions",
+          "#/components/schemas/paginated_webhook_subscriptions",
+          "#/components/schemas/paginated_workspace_memberships",
+          "#/components/schemas/paginated_workspaces",
+          "#/components/schemas/project/allOf/1/properties/links",
+          "#/components/schemas/project/allOf/1/properties/links/properties/avatar",
+          "#/components/schemas/project/allOf/1/properties/links/properties/html",
+          "#/components/schemas/project_branching_model/allOf/1/properties/branch_types/items",
+          "#/components/schemas/project_branching_model/allOf/1/properties/development",
+          "#/components/schemas/project_branching_model/allOf/1/properties/production",
+          "#/components/schemas/project_deploy_key/allOf/1/properties/links",
+          "#/components/schemas/project_deploy_key/allOf/1/properties/links/properties/self",
+          "#/components/schemas/pullrequest/allOf/1/properties/links",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/activity",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/approve",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/comments",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/commits",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/decline",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/diff",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/diffstat",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/html",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/merge",
+          "#/components/schemas/pullrequest/allOf/1/properties/links/properties/self",
+          "#/components/schemas/pullrequest/allOf/1/properties/merge_commit",
+          "#/components/schemas/pullrequest/allOf/1/properties/rendered",
+          "#/components/schemas/pullrequest/allOf/1/properties/rendered/properties/description",
+          "#/components/schemas/pullrequest/allOf/1/properties/rendered/properties/reason",
+          "#/components/schemas/pullrequest/allOf/1/properties/rendered/properties/title",
+          "#/components/schemas/pullrequest/allOf/1/properties/summary",
+          "#/components/schemas/pullrequest_endpoint",
+          "#/components/schemas/pullrequest_endpoint/properties/branch",
+          "#/components/schemas/pullrequest_endpoint/properties/commit",
+          "#/components/schemas/ref/properties/links",
+          "#/components/schemas/ref/properties/links/properties/commits",
+          "#/components/schemas/ref/properties/links/properties/html",
+          "#/components/schemas/ref/properties/links/properties/self",
+          "#/components/schemas/repository/allOf/1/properties/links",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/avatar",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/clone/items",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/commits",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/downloads",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/forks",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/hooks",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/html",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/pullrequests",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/self",
+          "#/components/schemas/repository/allOf/1/properties/links/properties/watchers",
+          "#/components/schemas/repository_group_permission/properties/links",
+          "#/components/schemas/repository_group_permission/properties/links/properties/self",
+          "#/components/schemas/repository_user_permission/properties/links",
+          "#/components/schemas/repository_user_permission/properties/links/properties/self",
+          "#/components/schemas/snippet_comment/allOf/1/properties/links",
+          "#/components/schemas/snippet_comment/allOf/1/properties/links/properties/html",
+          "#/components/schemas/snippet_comment/allOf/1/properties/links/properties/self",
+          "#/components/schemas/snippet_commit/allOf/1/properties/links",
+          "#/components/schemas/snippet_commit/allOf/1/properties/links/properties/diff",
+          "#/components/schemas/snippet_commit/allOf/1/properties/links/properties/html",
+          "#/components/schemas/snippet_commit/allOf/1/properties/links/properties/self",
+          "#/components/schemas/ssh_key/allOf/1/properties/links",
+          "#/components/schemas/ssh_key/allOf/1/properties/links/properties/self",
+          "#/components/schemas/subject_types",
+          "#/components/schemas/subject_types/properties/repository",
+          "#/components/schemas/subject_types/properties/repository/properties/events",
+          "#/components/schemas/subject_types/properties/workspace",
+          "#/components/schemas/subject_types/properties/workspace/properties/events",
+          "#/components/schemas/version/allOf/1/properties/links",
+          "#/components/schemas/version/allOf/1/properties/links/properties/self",
+          "#/components/schemas/workspace/allOf/1/properties/links",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/avatar",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/html",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/members",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/owners",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/projects",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/repositories",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/self",
+          "#/components/schemas/workspace/allOf/1/properties/links/properties/snippets",
+          "#/components/schemas/workspace_membership/allOf/1/properties/links",
+          "#/components/schemas/workspace_membership/allOf/1/properties/links/properties/self"
+        ]
+      },
+      {
+        "corpusId": "bitbucket",
+        "shape": "object-properties-additional-properties-omitted",
+        "carrier": "extension-data record",
+        "behaviorTest": "GeneratedCarrierFidelityTests.Implicit_open_object_preserves_additional_members_at_runtime",
+        "ownerPointers": [
+          "#/components/schemas/deployments_ddev_paginated_environments",
+          "#/components/schemas/deployments_stg_west_paginated_environments",
+          "#/components/schemas/paginated_annotations",
+          "#/components/schemas/paginated_deployment_variable",
+          "#/components/schemas/paginated_deployments",
+          "#/components/schemas/paginated_environments",
+          "#/components/schemas/paginated_pipeline_caches",
+          "#/components/schemas/paginated_pipeline_known_hosts",
+          "#/components/schemas/paginated_pipeline_schedule_executions",
+          "#/components/schemas/paginated_pipeline_schedules",
+          "#/components/schemas/paginated_pipeline_steps",
+          "#/components/schemas/paginated_pipeline_variables",
+          "#/components/schemas/paginated_pipelines",
+          "#/components/schemas/paginated_reports",
+          "#/components/schemas/pipeline_cache_content_uri",
+          "#/components/schemas/pipeline_command",
+          "#/components/schemas/pipeline_image",
+          "#/components/schemas/report_data",
+          "#/components/schemas/search_code_search_result",
+          "#/components/schemas/search_content_match",
+          "#/components/schemas/search_line",
+          "#/components/schemas/search_result_page",
+          "#/components/schemas/search_segment"
+        ]
+      },
+      {
+        "corpusId": "bitbucket",
+        "shape": "object-properties-additional-properties-true",
+        "carrier": "extension-data record",
+        "behaviorTest": "GeneratedCarrierFidelityTests.Explicit_open_object_preserves_additional_members_at_runtime",
+        "ownerPointers": [
+          "#/components/schemas/account/allOf/1",
+          "#/components/schemas/account_links",
+          "#/components/schemas/app_user/allOf/1",
+          "#/components/schemas/application_property",
+          "#/components/schemas/author/allOf/1",
+          "#/components/schemas/base_commit/allOf/1",
+          "#/components/schemas/branch/allOf/1",
+          "#/components/schemas/branching_model/allOf/1",
+          "#/components/schemas/branching_model_settings/allOf/1",
+          "#/components/schemas/branchrestriction/allOf/1",
+          "#/components/schemas/comment/allOf/1",
+          "#/components/schemas/commit/allOf/1",
+          "#/components/schemas/commit_comment/allOf/1",
+          "#/components/schemas/commit_file",
+          "#/components/schemas/commitstatus/allOf/1",
+          "#/components/schemas/component/allOf/1",
+          "#/components/schemas/default_reviewer_and_type",
+          "#/components/schemas/deploy_key/allOf/1",
+          "#/components/schemas/deployment/allOf/1",
+          "#/components/schemas/deployment_environment/allOf/1",
+          "#/components/schemas/deployment_environment_lock/allOf/1",
+          "#/components/schemas/deployment_release/allOf/1",
+          "#/components/schemas/deployment_state_completed/allOf/1",
+          "#/components/schemas/deployment_state_completed_status_failed/allOf/1",
+          "#/components/schemas/deployment_state_completed_status_stopped/allOf/1",
+          "#/components/schemas/deployment_state_completed_status_successful/allOf/1",
+          "#/components/schemas/deployment_state_in_progress/allOf/1",
+          "#/components/schemas/deployment_state_undeployed/allOf/1",
+          "#/components/schemas/deployment_variable/allOf/1",
+          "#/components/schemas/deployments_ddev_deployment_environment/allOf/1",
+          "#/components/schemas/deployments_ddev_deployment_environment_lock/allOf/1",
+          "#/components/schemas/deployments_stg_west_deployment_environment/allOf/1",
+          "#/components/schemas/deployments_stg_west_deployment_environment_lock/allOf/1",
+          "#/components/schemas/diffstat",
+          "#/components/schemas/effective_repo_branching_model/allOf/1",
+          "#/components/schemas/error",
+          "#/components/schemas/export_options",
+          "#/components/schemas/group/allOf/1",
+          "#/components/schemas/issue/allOf/1",
+          "#/components/schemas/issue_attachment/allOf/1",
+          "#/components/schemas/issue_change",
+          "#/components/schemas/issue_comment/allOf/1",
+          "#/components/schemas/milestone/allOf/1",
+          "#/components/schemas/object",
+          "#/components/schemas/participant/allOf/1",
+          "#/components/schemas/pipeline/allOf/1",
+          "#/components/schemas/pipeline_build_number/allOf/1",
+          "#/components/schemas/pipeline_cache/allOf/1",
+          "#/components/schemas/pipeline_commit_target/allOf/1",
+          "#/components/schemas/pipeline_error/allOf/1",
+          "#/components/schemas/pipeline_known_host/allOf/1",
+          "#/components/schemas/pipeline_ref_target/allOf/1",
+          "#/components/schemas/pipeline_schedule/allOf/1",
+          "#/components/schemas/pipeline_schedule_execution_errored/allOf/1",
+          "#/components/schemas/pipeline_schedule_execution_executed/allOf/1",
+          "#/components/schemas/pipeline_selector/allOf/1",
+          "#/components/schemas/pipeline_ssh_key_pair/allOf/1",
+          "#/components/schemas/pipeline_ssh_public_key/allOf/1",
+          "#/components/schemas/pipeline_state_completed/allOf/1",
+          "#/components/schemas/pipeline_state_completed_error/allOf/1",
+          "#/components/schemas/pipeline_state_completed_expired/allOf/1",
+          "#/components/schemas/pipeline_state_completed_failed/allOf/1",
+          "#/components/schemas/pipeline_state_completed_stopped/allOf/1",
+          "#/components/schemas/pipeline_state_completed_successful/allOf/1",
+          "#/components/schemas/pipeline_state_in_progress/allOf/1",
+          "#/components/schemas/pipeline_state_in_progress_paused/allOf/1",
+          "#/components/schemas/pipeline_state_in_progress_running/allOf/1",
+          "#/components/schemas/pipeline_state_pending/allOf/1",
+          "#/components/schemas/pipeline_step/allOf/1",
+          "#/components/schemas/pipeline_step_error/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed_error/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed_expired/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed_failed/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed_not_run/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed_stopped/allOf/1",
+          "#/components/schemas/pipeline_step_state_completed_successful/allOf/1",
+          "#/components/schemas/pipeline_step_state_in_progress/allOf/1",
+          "#/components/schemas/pipeline_step_state_pending/allOf/1",
+          "#/components/schemas/pipeline_step_state_ready/allOf/1",
+          "#/components/schemas/pipeline_variable/allOf/1",
+          "#/components/schemas/pipelines_config/allOf/1",
+          "#/components/schemas/project/allOf/1",
+          "#/components/schemas/project_branching_model/allOf/1",
+          "#/components/schemas/project_deploy_key/allOf/1",
+          "#/components/schemas/pullrequest/allOf/1",
+          "#/components/schemas/pullrequest_comment/allOf/1",
+          "#/components/schemas/pullrequest_merge_parameters",
+          "#/components/schemas/ref",
+          "#/components/schemas/report/allOf/1",
+          "#/components/schemas/report_annotation/allOf/1",
+          "#/components/schemas/repository/allOf/1",
+          "#/components/schemas/repository_group_permission",
+          "#/components/schemas/repository_inheritance_state",
+          "#/components/schemas/repository_permission",
+          "#/components/schemas/repository_user_permission",
+          "#/components/schemas/snippet/allOf/1",
+          "#/components/schemas/snippet_comment/allOf/1",
+          "#/components/schemas/snippet_commit/allOf/1",
+          "#/components/schemas/ssh_account_key/allOf/1",
+          "#/components/schemas/ssh_key/allOf/1",
+          "#/components/schemas/tag/allOf/1",
+          "#/components/schemas/team/allOf/1",
+          "#/components/schemas/team_links/allOf/1",
+          "#/components/schemas/treeentry",
+          "#/components/schemas/user/allOf/1",
+          "#/components/schemas/user_links/allOf/1",
+          "#/components/schemas/version/allOf/1",
+          "#/components/schemas/webhook_subscription/allOf/1",
+          "#/components/schemas/workspace/allOf/1",
+          "#/components/schemas/workspace_membership/allOf/1"
         ]
       },
       {
@@ -40637,22 +41284,22 @@
       "cross-path-reference": 0,
       "empty-schema": 249,
       "encoding-object": 1270,
-      "explicit-discriminator": 0,
+      "explicit-discriminator": 1,
       "external-value-example": 0,
       "nested-discriminator": 10,
       "nullable-composition-branch": 380,
       "object-no-properties-additional-properties-false": 299,
-      "object-no-properties-additional-properties-omitted": 1321,
+      "object-no-properties-additional-properties-omitted": 1323,
       "object-no-properties-additional-properties-schema": 787,
-      "object-no-properties-additional-properties-true": 65,
-      "object-properties-additional-properties-false": 1008,
-      "object-properties-additional-properties-omitted": 17881,
+      "object-no-properties-additional-properties-true": 84,
+      "object-properties-additional-properties-false": 1177,
+      "object-properties-additional-properties-omitted": 17904,
       "object-properties-additional-properties-schema": 4,
-      "object-properties-additional-properties-true": 114,
+      "object-properties-additional-properties-true": 225,
       "parameter-content": 0
     }
   },
-  "reviewedDispositionSha256": "0392324c6116e407ce2891ebb648478281877cb1d239831a1ab0272a1d4f7c0c",
+  "reviewedDispositionSha256": "e39032f55fd071e65acc6082fee397dfda7ef6b88c78bd4ad9dc5d602f10db99",
   "vendorExtensionDispositions": {
     "x-Description": {
       "disposition": "map",
@@ -41041,6 +41688,38 @@
     "x-discord-union": {
       "disposition": "preserve",
       "evidence": "All 16 'oneOf' values sit on anyOf request-body schemas and declare the branches mutually exclusive, which the standard anyOf alone does not say."
+    },
+    "x-atlassian-narrative": {
+      "disposition": "exclude",
+      "evidence": "The root object holds Atlassian's long-form guide pages (authentication, scopes, pagination) as Markdown documents; they narrate the API rather than define any request, response, schema or security scheme."
+    },
+    "x-revision": {
+      "disposition": "exclude",
+      "evidence": "The single root value is the upstream source revision, acquisition provenance already pinned by the manifest artifact hash."
+    },
+    "x-tags": {
+      "disposition": "exclude",
+      "evidence": "The info-level array labels the API for catalog browsing ('code repository', 'git'); it does not affect HTTP, schema, auth, or generated client behavior."
+    },
+    "x-bb-batch-max-size": {
+      "disposition": "preserve",
+      "evidence": "Bitbucket's batch-size hints sit only on component schemas the import preserves verbatim (they compose by allOf), so every value survives the round trip unchanged."
+    },
+    "x-bb-batch-url": {
+      "disposition": "preserve",
+      "evidence": "Bitbucket's internal batch-endpoint templates sit only on component schemas the import preserves verbatim, so every value survives the round trip unchanged."
+    },
+    "x-bb-default-fields": {
+      "disposition": "preserve",
+      "evidence": "Bitbucket's default partial-response field lists sit only on component schemas the import preserves verbatim, so every value survives the round trip unchanged."
+    },
+    "x-bb-detail-fields": {
+      "disposition": "preserve",
+      "evidence": "Bitbucket's detail-view field lists sit only on component schemas the import preserves verbatim, so every value survives the round trip unchanged."
+    },
+    "x-bb-url": {
+      "disposition": "preserve",
+      "evidence": "Bitbucket's internal resource URL templates sit only on component schemas the import preserves verbatim, so every value survives the round trip unchanged."
     }
   }
 }

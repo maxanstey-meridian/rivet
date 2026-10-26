@@ -78,9 +78,29 @@ internal sealed record ResponseSet(
     ResponseContract? Default
 );
 
+/// <summary>Where the host reads a contract's <c>TInput</c> from.</summary>
+internal enum InputBinding
+{
+    /// <summary>A JSON body, read by System.Text.Json with the host's options.</summary>
+    Json,
+
+    /// <summary>A form or multipart body (<c>.FormEncoded()</c>, <c>.AcceptsFile()</c>).</summary>
+    Form,
+
+    /// <summary>The route and query; the body is raw bytes (<c>.AcceptsBinary()</c>).</summary>
+    RouteAndQuery,
+}
+
+/// <summary>
+/// A published endpoint. <see cref="InputType"/> is the <c>TInput</c> that <c>.Bind(input)</c>
+/// takes, null for a definition without one, and <see cref="InputBinding"/> says where the
+/// host reads it from.
+/// </summary>
 internal sealed record EndpointContract(
     string Method,
     string Route,
+    Type? InputType,
+    InputBinding InputBinding,
     ResponseContract? Success,
     ResponseSet AlternateResponses
 );

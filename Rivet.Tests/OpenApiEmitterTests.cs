@@ -5272,6 +5272,71 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void TaggedUnion_Whose_Base_Is_Preserved_Verbatim_Emits_Only_The_Preserved_Schema()
+    {
+        // An imported allOf hierarchy (Bitbucket's object → repository) walks back as a
+        // tagged union, but its base carries the source's own schema verbatim. That schema
+        // is the truth: no oneOf, and no {Base}_{Tag} variants left behind beside it.
+        var baseId = new TsTypeMetadata("object", TsTypeProvenance.Component);
+        var preservedJson = """
+            {"type":"object","properties":{"type":{"type":"string"}},"required":["type"],"discriminator":{"propertyName":"type"}}
+            """;
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["BitbucketObject"] = new(
+                "BitbucketObject",
+                [],
+                new TsType.TaggedUnion("type", [Variant("repository", "slug")]),
+                Metadata: baseId
+            ),
+            ["Holder"] = new(
+                "Holder",
+                [],
+                [new TsPropertyDefinition("item", new TsType.TypeRef("BitbucketObject"), false)]
+            ),
+        };
+        var documentInfo = new OpenApiDocumentInfo(
+            Provenance: new OpenApiDocumentProvenance(
+                new OpenApiInfoProvenance("API", "1.0.0"),
+                [],
+                null,
+                [],
+                [],
+                ComponentSchemas: [new OpenApiRawComponentProvenance("object", preservedJson)]
+            )
+        );
+
+        using var doc = EmitOpenApiFromModel(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            documentInfo: documentInfo
+        );
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(
+            ["Holder", "object"],
+            schemas.EnumerateObject().Select(schema => schema.Name).Order(StringComparer.Ordinal)
+        );
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse(preservedJson),
+                JsonNode.Parse(schemas.GetProperty("object").GetRawText())
+            )
+        );
+        Assert.Equal(
+            "#/components/schemas/object",
+            schemas
+                .GetProperty("Holder")
+                .GetProperty("properties")
+                .GetProperty("item")
+                .GetProperty("$ref")
+                .GetString()
+        );
+    }
+
+    [Fact]
     public void Global_Tags_Array_Declares_All_Operation_Tags()
     {
         // W4: operations reference tags — the global tags array must declare them

@@ -113,7 +113,7 @@ public sealed class RoundTripGateHardeningTests
         var profileNode = JsonNode
             .Parse(File.ReadAllText(CliRunner.RepoPath("corpus", "verified-profile.json")))!
             .AsObject();
-        profileNode["verifiedCorpusIds"]!.AsArray().Add("bitbucket");
+        profileNode["verifiedCorpusIds"]!.AsArray().Add("cloudflare");
         using var mutation = TemporaryJson.Write(profileNode);
 
         Assert.Throws<InvalidDataException>(() =>

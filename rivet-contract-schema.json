@@ -142,7 +142,15 @@
                   "name": { "type": "string" },
                   "type": { "$ref": "#/$defs/tsType" },
                   "optional": { "type": "boolean" },
-                  "surface": { "type": "string", "enum": ["Both", "RequestOnly", "ResponseOnly"] }
+                  "deprecated": { "type": "boolean" },
+                  "format": { "type": "string" },
+                  "defaultValue": { "type": "string" },
+                  "constraints": { "$ref": "#/$defs/tsPropertyConstraints" },
+                  "description": { "type": "string" },
+                  "example": { "type": "string" },
+                  "readOnly": { "type": "boolean" },
+                  "writeOnly": { "type": "boolean" },
+                  "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
                 },
                 "required": ["name", "type"],
                 "additionalProperties": false
@@ -165,7 +173,9 @@
                   "properties": {
                     "tag": { "type": "string" },
                     "type": { "$ref": "#/$defs/tsType" },
-                    "metadata": { "$ref": "#/$defs/typeMetadata" }
+                    "metadata": { "$ref": "#/$defs/typeMetadata" },
+                    "description": { "type": "string" },
+                    "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
                 },
                 "required": ["tag", "type"],
                 "additionalProperties": false
@@ -194,7 +204,8 @@
       "type": "object",
       "properties": {
         "componentId": { "type": ["string", "null"] },
-        "provenance": { "type": "string", "enum": ["component", "synthetic"] }
+        "provenance": { "type": "string", "enum": ["component", "synthetic"] },
+        "discriminatorSchema": { "type": "string", "description": "On a polymorphic variant: the JSON of its tag property's schema as the source authored it, emitted in place of enum: [tag]." }
       },
       "required": ["provenance"],
       "additionalProperties": false
