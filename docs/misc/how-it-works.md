@@ -22,7 +22,7 @@ implemented in `Rivet.Tool`:
 Two side doors feed the same emit pipeline:
 
 - `--from contract.json` — a contract JSON document produced by the sibling
-  runtimes (rivet-ts, rivet-php). This is an **internal IR**, not a public format.
+  runtime, rivet-ts. This is an **internal IR**, not a public format.
 - `--from-openapi spec.json` — the one-shot [importer](/guides/openapi-import)
   generates C# contracts/DTOs which then go through the normal Roslyn path.
 

@@ -62,8 +62,8 @@ definitions (`admin=bearer`) and repeated values are rejected in import mode.
 
 ## From Contract JSON
 
-`--from` consumes a Rivet contract JSON document (produced by the sibling runtimes,
-rivet-ts and rivet-php) and emits the same OpenAPI spec. The contract JSON is an
+`--from` consumes a Rivet contract JSON document (produced by the sibling runtime,
+rivet-ts) and emits the same OpenAPI spec. The contract JSON is an
 internal intermediate representation, not a public format — OpenAPI is the only
 public output:
 

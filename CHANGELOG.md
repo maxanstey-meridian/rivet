@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.49.0 — unreleased
+## 0.49.0 — 2026-10-26
 
 The gap-audit release. Every place where Rivet knew it was wrong and wrote it up in the docs instead of fixing it, it now either gets right or refuses. That means a lot of former warnings now stop generation, so expect `dotnet-rivet` to fail on contracts it used to wave through. Each error names the thing and says what to do instead. It comes in three parts: wrong specs that used to ship silently, promises nothing checked, and the binding, security and corpus work that finishes the job.
 
