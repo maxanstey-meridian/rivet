@@ -740,7 +740,20 @@ public sealed class FormFileTests
         "public IFormFile File { get; init; } = null!;",
         false
     )]
+    [InlineData(
+        "internal new string File { get; init; } = \"\";",
+        "public IFormFile File { get; init; } = null!;",
+        false
+    )]
     [InlineData("", "public List<IFormFile> Files { get; init; } = [];", true)]
+    [InlineData("public IFormFile[] Files { get; init; } = [];", "", true)]
+    [InlineData("public IList<IFormFile> Files { get; init; } = [];", "", true)]
+    [InlineData("public ICollection<IFormFile> Files { get; init; } = [];", "", true)]
+    [InlineData("public IEnumerable<IFormFile> Files { get; init; } = [];", "", true)]
+    [InlineData("public IReadOnlyList<IFormFile> Files { get; init; } = [];", "", true)]
+    [InlineData("public IReadOnlyCollection<IFormFile> Files { get; init; } = [];", "", true)]
+    [InlineData("public IFormFileCollection Files { get; init; } = null!;", "", false)]
+    [InlineData("public HashSet<IFormFile> Files { get; init; } = [];", "", false)]
     public void Tool_and_runtime_agree_on_which_inputs_carry_files(
         string members,
         string baseMembers,

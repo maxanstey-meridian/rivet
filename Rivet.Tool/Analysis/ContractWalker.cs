@@ -1535,7 +1535,8 @@ public static class ContractWalker
     // The tool's formFileInput, by the runtime's rule (RequestInputLowering.CarriesFormFiles):
     // a property ASP.NET's form binder would bind is an IFormFile or a collection of them.
     // Those are the public instance properties that aren't indexers, along the whole base
-    // chain (not just the walkable assemblies), the most-derived one per name. Collections
+    // chain (not just the walkable assemblies), where the most-derived property of a name,
+    // whatever its accessibility, hides the base's. Collections
     // count: a record whose ONLY files were List<IFormFile> used to emit as JSON with
     // format:binary strings, an unimplementable spec.
     // FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files holds the two copies.
@@ -1550,14 +1551,12 @@ public static class ContractWalker
         {
             foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
             {
+                // Any instance property hides a base's of the same name, as ASP.NET's binder
+                // sees it; only a public one can carry files.
                 if (
-                    property
-                        is {
-                            IsStatic: false,
-                            IsIndexer: false,
-                            DeclaredAccessibility: Accessibility.Public
-                        }
+                    property is { IsStatic: false, IsIndexer: false }
                     && seen.Add(property.Name)
+                    && property.DeclaredAccessibility == Accessibility.Public
                     && (
                         IsFormFileType(wkt, property.Type)
                         || typeWalker.IsCollectionOf(property.Type, wkt.IFormFile)

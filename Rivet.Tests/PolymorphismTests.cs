@@ -1785,9 +1785,8 @@ public sealed class PolymorphismTests
         );
     }
 
-    // An implicit tag (a component name) is decided by the whole chain: every declaration of
-    // the tag property must admit it, and one of them must constrain the value. A mapped tag
-    // is named explicitly, so admitting it is enough.
+    // An implicit tag (a component name) is decided by the whole chain, like a mapped one:
+    // every declaration of the tag property must admit it.
     [Theory]
     // Account restates `type` with documentation only. Resource's `type` still constrains it
     // to a string, so Account and User are tags a payload names, as they would be had
@@ -1799,12 +1798,12 @@ public sealed class PolymorphismTests
         "\"type\": { \"type\": \"string\", \"enum\": [\"User\", \"team\"] },",
         "\"type\": { \"description\": \"The account kind.\" },"
     )]
-    // Nothing down the chain constrains `type`: no implicit tag is one a payload names, but
-    // the mapping names Team's.
+    // Nothing down the chain constrains `type`, so nothing refuses an implicit tag: the
+    // discriminator alone says the property holds it (OpenAPI's implicit mapping).
     [InlineData(
-        "public abstract record Account : Resource",
-        new string[0],
+        "public record Account : Resource",
         new[] { "Resource", "Account", "User" },
+        new string[0],
         "\"type\": { \"type\": \"string\", \"enum\": [\"User\", \"team\"] },",
         "\"type\": { \"description\": \"The account kind.\" },",
         "\"properties\": { \"type\": { \"type\": \"string\" } },",
@@ -1848,14 +1847,12 @@ public sealed class PolymorphismTests
     // A property-less root that admits null: the tag is declared only below it.
     [InlineData("Envelope.cs", "required Resource? Owner {", PropertylessRoot, "")]
     // A leaf that declares nothing under a root that declares nothing: no type, no
-    // properties, still the record the tag its mapping entry names.
+    // properties, still the record its own tag names.
     [InlineData(
         "Envelope.cs",
         "public Leaf Leaf {",
         PropertylessRoot,
         "",
-        TeamMapping,
-        "\"mapping\": { \"team\": \"#/components/schemas/Team\", \"leaf\": \"#/components/schemas/Leaf\" }",
         OwnerProperty,
         "\"properties\": { \"owner\": { \"$ref\": \"#/components/schemas/Resource\" }, \"leaf\": { \"$ref\": \"#/components/schemas/Leaf\" } },",
         "\"AccountLinks\": {",

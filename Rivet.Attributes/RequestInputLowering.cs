@@ -62,8 +62,8 @@ internal static class RequestInputLowering
     /// The runtime's <c>formFileInput</c>: <c>TInput</c> is an <c>IFormFile</c>, or one of the
     /// properties ASP.NET's form binder would bind is an <c>IFormFile</c>, an array of them or
     /// one of the tool's collections of them. Those are the public instance properties that
-    /// aren't indexers, along the whole base chain, the most-derived one per name, so a
-    /// <c>new</c> member hides its base's. Roslyn symbols and <c>System.Type</c> can't share
+    /// aren't indexers, along the whole base chain, where the most-derived property of a name,
+    /// whatever its accessibility, hides the base's, so a <c>new</c> member hides its base's. Roslyn symbols and <c>System.Type</c> can't share
     /// code, so the tool keeps its own copy (<c>ContractWalker.HasFormFileProperty</c>), and
     /// <c>FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files</c> holds the two
     /// to one table of shapes.
@@ -80,13 +80,21 @@ internal static class RequestInputLowering
         {
             foreach (
                 var property in type.GetProperties(
-                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly
+                    BindingFlags.Public
+                        | BindingFlags.NonPublic
+                        | BindingFlags.Instance
+                        | BindingFlags.DeclaredOnly
                 )
             )
             {
+                // Any instance property hides a base's of the same name; only a public one
+                // (a public accessor, as BindingFlags.Public reads it) can carry files.
                 if (
                     property.GetIndexParameters().Length == 0
                     && seen.Add(property.Name)
+                    && (
+                        property.GetMethod?.IsPublic == true || property.SetMethod?.IsPublic == true
+                    )
                     && IsFormFiles(property.PropertyType)
                 )
                 {
@@ -98,7 +106,8 @@ internal static class RequestInputLowering
         return false;
     }
 
-    // An IFormFile, or an array, List<T> or sequence interface of them (TypeWalker.IsCollectionOf).
+    // An IFormFile, or an array, List<T> or sequence interface of them: the tool's
+    // TypeWalker.IsCollectionOf, held to it by FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files.
     private static bool IsFormFiles(Type type) =>
         type == typeof(IFormFile)
         || (type.IsArray && type.GetElementType() == typeof(IFormFile))

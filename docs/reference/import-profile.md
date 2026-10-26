@@ -156,11 +156,10 @@ honest degradation, not full support.
   `pipeline_selector` redefines `type` as a selector kind) is named by no
   payload, so it stays a plain record outside the hierarchy. Every declaration
   of the tag property down a member's chain applies at once, so each must admit
-  its tag, and for a tag the `mapping` names that's enough. An implicit tag (the
-  component's name) also needs something in the chain to pin the value down with
-  an `enum`, `const` or `type`: a chain that says nothing about its tag, or only
-  documents it, names no payload, so its member is abstract. A child restating
-  `type` with nothing but a description therefore changes nothing. What C# can't hold
+  its tag, whether the `mapping` names it or it's the component's name (OpenAPI's
+  implicit mapping). The discriminator is what says the property holds the tag,
+  so a chain that declares it nowhere, or only documents it, refuses no tag, and
+  a child restating `type` with nothing but a description changes nothing. What C# can't hold
   leaves the whole hierarchy a plain record with a `RIV3005` naming why: several
   `$ref`s in one `allOf`, a descendant that also composes a `oneOf`/`anyOf`, a
   required member redeclared with a schema that differs beyond documentation (C#
