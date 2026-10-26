@@ -18,10 +18,25 @@ public sealed record TsTypeDefinition
         TsScalarMetadata? ScalarMetadata = null
     )
     {
+        // Exactly one of Type (an alias) or Properties (an object), as the schema's oneOf
+        // says; an empty properties list beside an alias says nothing, so it may stay.
+        if (Type is not null && Properties is { Count: > 0 })
+        {
+            throw new ArgumentException(
+                $"type '{Name}' has both 'type' and 'properties'; an alias carries its shape in 'type' and an object type in 'properties', so give it one"
+            );
+        }
+
+        if (Type is null && Properties is null)
+        {
+            throw new ArgumentException(
+                $"type '{Name}' has neither 'type' nor 'properties'; give an alias its 'type' or an object type its 'properties' (an empty object is \"properties\": [])"
+            );
+        }
+
         this.Name = Name;
         this.TypeParameters = TypeParameters;
-        // An alias carries its shape in Type; any properties beside it are ignored.
-        this.Properties = Type is null ? Properties ?? [] : [];
+        this.Properties = Properties ?? [];
         this.Type = Type;
         this.Description = Description;
         this.Metadata = Metadata;

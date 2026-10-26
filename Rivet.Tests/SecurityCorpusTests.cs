@@ -52,7 +52,9 @@ public sealed class SecurityCorpusTests
             }
             """;
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
+        Assert.Empty(imported.Warnings);
+        using var emitted = CompilationHelper.EmitImported(imported);
         var root = emitted.RootElement;
         var schemes = root.GetProperty("components").GetProperty("securitySchemes");
         var apiKey = schemes.GetProperty("api_key");
@@ -289,7 +291,7 @@ public sealed class SecurityCorpusTests
                 && warning.Contains("Security alternative dropped on GET /widgets")
                 && warning.Contains("'missing'")
         );
-        using var emitted = Emit(imported);
+        using var emitted = CompilationHelper.EmitImported(imported);
         var paths = JsonNode.Parse(emitted.RootElement.GetRawText())!["paths"]!;
         Assert.True(
             JsonNode.DeepEquals(JsonNode.Parse("[]"), paths["/health"]!["get"]!["security"])
@@ -344,7 +346,7 @@ public sealed class SecurityCorpusTests
                 && warning.Contains("Operation dropped: GET /widgets")
                 && warning.Contains("inherits from the document")
         );
-        using var emitted = Emit(imported);
+        using var emitted = CompilationHelper.EmitImported(imported);
         var root = JsonNode.Parse(emitted.RootElement.GetRawText())!;
         Assert.Null(root["paths"]!["/widgets"]);
         Assert.Null(root["security"]);
@@ -401,7 +403,7 @@ public sealed class SecurityCorpusTests
                 warning.Contains("Operation dropped: POST /uploads")
                 && warning.Contains("it declares")
         );
-        using var emitted = Emit(imported);
+        using var emitted = CompilationHelper.EmitImported(imported);
         var paths = JsonNode.Parse(emitted.RootElement.GetRawText())!["paths"]!;
         Assert.Null(paths["/uploads"]);
         Assert.NotNull(paths["/health"]);
@@ -455,7 +457,7 @@ public sealed class SecurityCorpusTests
                 warning.Contains("Security alternative dropped on the document")
                 && warning.Contains("'missing'")
         );
-        using var emitted = Emit(imported);
+        using var emitted = CompilationHelper.EmitImported(imported);
         var root = JsonNode.Parse(emitted.RootElement.GetRawText())!;
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse("[{\"auth\":[]}]"), root["security"]));
         Assert.NotNull(root["paths"]!["/widgets"]);
@@ -490,7 +492,7 @@ public sealed class SecurityCorpusTests
             imported.Warnings,
             warning => warning.Contains("Operation dropped: GET /gadgets")
         );
-        using var emitted = Emit(imported);
+        using var emitted = CompilationHelper.EmitImported(imported);
         var paths = JsonNode.Parse(emitted.RootElement.GetRawText())!["paths"]!;
         Assert.Null(paths["/gadgets"]);
         Assert.True(
@@ -549,28 +551,5 @@ public sealed class SecurityCorpusTests
         Assert.Equal("X-Override", auth["name"]!.GetValue<string>());
         Assert.Equal("header", auth["in"]!.GetValue<string>());
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse("[{\"auth\":[]}]")!, output["security"]));
-    }
-
-    private static System.Text.Json.JsonDocument ImportCompileWalkAndEmit(string spec)
-    {
-        var imported = OpenApiImporter.Import(spec, new ImportOptions("Generated"));
-        Assert.Empty(imported.Warnings);
-        return Emit(imported);
-    }
-
-    private static System.Text.Json.JsonDocument Emit(ImportResult imported)
-    {
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var security = SecurityMetadataWalker.Walk(compilation);
-        var emitted = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            security
-        );
-        return System.Text.Json.JsonDocument.Parse(emitted);
     }
 }

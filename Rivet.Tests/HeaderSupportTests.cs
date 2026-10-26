@@ -334,8 +334,7 @@ public sealed class HeaderSupportTests
             namespace Test;
 
             public sealed record ListInput(
-                [property: RivetHeader("{{header}}")] string Reserved,
-                [property: RivetHeader("X-Fine")] string Fine);
+                [property: RivetHeader("{{header}}")] string Reserved);
 
             [RivetContract]
             public static class ItemsContract

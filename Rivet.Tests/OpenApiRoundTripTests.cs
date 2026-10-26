@@ -13,23 +13,6 @@ namespace Rivet.Tests;
 /// </summary>
 public sealed class OpenApiRoundTripTests
 {
-    private static JsonElement ImportCompileWalkAndEmit(string spec, string ns)
-    {
-        var result = CompilationHelper.Import(spec, ns);
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var security = SecurityMetadataWalker.Walk(compilation);
-        var emittedJson = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            security
-        );
-        return JsonSerializer.Deserialize<JsonElement>(emittedJson);
-    }
-
     [Fact]
     public void Imported_Path_And_Body_Properties_With_Same_Name_Remain_Independent()
     {
@@ -66,11 +49,16 @@ public sealed class OpenApiRoundTripTests
             """
         );
 
-        var firstEmission = ImportCompileWalkAndEmit(spec, "SameNameRoundTripFirst");
-        var emitted = ImportCompileWalkAndEmit(
+        using var firstEmissionDocument = CompilationHelper.ImportCompileWalkAndEmit(
+            spec,
+            "SameNameRoundTripFirst"
+        );
+        var firstEmission = firstEmissionDocument.RootElement;
+        using var emittedDocument = CompilationHelper.ImportCompileWalkAndEmit(
             firstEmission.GetRawText(),
             "SameNameRoundTripSecond"
         );
+        var emitted = emittedDocument.RootElement;
         var operation = emitted
             .GetProperty("paths")
             .GetProperty("/members/{id}")
@@ -879,10 +867,11 @@ public sealed class OpenApiRoundTripTests
     [Fact]
     public void Twilio_CreateAccount_Request_Example_Survives_Import_Compile_Walk_Emit()
     {
-        var emitted = ImportCompileWalkAndEmit(
+        using var emittedDocument = CompilationHelper.ImportCompileWalkAndEmit(
             FixtureSlices.TwilioCreateAccount(),
             "TwilioRoundTrip"
         );
+        var emitted = emittedDocument.RootElement;
 
         var content = emitted
             .GetProperty("paths")
@@ -900,10 +889,11 @@ public sealed class OpenApiRoundTripTests
     [Fact]
     public void GitHub_UpdateBudget_404_Named_Response_Examples_Survive_Import_Compile_Walk_Emit()
     {
-        var emitted = ImportCompileWalkAndEmit(
+        using var emittedDocument = CompilationHelper.ImportCompileWalkAndEmit(
             FixtureSlices.GitHubUpdateBudget(),
             "GitHubRoundTrip"
         );
+        var emitted = emittedDocument.RootElement;
 
         var examples = emitted
             .GetProperty("paths")
@@ -936,10 +926,11 @@ public sealed class OpenApiRoundTripTests
     [Fact]
     public void GitHub_DeleteBudget_RefBacked_Response_Example_Survives_Import_Compile_Walk_Emit()
     {
-        var emitted = ImportCompileWalkAndEmit(
+        using var emittedDocument = CompilationHelper.ImportCompileWalkAndEmit(
             FixtureSlices.GitHubDeleteBudget(),
             "GitHubRoundTrip"
         );
+        var emitted = emittedDocument.RootElement;
 
         var examples = emitted
             .GetProperty("paths")
@@ -970,10 +961,11 @@ public sealed class OpenApiRoundTripTests
     [Fact]
     public void GitHub_SetActionsCacheRetentionLimit_Request_RefExample_Survives_Import_Compile_Walk_Emit()
     {
-        var emitted = ImportCompileWalkAndEmit(
+        using var emittedDocument = CompilationHelper.ImportCompileWalkAndEmit(
             FixtureSlices.GitHubSetActionsCacheRetentionLimit(),
             "GitHubRoundTrip"
         );
+        var emitted = emittedDocument.RootElement;
 
         var examples = emitted
             .GetProperty("paths")
@@ -2827,17 +2819,8 @@ public sealed class OpenApiRoundTripTests
         );
 
         // Import → compile → walk → emit OpenAPI
-        var result = CompilationHelper.Import(spec);
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
+        var emittedJson = emitted.RootElement.GetRawText();
 
         // The emitted spec must use form-urlencoded, not JSON, for the request body
         Assert.Contains("application/x-www-form-urlencoded", emittedJson);
@@ -2937,18 +2920,8 @@ public sealed class OpenApiRoundTripTests
         );
 
         // Import → compile → walk → emit OpenAPI
-        var result = CompilationHelper.Import(spec);
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
+        using var emittedDocument = CompilationHelper.ImportCompileWalkAndEmit(spec);
+        var emitted = emittedDocument.RootElement;
 
         var props = emitted
             .GetProperty("components")
@@ -3003,18 +2976,8 @@ public sealed class OpenApiRoundTripTests
             """
         );
 
-        var result = CompilationHelper.Import(spec);
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        var emitted = JsonSerializer.Deserialize<JsonElement>(emittedJson);
+        using var emittedDocument = CompilationHelper.ImportCompileWalkAndEmit(spec);
+        var emitted = emittedDocument.RootElement;
 
         var props = emitted
             .GetProperty("components")
@@ -3062,33 +3025,13 @@ public sealed class OpenApiRoundTripTests
         );
 
         // First round-trip: OpenAPI → import → compile → walk → emit
-        var result1 = CompilationHelper.Import(spec);
-        var comp1 = CompilationHelper.CompileImportResult(result1);
-        var (disc1, walker1) = CompilationHelper.DiscoverAndWalk(comp1);
-        var eps1 = CompilationHelper.WalkContracts(comp1, disc1, walker1);
-        var json1 = OpenApiEmitter.Emit(
-            eps1,
-            walker1.Definitions,
-            walker1.Brands,
-            walker1.Enums,
-            null
-        );
+        using var emitted1 = CompilationHelper.ImportCompileWalkAndEmit(spec);
+        var doc1 = emitted1.RootElement;
 
         // Second round-trip: should be stable
-        var result2 = CompilationHelper.Import(json1);
-        var comp2 = CompilationHelper.CompileImportResult(result2);
-        var (disc2, walker2) = CompilationHelper.DiscoverAndWalk(comp2);
-        var eps2 = CompilationHelper.WalkContracts(comp2, disc2, walker2);
-        var json2 = OpenApiEmitter.Emit(
-            eps2,
-            walker2.Definitions,
-            walker2.Brands,
-            walker2.Enums,
-            null
-        );
+        using var emitted2 = CompilationHelper.ImportCompileWalkAndEmit(doc1.GetRawText());
 
         // The description should not be duplicated as summary — only description should exist
-        var doc1 = JsonSerializer.Deserialize<JsonElement>(json1);
         var op1 = doc1.GetProperty("paths").GetProperty("/api/items").GetProperty("get");
         Assert.True(op1.TryGetProperty("description", out _), "description should be present");
         Assert.False(
@@ -3097,8 +3040,10 @@ public sealed class OpenApiRoundTripTests
         );
 
         // Second pass should be identical to first
-        var doc2 = JsonSerializer.Deserialize<JsonElement>(json2);
-        var op2 = doc2.GetProperty("paths").GetProperty("/api/items").GetProperty("get");
+        var op2 = emitted2
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/items")
+            .GetProperty("get");
         Assert.Equal(
             op1.GetProperty("description").GetString(),
             op2.GetProperty("description").GetString()

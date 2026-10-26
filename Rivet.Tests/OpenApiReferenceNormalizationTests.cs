@@ -46,7 +46,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var emitted = ImportCompileWalkAndEmit(spec);
+        var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var parameter = Assert.Single(
             emitted
                 .RootElement.GetProperty("paths")
@@ -116,7 +116,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var emitted = ImportCompileWalkAndEmit(spec);
+        var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var path = emitted.RootElement.GetProperty("paths").GetProperty("/accounts/{id}");
         var getParameters = path.GetProperty("get")
             .GetProperty("parameters")
@@ -257,7 +257,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var emitted = ImportCompileWalkAndEmit(spec);
+        var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schema = Assert
             .Single(
                 emitted
@@ -312,7 +312,9 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var paths = ImportCompileWalkAndEmit(spec).RootElement.GetProperty("paths");
+        var paths = CompilationHelper
+            .ImportCompileWalkAndEmit(spec)
+            .RootElement.GetProperty("paths");
         var response = paths
             .GetProperty("/target")
             .GetProperty("get")
@@ -388,7 +390,8 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var requestBody = ImportCompileWalkAndEmit(spec)
+        var requestBody = CompilationHelper
+            .ImportCompileWalkAndEmit(spec)
             .RootElement.GetProperty("paths")
             .GetProperty("/target")
             .GetProperty("post")
@@ -452,7 +455,8 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var header = ImportCompileWalkAndEmit(spec)
+        var header = CompilationHelper
+            .ImportCompileWalkAndEmit(spec)
             .RootElement.GetProperty("paths")
             .GetProperty("/target")
             .GetProperty("get")
@@ -521,7 +525,8 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        var example = ImportCompileWalkAndEmit(spec)
+        var example = CompilationHelper
+            .ImportCompileWalkAndEmit(spec)
             .RootElement.GetProperty("paths")
             .GetProperty("/target")
             .GetProperty("get")
@@ -575,7 +580,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var root = emitted.RootElement;
         Assert.Equal(
             "#/components/examples/account",
@@ -770,7 +775,7 @@ public sealed class OpenApiReferenceNormalizationTests
             }
             """;
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var root = emitted.RootElement;
         var schemas = root.GetProperty("components").GetProperty("schemas");
 
@@ -821,21 +826,5 @@ public sealed class OpenApiReferenceNormalizationTests
                 .GetProperty("description")
                 .GetString()
         );
-    }
-
-    private static JsonDocument ImportCompileWalkAndEmit(string spec)
-    {
-        var result = CompilationHelper.Import(spec, "ReferenceNormalization");
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var json = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            security: null
-        );
-        return JsonDocument.Parse(json);
     }
 }

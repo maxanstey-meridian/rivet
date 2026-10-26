@@ -359,6 +359,42 @@ public sealed class MetadataAttributeTests
         );
     }
 
+    [Theory]
+    [InlineData("null", "\"true\"", "enum", "true")]
+    [InlineData("null", "\"{}\"", "enum", "{}")]
+    [InlineData("\"\\\"one\\\"\"", "null", "examples", "\"one\"")]
+    public void Generated_Schema_Metadata_Array_Keyword_That_Is_Not_An_Array_Is_A_User_Error(
+        string examples,
+        string enumJson,
+        string keyword,
+        string value
+    )
+    {
+        // `enum: true` or `examples: "one"` is not a schema; refuse rather than emit it.
+        var source = $$"""
+            using Rivet;
+
+            [RivetType]
+            public sealed record ResultDto(
+                [property: RivetGeneratedSchemaMetadata("", null, null, null, null, {{examples}}, -1, -1, null, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, -1, -1, false, null, null, null, false, false, null, false, false, false, false, false, null, enumJson: {{enumJson}})]
+                bool Success);
+
+            [RivetContract]
+            public static class ResultContract
+            {
+                public static readonly RouteDefinition<ResultDto> Get = Define.Get<ResultDto>("/api/result");
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source)
+        );
+        Assert.Equal(
+            $"error: schema metadata {keyword} must be a JSON array, got '{value}'",
+            exception.Message
+        );
+    }
+
     // ========== [RivetReadOnly] / [RivetWriteOnly] ==========
 
     [Fact]

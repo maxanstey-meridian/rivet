@@ -151,7 +151,7 @@ public sealed class ComponentProvenanceTests
             """
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
 
         Assert.True(schemas.TryGetProperty("pet.kind", out _));
@@ -186,7 +186,7 @@ public sealed class ComponentProvenanceTests
             """
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
 
         Assert.False(emitted.RootElement.TryGetProperty("components", out _));
         var parameters = emitted
@@ -239,7 +239,7 @@ public sealed class ComponentProvenanceTests
             """
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
         var petProperties = schemas.GetProperty("Pet").GetProperty("properties");
 
@@ -332,7 +332,7 @@ public sealed class ComponentProvenanceTests
             """
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
 
         Assert.True(schemas.TryGetProperty("empty.group", out var empty));
@@ -448,7 +448,7 @@ public sealed class ComponentProvenanceTests
         Assert.Contains("string Token", holder);
         Assert.DoesNotContain("record SessionToken", imported.Files.Select(file => file.Content));
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
 
         Assert.True(
@@ -637,6 +637,10 @@ public sealed class ComponentProvenanceTests
     [InlineData("{ \"enum\": [true] }")]
     [InlineData("{ \"enum\": [[]] }")]
     [InlineData("{ \"enum\": [null] }")]
+    [InlineData("{ \"enum\": [true, null] }")]
+    [InlineData("{ \"enum\": [0.5, null] }")]
+    [InlineData("{ \"type\": \"integer\", \"enum\": [1, 2, 3.5] }")]
+    [InlineData("{ \"type\": \"number\", \"enum\": [\"a\"] }")]
     public void Named_scalar_enum_no_CSharp_enum_can_hold_keeps_its_members_and_its_refs(
         string schema
     )
@@ -675,7 +679,7 @@ public sealed class ComponentProvenanceTests
             warning => warning.Contains(Diagnostics.ImportNamedScalarAlgebraUnsupported)
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
         Assert.Equal(
             JsonNode.Parse(schema)!["enum"]!.ToJsonString(),
@@ -705,6 +709,8 @@ public sealed class ComponentProvenanceTests
     )]
     [InlineData("{ \"enum\": [true, \"yes\"] }", "System.Text.Json.JsonElement")]
     [InlineData("{ \"enum\": [null] }", "System.Text.Json.JsonElement")]
+    [InlineData("{ \"enum\": [true, null] }", "bool?")]
+    [InlineData("{ \"enum\": [0.5, null] }", "double?")]
     [InlineData(
         "{ \"type\": \"object\", \"nullable\": true, \"enum\": [null] }",
         "Dictionary<string, System.Text.Json.JsonElement>?"
@@ -757,7 +763,7 @@ public sealed class ComponentProvenanceTests
         foreach (
             var emitted in new[]
             {
-                ImportCompileWalkAndEmit(spec),
+                CompilationHelper.ImportCompileWalkAndEmit(spec),
                 ImportCompileWalkContractJsonAndEmit(spec),
             }
         )
@@ -773,6 +779,129 @@ public sealed class ComponentProvenanceTests
                 Assert.Equal(expected, JsonNode.Parse(value.GetRawText())!["enum"]!.ToJsonString());
             }
         }
+    }
+
+    [Fact]
+    public void Untyped_literal_enum_with_items_is_a_list_of_its_items()
+    {
+        // `items` says what each value is, so `{items: Item, enum: [[]]}` is a List<Item>,
+        // not the JsonElement its enum alone would infer; the values still survive.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Item": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "Envelope": {
+                "type": "object",
+                "properties": {
+                    "value": { "items": { "$ref": "#/components/schemas/Item" }, "enum": [[]] }
+                },
+                "required": ["value"]
+            }
+            """,
+            paths: """
+            "/envelope": {
+                "get": {
+                    "operationId": "getEnvelope",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec, "LiteralEnum");
+        Assert.Empty(imported.Warnings);
+        Assert.Contains(" List<Item> Value", CompilationHelper.FindFile(imported, "Envelope.cs"));
+
+        using var emitted = CompilationHelper.EmitImported(imported);
+        var value = emitted
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Envelope")
+            .GetProperty("properties")
+            .GetProperty("value");
+        Assert.Equal("[[]]", JsonNode.Parse(value.GetRawText())!["enum"]!.ToJsonString());
+        Assert.Equal(
+            "#/components/schemas/Item",
+            value.GetProperty("items").GetProperty("$ref").GetString()
+        );
+    }
+
+    [Fact]
+    public void Untyped_component_keeps_its_refs_at_every_site()
+    {
+        // `AnyJson` has no type and no enum: any JSON value. Every site that names it
+        // keeps the $ref rather than inlining an anonymous JsonElement schema.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "AnyJson": { "description": "Any JSON value." },
+            "Envelope": {
+                "type": "object",
+                "properties": {
+                    "value": { "$ref": "#/components/schemas/AnyJson" },
+                    "values": { "type": "array", "items": { "$ref": "#/components/schemas/AnyJson" } }
+                },
+                "required": ["value", "values"]
+            }
+            """,
+            paths: """
+            "/envelope": {
+                "post": {
+                    "operationId": "postEnvelope",
+                    "parameters": [
+                        { "name": "filter", "in": "query", "schema": { "$ref": "#/components/schemas/AnyJson" } }
+                    ],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": { "schema": { "$ref": "#/components/schemas/AnyJson" } }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Envelope" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
+        var root = emitted.RootElement;
+        var schemas = root.GetProperty("components").GetProperty("schemas");
+        Assert.Equal(
+            "Any JSON value.",
+            schemas.GetProperty("AnyJson").GetProperty("description").GetString()
+        );
+        var properties = schemas.GetProperty("Envelope").GetProperty("properties");
+        var operation = root.GetProperty("paths").GetProperty("/envelope").GetProperty("post");
+        var sites = new[]
+        {
+            properties.GetProperty("value"),
+            properties.GetProperty("values").GetProperty("items"),
+            Assert
+                .Single(operation.GetProperty("parameters").EnumerateArray())
+                .GetProperty("schema"),
+            operation
+                .GetProperty("requestBody")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema"),
+        };
+        Assert.All(
+            sites,
+            site =>
+                Assert.Equal("#/components/schemas/AnyJson", site.GetProperty("$ref").GetString())
+        );
     }
 
     [Fact]
@@ -825,7 +954,7 @@ public sealed class ComponentProvenanceTests
             """
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var properties = JsonNode.Parse(
             emitted
                 .RootElement.GetProperty("components")
@@ -913,7 +1042,7 @@ public sealed class ComponentProvenanceTests
         Assert.Contains("[JsonStringEnumMemberName(\"users\")]", kind);
         Assert.Contains("[JsonStringEnumMemberName(\"Roles\")]", kind);
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
         Assert.Equal(
             "#/components/schemas/Duration",
@@ -967,7 +1096,7 @@ public sealed class ComponentProvenanceTests
             """
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var link = emitted
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -1033,7 +1162,7 @@ public sealed class ComponentProvenanceTests
             """
         );
 
-        using var emitted = ImportCompileWalkAndEmit(spec);
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
         var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
         var shape = schemas.GetProperty("shape.base");
 
@@ -1054,23 +1183,6 @@ public sealed class ComponentProvenanceTests
                 .GetProperty("mapping")
                 .GetProperty("circle")
                 .GetString()
-        );
-    }
-
-    private static JsonDocument ImportCompileWalkAndEmit(string spec)
-    {
-        var imported = CompilationHelper.Import(spec, "ComponentIdentity");
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        return JsonDocument.Parse(
-            OpenApiEmitter.Emit(
-                endpoints,
-                walker.Definitions,
-                walker.Brands,
-                walker.Enums,
-                security: null
-            )
         );
     }
 

@@ -1620,6 +1620,9 @@ class Comparator:
         declared_type = schema.get("type")
         if isinstance(declared_type, list) and "null" in declared_type:
             return True
+        # An untyped enum that lists null accepts null, just as `type: [..., "null"]` does.
+        if declared_type is None and None in (schema.get("enum") or []):
+            return True
         for composition in ("oneOf", "anyOf"):
             branches = schema.get(composition)
             if isinstance(branches, list) and any(
@@ -1667,7 +1670,10 @@ class Comparator:
             return "object"
         if declared_type is None and isinstance(schema.get("enum"), list):
             # An untyped enum's members already fix its type: `{enum: [true]}` is a boolean.
+            # A null member makes it nullable, not untyped, as a "null" in `type` does.
             kinds = {Comparator.json_type(value) for value in schema["enum"]}
+            if len(kinds) > 1:
+                kinds.discard("null")
             if kinds == {"integer", "number"}:
                 return "number"
             if len(kinds) == 1:

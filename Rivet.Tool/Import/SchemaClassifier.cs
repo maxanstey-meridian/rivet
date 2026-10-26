@@ -71,9 +71,9 @@ internal static class SchemaClassifier
 
         // The member set must be expressible as one legal C# enum: a negative
         // constant cannot coexist with a constant above long.MaxValue in any
-        // underlying type, so such a schema is not classified as an integer enum —
-        // it degrades through the existing dropped-constraint warning instead of
-        // generating uncompilable C#. Only Number-kind nodes participate; other
+        // underlying type, so such a schema is not classified as an integer enum
+        // rather than generating uncompilable C#: it stays the integer primitive and
+        // its values ride as generated literal-enum metadata. Only Number-kind nodes participate; other
         // enum entries are rejected by the IsWholeInt64 gate below anyway.
         var numberNodes = schema
             .Enum.OfType<JsonNode>()

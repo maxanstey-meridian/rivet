@@ -121,6 +121,43 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void Docs_Intro_Lists_Exactly_The_Error_Rows()
+    {
+        var page = File.ReadAllText(CliRunner.RepoPath("docs", "reference", "diagnostics.md"));
+        var intro = Regex.Match(page, @"The errors are\s+(.*?)\.\s", RegexOptions.Singleline);
+        Assert.True(intro.Success, "docs/reference/diagnostics.md lost its list of errors.");
+        var listed = Regex
+            .Matches(intro.Groups[1].Value, @"`(RIV\d{4})`")
+            .Select(match => match.Groups[1].Value)
+            .Order(StringComparer.Ordinal);
+        var errorRows = Regex
+            .Matches(page, @"^\| `(RIV\d{4})` \| Error \|", RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value)
+            .Order(StringComparer.Ordinal);
+
+        Assert.Equal(errorRows, listed);
+    }
+
+    [Fact]
+    public void Every_Retired_Id_Has_A_Tombstone_And_No_Other()
+    {
+        // A retired ID keeps a comment in Diagnostics.cs and a tombstone on the page, so its
+        // number is never reused and a reader who meets it in an old log learns what it was.
+        var source = File.ReadAllText(CliRunner.RepoPath("Rivet.Tool", "Diagnostics.cs"));
+        var retired = Regex
+            .Matches(source, @"//\s*(RIV\d{4}) \(\w+\) retired")
+            .Select(match => match.Groups[1].Value)
+            .Order(StringComparer.Ordinal);
+        var page = File.ReadAllText(CliRunner.RepoPath("docs", "reference", "diagnostics.md"));
+        var tombstones = Regex
+            .Matches(page, @"^- ~~`(RIV\d{4})`~~", RegexOptions.Multiline)
+            .Select(match => match.Groups[1].Value)
+            .Order(StringComparer.Ordinal);
+
+        Assert.Equal(retired, tombstones);
+    }
+
+    [Fact]
     public void Warn_Writes_The_Canonical_Stderr_Line()
     {
         var stderr = CompilationHelper.CaptureStdErr(() =>

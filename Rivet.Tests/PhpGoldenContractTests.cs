@@ -6,8 +6,10 @@ namespace Rivet.Tests;
 /// <summary>
 /// Pins the .NET side of the rivet-php pipeline against real rivet-php output: the fixture is
 /// rivet-php's <c>samples/basic/generated/api.contract.json</c>, copied as generated (regenerate
-/// it there with <c>composer rivet:generate</c>, never edit it by hand). The strict reader has to
-/// accept every property rivet-php writes, and its security has to reach the operations.
+/// it there with <c>composer rivet:generate</c>, never edit it by hand). The sample is small (two
+/// DTOs, two endpoints, one secured and one anonymous), so this proves the strict reader accepts
+/// what rivet-php writes for that much and that its security reaches the operations, not that
+/// every property rivet-php can write gets through.
 /// </summary>
 public sealed class PhpGoldenContractTests
 {

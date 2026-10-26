@@ -657,6 +657,8 @@ public sealed class RoundTripDiffTests
     [InlineData("[[]]", "array", 0)]
     [InlineData("[true]", "string", 1)]
     [InlineData("[true, \"yes\"]", "boolean", 1)]
+    [InlineData("[true, null]", "boolean", 0)]
+    [InlineData("[null]", "null", 0)]
     public void Untyped_Enum_Has_The_Type_Its_Members_Share(
         string members,
         string reemittedType,
@@ -676,6 +678,26 @@ public sealed class RoundTripDiffTests
         var result = RoundTripDiff.Run(original, reemitted);
 
         Assert.Equal(typeFindings, FindingCount(result.SchemaFindings, "schema-type"));
+    }
+
+    [Fact]
+    public void Untyped_Enum_Listing_Null_Matches_Its_Nullable_Typed_Emission()
+    {
+        // The importer types `{enum: [true, null]}` as `bool?`, which emits
+        // `type: [boolean, null]` beside the same members.
+        var original = Fixture.Json("roundtrip-probe.json");
+        original["components"]!["schemas"]!["Thing"]!["properties"]!["flag"] = new JsonObject
+        {
+            ["enum"] = JsonNode.Parse("[true, null]"),
+        };
+        var reemitted = original.DeepClone().AsObject();
+        reemitted["components"]!["schemas"]!["Thing"]!["properties"]!["flag"]!["type"] =
+            JsonNode.Parse("""["boolean", "null"]""");
+
+        var result = RoundTripDiff.Run(original, reemitted);
+
+        Assert.Equal(0, FindingCount(result.SchemaFindings, "schema-type"));
+        Assert.Equal(0, FindingCount(result.SchemaFindings, "schema-nullable"));
     }
 
     [Theory]

@@ -143,9 +143,10 @@ honest degradation, not full support.
   OpenAPI 3.1's titled-const idiom (`oneOf` of `{"title": "ONE_HOUR", "const": 60}`)
   is an enum named by its titles, not a union of indistinguishable slots. An enum
   is a set, so a repeated member (Vercel lists `preview` twice) collapses to one;
-  a `null` member is kept as a member, separately from nullability. A named
-  boolean or non-integer number enum keeps its members as metadata on the
-  primitive. A typed record's array items and map values keep their `$ref` to a
+  a `null` member is kept as a member, separately from nullability. An enum no
+  C# enum can hold (booleans, numbers, arrays, `null`, a single value) keeps its
+  values as generated metadata, and its C# type follows them: `{ enum: [true] }`
+  is a `bool`, `{ enum: [[]] }` a `JsonElement`. A typed record's array items and map values keep their `$ref` to a
   named scalar, a nullable component is referenced bare (it already admits
   null), and `minProperties`/`maxProperties` survive on typed dictionaries.
   Framework scalar names are globally qualified when a generated component name
@@ -196,8 +197,10 @@ honest degradation, not full support.
   operation with no `security` key writes none of them and inherits the document's.
   Document-level requirements and scheme definitions (API key in header/query/cookie,
   HTTP, every OAuth2 flow with its scopes, OpenID Connect, mutual TLS) land in
-  `RivetSecurity.cs` as assembly attributes. Nothing is dropped, so there is no
-  security warning to watch for.
+  `RivetSecurity.cs` as assembly attributes. The one exception is a requirement
+  naming a scheme the document never defines: nobody can satisfy it, so that
+  alternative is dropped with `RIV3030`, and an operation left with none is
+  dropped rather than imported as open.
 
 ## What diagnoses
 
@@ -229,7 +232,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (plain object without `oneOf`, or `oneOf` whose `mapping` is absent/unusable) — dispatch semantics dropped. |
 | `RIV3001`, `RIV3006`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
 | `RIV3014` | `dictionary-key-dropped` | A `propertyNames` schema has no C# dictionary-key representation; keys degrade to `string`. |
-| `RIV3015` | `named-scalar-algebra-unsupported` | A named scalar component uses const/composition/heterogeneous leaves outside bounded scalar preservation; its fallback mapping is retained. |
+| `RIV3015` | `named-scalar-algebra-unsupported` | A named scalar component uses `const`, schema composition, or heterogeneous leaf types; its fallback mapping is retained. |
 | `RIV3003` | `operation-method-dropped` | TRACE operation dropped — the HTTP method has no contract representation. |
 | `RIV3019` | `swagger-server-not-projected` | A Swagger 2 document has a `host` without `schemes`, or `schemes` without a `host`; no server URL is invented from half of one. |
 | `RIV3020` | `empty-parameter-name-dropped` | Parameter name is empty, which OpenAPI forbids; the parameter is dropped. |
@@ -241,6 +244,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3027` | `callback-dropped` | Operation or component `callbacks` entry; contracts describe requests the API receives. |
 | `RIV3028` | `path-item-outside-paths-dropped` | `webhooks` or `components.pathItems` entry; only path items under `paths` become endpoints. |
 | `RIV3029` | `equivalent-path-template-merged` | A path repeats an earlier path's template under other parameter names, which OpenAPI forbids; its operations merge into the earlier path and adopt its parameter names. |
+| `RIV3030` | `unsatisfiable-security-dropped` | A security alternative names a scheme the document never defines; the alternative is dropped, and an operation left with none is dropped too. |
 
 - **Paths**: two paths that differ only in their parameter names
   (`/deployments/{idOrUrl}` and `/deployments/{id}`) are one template, which
@@ -309,8 +313,6 @@ Rivet gap with a known shape, waiting on a design decision rather than a shrug:
   operations (`#/paths/~1v2~11-clicks/get/responses/401`), 2,797 times. The
   importer inlines those and the reference identity is gone, which is nearly all
   of its ~10,000 findings.
-- **Cloudflare**: the largest of them, and the longest list: a security
-  requirement that names an undefined scheme (`assets_jwt`, dropped on import
-  with `RIV3030`), 15 unusable
+- **Cloudflare**: the largest of them, and the longest list: 15 unusable
   discriminators (`RIV3005`), 7 scalar compositions (`RIV3015`), 5 identity-only
   fallbacks (`RIV3010`), and 25 unreviewed extension families.

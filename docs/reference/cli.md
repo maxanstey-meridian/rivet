@@ -71,6 +71,11 @@ public output:
 dotnet rivet --from contract.json --output ./generated
 ```
 
+The reader is strict: a property it doesn't know, or a required member left out or
+written as `null`, stops the run with the JSON path of the offending spot instead of
+quietly dropping out of the spec, and `rivet-contract-schema.json` in the repo root
+is the authority on what belongs where.
+
 An inline-object property without an `optional` flag is required, whether or not its
 value type is nullable.
 

@@ -17,6 +17,8 @@ public sealed record TsEndpointExample
     {
         var hasJson = Json is not null;
         var hasComponentExampleId = ComponentExampleId is not null;
+        // The contract reader can't say where a refused example sits, so the message does.
+        var example = Name is null ? $"the {MediaType} example" : $"{MediaType} example '{Name}'";
 
         // An Example Object may carry only a summary or description: OpenAPI makes the
         // value optional, and github documents request variants that way.
@@ -26,13 +28,15 @@ public sealed record TsEndpointExample
         )
         {
             throw new ArgumentException(
-                "Exactly one of json or componentExampleId must be provided, unless the example only has a summary or description."
+                $"Exactly one of json or componentExampleId must be provided for {example}, unless the example only has a summary or description."
             );
         }
 
         if (ResolvedJson is not null && !hasComponentExampleId)
         {
-            throw new ArgumentException("resolvedJson is only valid for ref-backed examples.");
+            throw new ArgumentException(
+                $"resolvedJson is only valid for ref-backed examples, and {example} has no componentExampleId."
+            );
         }
 
         this.MediaType = MediaType;

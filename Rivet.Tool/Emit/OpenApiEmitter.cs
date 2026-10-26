@@ -743,14 +743,15 @@ public sealed class OpenApiEmitter
                     formFieldParams.Add(param);
                     break;
 
-                // OpenAPI 3.x: Accept/Content-Type/Authorization are not legal header
-                // parameters (they belong to content negotiation / securitySchemes). Dropping
-                // one would ship a spec whose clients never send what the handler reads.
+                // OpenAPI 3.x ignores a header parameter named Accept, Content-Type or
+                // Authorization (media types and security schemes describe them), so the spec
+                // would never carry what the handler reads.
                 case ParamSource.Header when IsReservedHeaderName(param.Name):
                     throw new RivetUserException(
                         $"error {Diagnostics.ReservedHeaderParameter}: header param '{param.Name}' on endpoint "
-                            + $"'{ep.ControllerName}.{ep.Name}' is reserved by OpenAPI — Accept and Content-Type "
-                            + "are described by media types and Authorization by a security scheme "
+                            + $"'{ep.ControllerName}.{ep.Name}' is ignored by OpenAPI — Accept and Content-Type "
+                            + "are described by media types (.ProducesContentType(...) / .AcceptsContentType(...)) "
+                            + "and Authorization by a security scheme "
                             + "(.Secure(...) or --security); use a custom header name for anything else"
                     );
 
@@ -2982,7 +2983,7 @@ public sealed class OpenApiEmitter
         }
         if (metadata.Examples is not null)
         {
-            schema["examples"] = SchemaEnricher.ParseJsonLiteral(
+            schema["examples"] = SchemaEnricher.ParseJsonArray(
                 metadata.Examples,
                 "schema metadata examples"
             );
@@ -3002,7 +3003,7 @@ public sealed class OpenApiEmitter
         SchemaEnricher.EnrichConstraints(schema, metadata.Constraints);
         if (metadata.Enum is not null)
         {
-            schema["enum"] = SchemaEnricher.ParseJsonLiteral(metadata.Enum, "schema metadata enum");
+            schema["enum"] = SchemaEnricher.ParseJsonArray(metadata.Enum, "schema metadata enum");
         }
         if (
             metadata.EnumListsNull

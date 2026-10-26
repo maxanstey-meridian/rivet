@@ -672,7 +672,7 @@ internal sealed class SchemaMapper
     )
     {
         scalar = null!;
-        if ((schema.Type ?? LiteralEnumType(schema)) is not { } declared)
+        if ((schema.Type ?? LiteralEnumNullableType(schema)) is not { } declared)
         {
             return false;
         }
@@ -735,19 +735,6 @@ internal sealed class SchemaMapper
 
         var metadata = BuildScalarMetadata(schema, declared.HasFlag(JsonSchemaType.Null));
         var isEnum = SchemaClassifier.IsStringEnum(schema) || SchemaClassifier.IsIntEnum(schema);
-        if (
-            schema.Enum is { Count: > 0 } values
-            && !isEnum
-            && !values.All(value => IsEnumValueOfType(value, nonNull))
-        )
-        {
-            WarnUnsupportedNamedScalar(
-                componentId,
-                "an enum whose values contradict its declared type"
-            );
-            return false;
-        }
-
         scalar = new GeneratedScalarSchema(
             name,
             componentId,
@@ -945,6 +932,16 @@ internal sealed class SchemaMapper
             .Cast<JsonSchemaType?>()
             .FirstOrDefault();
     }
+
+    /// <summary>
+    /// <see cref="LiteralEnumType"/> plus null when the enum also lists null: the reader
+    /// drops null members and leaves only the marker, so <c>[true, null]</c> arrives as
+    /// <c>[true]</c> and would otherwise infer a boolean that refuses null.
+    /// </summary>
+    private static JsonSchemaType? LiteralEnumNullableType(IOpenApiSchema schema) =>
+        LiteralEnumType(schema) is not { } inferred ? null
+        : EnumListsNull(schema) ? inferred | JsonSchemaType.Null
+        : inferred;
 
     private static bool HasExplicitNullBranch(IOpenApiSchema schema) =>
         new[] { schema.OneOf, schema.AnyOf }.Any(branches =>
@@ -1821,8 +1818,14 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapEnum);
             }
 
+            // Items say what each value is; the enum still rides as generated metadata.
+            if (schema.Items is not null)
+            {
+                return ResolveArrayType(schema, context);
+            }
+
             return LiteralEnumType(schema) is { } inferred
-                ? ResolveSingleType(inferred, schema, context)
+                ? ResolveSingleType(inferred, schema, context) + (EnumListsNull(schema) ? "?" : "")
                 : QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
         }
 

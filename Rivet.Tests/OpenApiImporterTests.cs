@@ -519,18 +519,7 @@ public sealed class OpenApiImporterTests
         Assert.Contains(".Anonymous()", contract);
         Assert.DoesNotContain(".Secure(", contract);
 
-        var compilation = CompilationHelper.CompileImportResult(imported);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        using var emitted = JsonDocument.Parse(
-            OpenApiEmitter.Emit(
-                endpoints,
-                walker.Definitions,
-                walker.Brands,
-                walker.Enums,
-                security: null
-            )
-        );
+        using var emitted = CompilationHelper.EmitImported(imported);
         var security = emitted
             .RootElement.GetProperty("paths")
             .GetProperty("/api/health")
@@ -2799,19 +2788,9 @@ public sealed class OpenApiImporterTests
 
     private static List<string> EmittedComponentEnum(string spec, string componentName)
     {
-        var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emittedJson = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            security: null
-        );
-        return JsonSerializer
-            .Deserialize<JsonElement>(emittedJson)
-            .GetProperty("components")
+        using var emitted = CompilationHelper.ImportCompileWalkAndEmit(spec);
+        return emitted
+            .RootElement.GetProperty("components")
             .GetProperty("schemas")
             .GetProperty(componentName)
             .GetProperty("enum")
@@ -4156,16 +4135,28 @@ public sealed class OpenApiImporterTests
         // No enum file — float value disqualifies it as an int enum
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("MixedVals.cs"));
 
-        // The DTO property should fall through to long
+        // The declared integer type wins, as it does inline, and 3.5 rides with the
+        // other values as metadata on the kept component.
         var dtoContent = CompilationHelper.FindFile(result, "OrderDto.cs");
         Assert.Contains("long Code", dtoContent);
+        Assert.Empty(result.Warnings);
 
-        // 3.5 contradicts the declared integer type, so the component is refused loudly.
-        Assert.Contains(
-            result.Warnings,
-            w =>
-                w.Contains(Diagnostics.ImportNamedScalarAlgebraUnsupported)
-                && w.Contains("'MixedVals'")
+        using var emitted = CompilationHelper.EmitImported(result);
+        var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
+        var mixed = schemas.GetProperty("MixedVals");
+        Assert.Equal("integer", mixed.GetProperty("type").GetString());
+        Assert.Equal(
+            ["1", "2", "3.5"],
+            mixed.GetProperty("enum").EnumerateArray().Select(value => value.GetRawText())
+        );
+        Assert.Equal(
+            "#/components/schemas/MixedVals",
+            schemas
+                .GetProperty("OrderDto")
+                .GetProperty("properties")
+                .GetProperty("code")
+                .GetProperty("$ref")
+                .GetString()
         );
     }
 
@@ -5456,17 +5447,7 @@ public sealed class OpenApiImporterTests
             """
         );
 
-        var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = Rivet.Tool.Emit.OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        using var document = System.Text.Json.JsonDocument.Parse(emitted);
+        using var document = CompilationHelper.EmitImported(CompilationHelper.Import(spec));
         var properties = document
             .RootElement.GetProperty("components")
             .GetProperty("schemas")
@@ -5523,17 +5504,7 @@ public sealed class OpenApiImporterTests
             """
         );
 
-        var compilation = CompilationHelper.CompileImportResult(CompilationHelper.Import(spec));
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = Rivet.Tool.Emit.OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        using var document = System.Text.Json.JsonDocument.Parse(emitted);
+        using var document = CompilationHelper.EmitImported(CompilationHelper.Import(spec));
 
         var dtoSchema = document
             .RootElement.GetProperty("components")
@@ -6980,17 +6951,8 @@ public sealed class OpenApiImporterTests
             file => file.Content.Contains("RivetRequestBody", StringComparison.Ordinal)
         );
 
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        var document = JsonSerializer.Deserialize<JsonElement>(emitted);
+        using var emitted = CompilationHelper.EmitImported(result);
+        var document = emitted.RootElement;
 
         var alphaBody = document
             .GetProperty("paths")
@@ -7084,17 +7046,8 @@ public sealed class OpenApiImporterTests
             warning => warning.StartsWith("RIV3003:", StringComparison.Ordinal)
         );
 
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        var document = JsonSerializer.Deserialize<JsonElement>(emitted);
+        using var emitted = CompilationHelper.EmitImported(result);
+        var document = emitted.RootElement;
 
         Assert.True(
             document.GetProperty("paths").GetProperty("/health").TryGetProperty("head", out _)
@@ -7125,17 +7078,8 @@ public sealed class OpenApiImporterTests
             warning => warning.StartsWith("RIV3003:", StringComparison.Ordinal)
         );
 
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = OpenApiEmitter.Emit(
-            endpoints,
-            walker.Definitions,
-            walker.Brands,
-            walker.Enums,
-            null
-        );
-        var document = JsonSerializer.Deserialize<JsonElement>(emitted);
+        using var emitted = CompilationHelper.EmitImported(result);
+        var document = emitted.RootElement;
 
         Assert.True(
             document.GetProperty("paths").GetProperty("/health").TryGetProperty("options", out _)
@@ -7210,16 +7154,15 @@ public sealed class OpenApiImporterTests
             result.Warnings
         );
 
-        var compilation = CompilationHelper.CompileImportResult(result);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var emitted = JsonNode.Parse(
-            OpenApiEmitter.Emit(endpoints, walker.Definitions, walker.Brands, walker.Enums, null)
-        )!;
-        var parameters = emitted["paths"]!["/items"]!["get"]!["parameters"]!.AsArray();
+        using var emitted = CompilationHelper.EmitImported(result);
+        var parameters = emitted
+            .RootElement.GetProperty("paths")
+            .GetProperty("/items")
+            .GetProperty("get")
+            .GetProperty("parameters");
 
-        var parameter = Assert.Single(parameters);
-        Assert.Equal("limit", parameter!["name"]!.GetValue<string>());
+        var parameter = Assert.Single(parameters.EnumerateArray());
+        Assert.Equal("limit", parameter.GetProperty("name").GetString());
     }
 
     // ========== Malformed specs are user errors ==========

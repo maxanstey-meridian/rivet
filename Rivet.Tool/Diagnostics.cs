@@ -240,7 +240,7 @@ public static class Diagnostics
         [BrandConflictingUnderlyingTypes] =
             "Contract JSON declares one brand name two different ways — generation fails instead of letting the first declaration win.",
         [ReservedHeaderParameter] =
-            "Header parameter named Accept, Content-Type or Authorization — OpenAPI forbids these as header parameters, and omitting it would ship a spec whose clients never send it; generation fails.",
+            "Header parameter named Accept, Content-Type or Authorization — OpenAPI ignores these as header parameters, so the spec would never carry it and clients would never send it; generation fails.",
         [DuplicateResponseStatusInIr] =
             "Controller metadata or contract JSON declares the same response status more than once — generation fails instead of keeping the first declaration.",
         [DuplicateSecuritySchemeDefinition] = "Two --security values define the same scheme name.",
@@ -265,7 +265,7 @@ public static class Diagnostics
         [ImportDictionaryKeyDropped] =
             "Dictionary 'propertyNames' schema has no C# dictionary-key representation — imported with string keys.",
         [ImportNamedScalarAlgebraUnsupported] =
-            "Named scalar uses schema algebra outside primitive/flat-enum preservation — existing fallback mapping retained.",
+            "Named scalar uses const, schema composition or heterogeneous leaf types — existing fallback mapping retained.",
         [ImportSwaggerServerNotProjected] =
             "Swagger 2 document declares a host without schemes, or schemes without a host — no server URL is invented from half of one, so no server is imported.",
         [ImportEmptyParameterNameDropped] =

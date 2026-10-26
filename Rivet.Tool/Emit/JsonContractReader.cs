@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
@@ -9,7 +10,7 @@ namespace Rivet.Tool.Emit;
 /// Reads Rivet contract JSON (<c>--from</c>; the shape rivet-ts produces and
 /// <c>rivet-contract-schema.json</c> describes) straight into the IR records.
 /// </summary>
-public static class JsonContractReader
+public static partial class JsonContractReader
 {
     internal static readonly JsonSerializerOptions Options = new()
     {
@@ -21,13 +22,16 @@ public static class JsonContractReader
         // retired shape (the old { isAnonymous, scheme } security) would silently drop what
         // it carried. Required members are marked [JsonRequired], as the schema lists them.
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        // [JsonRequired] is satisfied by an explicit null, so a non-nullable member written as
+        // null ("responses": null) would otherwise reach the IR and crash far from the input.
+        RespectNullableAnnotations = true,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     internal sealed record RivetContract(
         [property: JsonRequired] IReadOnlyList<TsTypeDefinition> Types,
         [property: JsonRequired] IReadOnlyList<ContractEnum> Enums,
-        IReadOnlyList<TsEndpointDefinition>? Endpoints = null
+        [property: JsonRequired] IReadOnlyList<TsEndpointDefinition> Endpoints
     );
 
     /// <summary>An enum declaration: string members in <c>values</c> or integer members in <c>intValues</c>.</summary>
@@ -78,7 +82,8 @@ public static class JsonContractReader
         catch (ArgumentException exception)
         {
             // A record constructor refusing a value (an example with both json and a
-            // componentExampleId) is malformed contract JSON, not a crash.
+            // componentExampleId) is malformed contract JSON, not a crash. System.Text.Json
+            // gives no location here, so the constructor's message names the element.
             throw new JsonException(exception.Message, exception);
         }
 
@@ -124,7 +129,7 @@ public static class JsonContractReader
                 );
         }
 
-        var endpoints = (contract.Endpoints ?? []).Select(NormalizeResponses).ToList();
+        var endpoints = contract.Endpoints.Select(NormalizeResponses).ToList();
         foreach (var endpoint in endpoints)
         {
             RejectRepeatedSecuritySchemes(endpoint);
@@ -164,19 +169,54 @@ public static class JsonContractReader
         endpoint with
         {
             Responses = ResponseStatusValidation.NormalizeIrAndEnsureResponse(
-                endpoint.Responses.Select(response =>
-                    response.StatusCode == 0 && int.TryParse(response.StatusKey, out var code)
-                        ? response with
-                        {
-                            StatusCode = code,
-                        }
-                        : response
-                ),
+                endpoint.Responses.Select(response => ResolveStatus(endpoint, response)),
                 endpoint.Name,
                 endpoint.HttpMethod,
                 endpoint.ReturnType
             ),
         };
+
+    /// <summary>
+    /// A response is keyed by its statusCode or its statusKey (default, a 1XX-5XX range or a
+    /// three-digit code); with neither it would be emitted under status "0".
+    /// </summary>
+    private static TsResponseType ResolveStatus(
+        TsEndpointDefinition endpoint,
+        TsResponseType response
+    )
+    {
+        if (response.StatusKey is { } key && !StatusKeyPattern().IsMatch(key))
+        {
+            throw new JsonException(
+                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' has a response with statusKey '{key}'; "
+                    + "a statusKey is 'default', a range like '4XX' or a three-digit status code"
+            );
+        }
+
+        if (response.StatusCode != 0)
+        {
+            return response;
+        }
+
+        if (response.StatusKey is null)
+        {
+            throw new JsonException(
+                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' has a response with neither statusCode nor statusKey; "
+                    + "give each response one of them"
+            );
+        }
+
+        return int.TryParse(response.StatusKey, out var code)
+            ? response with
+            {
+                StatusCode = code,
+            }
+            : response;
+    }
+
+    // rivet-contract-schema.json's statusKey pattern.
+    [GeneratedRegex("^(default|[1-5](?:[0-9]{2}|XX))$")]
+    private static partial Regex StatusKeyPattern();
 
     private static Dictionary<string, TsType.Brand> CollectBrands(
         IReadOnlyList<TsTypeDefinition> types,

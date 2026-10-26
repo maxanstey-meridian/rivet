@@ -124,7 +124,6 @@ public sealed class CliPipelineTests
                 sourceSecuritySchemes[securityScheme.Name] = securityScheme.Value;
             }
         }
-        CollectSecuritySchemeNames(sourceDocument.RootElement, securitySchemeNames);
         var degradedSchemes = new List<string>();
         foreach (var securitySchemeName in securitySchemeNames.Order(StringComparer.Ordinal))
         {
@@ -414,42 +413,5 @@ public sealed class CliPipelineTests
         // Keep the reference resolvable and pin the deliberate loss instead of claiming fidelity.
         degradedSchemes.Add(name);
         return $"{name}=bearer";
-    }
-
-    private static void CollectSecuritySchemeNames(JsonElement node, HashSet<string> names)
-    {
-        if (node.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var property in node.EnumerateObject())
-            {
-                if (
-                    property.NameEquals("security")
-                    && property.Value.ValueKind == JsonValueKind.Array
-                )
-                {
-                    foreach (var requirement in property.Value.EnumerateArray())
-                    {
-                        if (requirement.ValueKind != JsonValueKind.Object)
-                        {
-                            continue;
-                        }
-
-                        foreach (var scheme in requirement.EnumerateObject())
-                        {
-                            names.Add(scheme.Name);
-                        }
-                    }
-                }
-
-                CollectSecuritySchemeNames(property.Value, names);
-            }
-        }
-        else if (node.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in node.EnumerateArray())
-            {
-                CollectSecuritySchemeNames(item, names);
-            }
-        }
     }
 }

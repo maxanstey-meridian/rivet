@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Json.Schema;
 using Rivet.Tool.Emit;
@@ -439,12 +440,13 @@ public sealed class ContractSchemaTests
 
     /// <summary>
     /// The reader's [JsonRequired] members are the schema's required ones, so neither side can
-    /// let a producer leave out what the other insists on. A member the schema requires but
-    /// lets be null stays optional in the reader, because writers omit nulls. The root and
-    /// contractEnum have their own checks (endpoints may be absent; exactly one of values or
-    /// intValues).
+    /// let a producer leave out what the other insists on. The property sets match too, since
+    /// the reader refuses a property it doesn't map, and a member the schema lets be null is
+    /// nullable in the reader, which respects nullable annotations. contractEnum has its own
+    /// check (exactly one of values or intValues).
     /// </summary>
     [Theory]
+    [InlineData("", typeof(JsonContractReader.RivetContract))]
     [InlineData("$defs/typeDefinition", typeof(TsTypeDefinition))]
     [InlineData("$defs/typeMetadata", typeof(TsTypeMetadata))]
     [InlineData("$defs/scalarMetadata", typeof(TsScalarMetadata))]
@@ -533,24 +535,41 @@ public sealed class ContractSchemaTests
     public void Reader_Requires_What_The_Schema_Requires(string pointer, Type type)
     {
         var node = pointer
-            .Split('/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Aggregate(
                 JsonNode.Parse(File.ReadAllText(_schemaPath))!,
                 (node, key) => (node is JsonArray items ? items[int.Parse(key)] : node[key])!
             );
-        var properties = node["properties"]!;
+        var schemaProperties = node["properties"]!.AsObject();
+        // A [JsonIgnore]d member is never read or written, but the resolver still lists it.
+        var readerProperties = _modelOptions
+            .GetTypeInfo(type)
+            .Properties.Where(property =>
+                property.AttributeProvider?.GetCustomAttributes(typeof(JsonIgnoreAttribute), false)
+                    is not [JsonIgnoreAttribute { Condition: JsonIgnoreCondition.Always }]
+            )
+            .ToList();
+        // "kind" is the polymorphic discriminator, not a member.
         var schemaRequired = (node["required"]?.AsArray() ?? [])
             .Select(name => name!.GetValue<string>())
-            // "kind" is the polymorphic discriminator, not a member.
-            .Where(name => name != "kind" && !AdmitsNull(properties[name]!))
+            .Where(name => name != "kind")
             .Order();
-        var readerRequired = _modelOptions
-            .GetTypeInfo(type)
-            .Properties.Where(property => property.IsRequired)
+        var readerRequired = readerProperties
+            .Where(property => property.IsRequired)
             .Select(property => property.Name)
             .Order();
 
         Assert.Equal(schemaRequired, readerRequired);
+        Assert.Equal(
+            schemaProperties.Select(property => property.Key).Where(name => name != "kind").Order(),
+            readerProperties.Select(property => property.Name).Order()
+        );
+        Assert.Empty(
+            readerProperties
+                .Where(property => AdmitsNull(schemaProperties[property.Name]!))
+                .Where(property => !property.IsSetNullable)
+                .Select(property => property.Name)
+        );
     }
 
     [Fact]

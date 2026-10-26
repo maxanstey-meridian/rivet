@@ -100,4 +100,12 @@ internal static class SchemaEnricher
             );
         }
     }
+
+    /// <summary>
+    /// <see cref="ParseJsonLiteral"/> for a keyword JSON Schema defines as an array
+    /// (<c>enum</c>, <c>examples</c>): any other literal is a user error, not a schema.
+    /// </summary>
+    public static JsonArray ParseJsonArray(string json, string what) =>
+        ParseJsonLiteral(json, what) as JsonArray
+        ?? throw new RivetUserException($"error: {what} must be a JSON array, got '{json}'");
 }

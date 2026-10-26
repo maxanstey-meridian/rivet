@@ -1100,6 +1100,16 @@ public sealed class JsonContractReaderTests
         """[{ "name": "Status", "values": ["a"], "intValues": [1] }]""",
         "enum 'Status' must carry exactly one of"
     )]
+    [InlineData(
+        """[{ "name": "Id", "typeParameters": [], "type": { "kind": "primitive", "type": "string" }, "properties": [{ "name": "value", "type": { "kind": "primitive", "type": "string" }, "optional": false }] }]""",
+        "[]",
+        "type 'Id' has both 'type' and 'properties'"
+    )]
+    [InlineData(
+        """[{ "name": "Dto", "typeParameters": [] }]""",
+        "[]",
+        "type 'Dto' has neither 'type' nor 'properties'"
+    )]
     public void Malformed_Declarations_Are_Refused(string types, string enums, string expected)
     {
         var json = $$"""{ "types": {{types}}, "enums": {{enums}}, "endpoints": [] }""";
@@ -1152,6 +1162,35 @@ public sealed class JsonContractReaderTests
             """;
 
         var exception = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+        Assert.Contains(expected, exception.Message);
+        Assert.Contains("Path: $.", exception.Message);
+    }
+
+    /// <summary>
+    /// An explicit null satisfies [JsonRequired], so a non-nullable member written as null
+    /// used to reach the IR and crash with a NullReferenceException; a response with no
+    /// status was emitted under "0".
+    /// </summary>
+    [Theory]
+    [InlineData($$"""{ {{GetEndpoint}}, "responses": null }""", "Path: $.endpoints[0].responses")]
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }], "security": { "alternatives": null } }""",
+        "Path: $.endpoints[0].security.alternatives"
+    )]
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "description": "ok" }] }""",
+        "endpoint 'things.get' has a response with neither statusCode nor statusKey"
+    )]
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "statusKey": "ok" }] }""",
+        "endpoint 'things.get' has a response with statusKey 'ok'"
+    )]
+    public void Malformed_Endpoints_Are_Refused(string endpoint, string expected)
+    {
+        var json = $$"""{ "types": [], "enums": [], "endpoints": [{{endpoint}}] }""";
+
+        var exception = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+
         Assert.Contains(expected, exception.Message);
     }
 

@@ -320,6 +320,31 @@ public static class CompilationHelper
     public static ImportResult Import(string json, string ns = "Test", string? security = null) =>
         OpenApiImporter.Import(json, new ImportOptions(ns, security));
 
+    /// <summary>
+    /// Compiles an import's generated C#, walks its types, contracts and security, and
+    /// emits OpenAPI as a parsed JSON document: the CLI's import → emit path.
+    /// </summary>
+    public static System.Text.Json.JsonDocument EmitImported(ImportResult imported)
+    {
+        var compilation = CompileImportResult(imported);
+        var (discovered, walker) = DiscoverAndWalk(compilation);
+        var endpoints = WalkContracts(compilation, discovered, walker);
+        var json = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            SecurityMetadataWalker.Walk(compilation)
+        );
+        return System.Text.Json.JsonDocument.Parse(json);
+    }
+
+    /// <summary>Imports <paramref name="spec"/> and emits it again through <see cref="EmitImported"/>.</summary>
+    public static System.Text.Json.JsonDocument ImportCompileWalkAndEmit(
+        string spec,
+        string ns = "Test"
+    ) => EmitImported(Import(spec, ns));
+
     public static string FindFile(ImportResult result, string fileName)
     {
         var file = result.Files.FirstOrDefault(f => f.FileName.EndsWith(fileName));
