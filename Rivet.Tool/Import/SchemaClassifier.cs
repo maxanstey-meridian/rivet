@@ -752,8 +752,9 @@ internal static class SchemaClassifier
     /// <summary>
     /// <see cref="ComputeSchemaFingerprint"/> with the documentation keywords
     /// (<c>description</c>, <c>title</c>, <c>example</c>, <c>examples</c>) left out at every
-    /// depth, outside data keywords and property names, and vendor extensions kept. Two
-    /// schemas with the same one validate the same instances and map to the same C#.
+    /// depth, outside data keywords, vendor extension values and property names, and vendor
+    /// extensions kept. Two schemas with the same one validate the same instances and map to
+    /// the same C#.
     /// </summary>
     internal static string ComputeUndocumentedFingerprint(IOpenApiSchema schema) =>
         Fingerprint(schema, keyword => !_documentationKeywords.Contains(keyword));
@@ -779,12 +780,17 @@ internal static class SchemaClassifier
             {
                 _ when key is not null && _schemaDataKeywords.Contains(key) => node?.DeepClone(),
                 JsonObject obj => new JsonObject(
-                    obj.Where(entry =>
-                            key is not null && _schemaNameMaps.Contains(key) || keep(entry.Key)
-                        )
+                    obj.Where(entry => IsNameMap(key) || keep(entry.Key))
                         .OrderBy(entry => entry.Key, StringComparer.Ordinal)
                         .Select(entry =>
-                            KeyValuePair.Create(entry.Key, Canonical(entry.Value, entry.Key))
+                            KeyValuePair.Create(
+                                entry.Key,
+                                // A vendor extension's value is data, kept exactly as written.
+                                !IsNameMap(key)
+                                && entry.Key.StartsWith("x-", StringComparison.Ordinal)
+                                    ? entry.Value?.DeepClone()
+                                    : Canonical(entry.Value, entry.Key)
+                            )
                         )
                 ),
                 JsonArray array when key == "required" => new JsonArray(
@@ -798,5 +804,7 @@ internal static class SchemaClassifier
                 ),
                 _ => node?.DeepClone(),
             };
+
+        static bool IsNameMap(string? key) => key is not null && _schemaNameMaps.Contains(key);
     }
 }

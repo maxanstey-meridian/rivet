@@ -141,26 +141,31 @@ honest degradation, not full support.
   `abstract`, and leaves are polymorphic too, which is what makes a `User` you
   return directly still write `"type": "user"`. Children declare only what their
   parent's record doesn't already carry, and the discriminator property is
-  stripped everywhere. allOf applies every `required` at once, so a property a
-  child restates stays required if an ancestor requires it, and one a child only
-  lists in its own `required` is tightened. A child's property whose schema
-  differs from the inherited one only in documentation (`description`, `title`,
-  `example`, `examples`, at any depth: the preserved schema keeps them) is simply
-  inherited, inline enums and objects included, so no twin type turns up for
-  it; one that differs is written with `new`, which is how
+  stripped everywhere. allOf applies every `required` at once, so a property is
+  required wherever it's declared if its member or any ancestor requires it, and
+  one a child only lists in its own `required` is tightened. A child's property
+  whose schema differs from the inherited one only in documentation
+  (`description`, `title`, `example`, `examples`, at any depth outside an `x-`
+  extension's value: the preserved schema keeps them) is simply inherited,
+  inline enums and objects included, so no twin type turns up for it; one that
+  differs is written with `new`, which is how
   Bitbucket's `user.links` gets its own type. Extension data sits on the root,
   and only when no member refuses extra properties. An unknown tag fails to
   deserialize: a `type` Rivet never heard of is an error, not a bare base. A
   component whose own tag property can never hold its tag (Bitbucket's
   `pipeline_selector` redefines `type` as a selector kind) is named by no
-  payload, so it stays a plain record outside the hierarchy. A tag the `mapping`
-  names is admitted by a declaration that constrains nothing; an implicit one
-  (the component's name) needs every declaration down its chain to say so with
-  an `enum`, `const` or `type`, and a member whose tag property declares nothing
-  is abstract. What C# can't hold
+  payload, so it stays a plain record outside the hierarchy. Every declaration
+  of the tag property down a member's chain applies at once, so each must admit
+  its tag, and for a tag the `mapping` names that's enough. An implicit tag (the
+  component's name) also needs something in the chain to pin the value down with
+  an `enum`, `const` or `type`: a chain that says nothing about its tag, or only
+  documents it, names no payload, so its member is abstract. A child restating
+  `type` with nothing but a description therefore changes nothing. What C# can't hold
   leaves the whole hierarchy a plain record with a `RIV3005` naming why: several
   `$ref`s in one `allOf`, a descendant that also composes a `oneOf`/`anyOf`, a
-  required member redeclared differently (C# can't hide a `required` member), a
+  required member redeclared with a schema that differs beyond documentation (C#
+  can't hide a `required` member, and Rivet says so even when both would map to
+  the same C# type), a
   member refusing extra properties its root accepts, a member with a
   discriminator of its own or a `mapping` that disagrees with the root's tags, and
   two schemas claiming one tag. A `discriminator` beside a component's own `allOf`

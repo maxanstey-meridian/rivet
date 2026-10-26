@@ -1532,20 +1532,45 @@ public static class ContractWalker
     private static bool IsFormFileType(WellKnownTypes wkt, ITypeSymbol type) =>
         SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile);
 
+    // The tool's formFileInput, by the runtime's rule (RequestInputLowering.CarriesFormFiles):
+    // a property ASP.NET's form binder would bind is an IFormFile or a collection of them.
+    // Those are the public instance properties that aren't indexers, along the whole base
+    // chain (not just the walkable assemblies), the most-derived one per name. Collections
+    // count: a record whose ONLY files were List<IFormFile> used to emit as JSON with
+    // format:binary strings, an unimplementable spec.
+    // FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files holds the two copies.
     private static bool HasFormFileProperty(
         WellKnownTypes wkt,
         TypeWalker typeWalker,
         ITypeSymbol type
-    ) =>
-        // Consider inherited properties too. Collections of IFormFile count —
-        // a record whose ONLY files were List<IFormFile> used to emit as JSON with
-        // format:binary strings, an unimplementable spec.
-        typeWalker
-            .GetEffectiveProperties(type)
-            .OfType<IPropertySymbol>()
-            .Any(p =>
-                IsFormFileType(wkt, p.Type) || typeWalker.IsCollectionOf(p.Type, wkt.IFormFile)
-            );
+    )
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
+            {
+                if (
+                    property
+                        is {
+                            IsStatic: false,
+                            IsIndexer: false,
+                            DeclaredAccessibility: Accessibility.Public
+                        }
+                    && seen.Add(property.Name)
+                    && (
+                        IsFormFileType(wkt, property.Type)
+                        || typeWalker.IsCollectionOf(property.Type, wkt.IFormFile)
+                    )
+                )
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Checks if the type is a (byte[], string) tuple — used for named file downloads

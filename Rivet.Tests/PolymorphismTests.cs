@@ -1041,6 +1041,8 @@ public sealed class PolymorphismTests
         Assert.True(errors.Count == 0, string.Join("\n", errors));
     }
 
+    // A sibling beside the oneOf may only restate the tag, and must admit every tag the
+    // mapping names, by the walker's rule.
     [Theory]
     [InlineData(
         "\"properties\": { \"type\": { \"type\": \"string\" }, \"id\": { \"type\": \"string\" } }",
@@ -1050,9 +1052,16 @@ public sealed class PolymorphismTests
         "\"properties\": { \"type\": { \"type\": \"string\" } }, \"required\": [\"type\", \"id\"]",
         "the schema requires 'id' beside oneOf"
     )]
-    public void OneOf_Sibling_Beyond_The_Discriminator_Falls_Back_Loudly(
+    // Constrains nothing, so it admits whatever tag the mapping names.
+    [InlineData("\"properties\": { \"type\": { \"description\": \"Kind\" } }", null)]
+    // Self-contradictory: every keyword present must admit the tag, not just the enum.
+    [InlineData(
+        "\"properties\": { \"type\": { \"type\": \"integer\", \"enum\": [\"user\"] } }",
+        "the sibling 'type' schema doesn't admit tag 'user'"
+    )]
+    public void OneOf_Sibling_Beside_The_Discriminator_Falls_Back_Loudly_Unless_It_Is_The_Tag(
         string siblings,
-        string reason
+        string? reason
     )
     {
         var schemas = $$"""
@@ -1071,6 +1080,16 @@ public sealed class PolymorphismTests
             """;
 
         var result = CompilationHelper.Import(CompilationHelper.BuildSpec(schemas));
+
+        if (reason is null)
+        {
+            Assert.DoesNotContain(result.Warnings, w => w.Contains("RIV3005"));
+            Assert.Contains(
+                "[JsonDerivedType(typeof(UserVariable), \"user\")]",
+                CompilationHelper.FindFile(result, "Variable.cs")
+            );
+            return;
+        }
 
         Assert.Contains(
             result.Warnings,
@@ -1413,6 +1432,14 @@ public sealed class PolymorphismTests
         "\"User\": {",
         "\"User\": { \"required\": [\"name\"],"
     )]
+    // Declared only below the ancestor that requires it: allOf applies every `required`.
+    [InlineData(
+        "User.cs",
+        "public required string Nickname { get; init; }",
+        "",
+        "\"required\": [\"type\"]",
+        "\"required\": [\"type\", \"nickname\"]"
+    )]
     // An ancestor refuses extra properties, so nothing below it takes them either.
     [InlineData(
         "Account.cs",
@@ -1449,6 +1476,9 @@ public sealed class PolymorphismTests
     }
 
     // A type synthesized for an inline schema that nothing refers to is an orphan.
+    // RivetDocument.cs names every generated file, so it is no evidence of use.
+    // PipelineSelectorType is one the hierarchy doesn't make: PipelineSelector flattens its
+    // allOf, the `type` it inherits wins, and its own enum is synthesized all the same.
     private static void AssertEverySyntheticTypeIsUsed(Rivet.Tool.Import.ImportResult result)
     {
         foreach (
@@ -1458,9 +1488,15 @@ public sealed class PolymorphismTests
         )
         {
             var name = Path.GetFileNameWithoutExtension(synthetic.FileName);
+            if (name == "PipelineSelectorType")
+            {
+                continue;
+            }
+
             Assert.True(
                 result.Files.Any(file =>
                     file != synthetic
+                    && file.FileName != "RivetDocument.cs"
                     && System.Text.RegularExpressions.Regex.IsMatch(
                         file.Content,
                         $@"\b{System.Text.RegularExpressions.Regex.Escape(name)}\b"
@@ -1516,6 +1552,16 @@ public sealed class PolymorphismTests
         UserName,
         "\"name\": { \"type\": \"string\", \"maxLength\": 10 },"
     )]
+    // A vendor extension's value is data, documentation keywords inside it included.
+    [InlineData(
+        "'User' redeclares 'name', which 'Account' requires, and C# can't hide a required member",
+        AccountTitle,
+        "\"title\": \"Account\", \"required\": [\"name\"],",
+        "\"name\": { \"type\": \"string\" }\n",
+        "\"name\": { \"type\": \"string\", \"x-meta\": { \"description\": \"a\" } }\n",
+        UserName,
+        "\"name\": { \"type\": \"string\", \"x-meta\": { \"description\": \"b\" } },"
+    )]
     [InlineData(
         "'Team' refuses additional properties its ancestor 'Resource' accepts",
         TeamPart,
@@ -1568,6 +1614,7 @@ public sealed class PolymorphismTests
                 && w.Contains($"has no usable allOf hierarchy ({reason})")
         );
         Assert.DoesNotContain("JsonPolymorphic", CompilationHelper.FindFile(result, "Resource.cs"));
+        AssertCompiles(result);
     }
 
     [Fact]
@@ -1739,30 +1786,56 @@ public sealed class PolymorphismTests
         );
     }
 
-    [Fact]
-    public void AllOf_Hierarchy_Tag_Declaration_That_Constrains_Nothing_Admits_Only_A_Mapped_Tag()
+    // An implicit tag (a component name) is decided by the whole chain: every declaration of
+    // the tag property must admit it, and one of them must constrain the value. A mapped tag
+    // is named explicitly, so admitting it is enough.
+    [Theory]
+    // Account restates `type` with documentation only. Resource's `type` still constrains it
+    // to a string, so Account and User are tags a payload names, as they would be had
+    // Account not restated it.
+    [InlineData(
+        "public record Account : Resource",
+        new[] { "Resource", "Account", "User" },
+        new string[0],
+        "\"type\": { \"type\": \"string\", \"enum\": [\"User\", \"team\"] },",
+        "\"type\": { \"description\": \"The account kind.\" },"
+    )]
+    // Nothing down the chain constrains `type`: no implicit tag is one a payload names, but
+    // the mapping names Team's.
+    [InlineData(
+        "public abstract record Account : Resource",
+        new string[0],
+        new[] { "Resource", "Account", "User" },
+        "\"type\": { \"type\": \"string\", \"enum\": [\"User\", \"team\"] },",
+        "\"type\": { \"description\": \"The account kind.\" },",
+        "\"properties\": { \"type\": { \"type\": \"string\" } },",
+        "\"properties\": { \"type\": { \"description\": \"The resource kind.\" } },"
+    )]
+    public void AllOf_Hierarchy_Implicit_Tag_Is_Admitted_By_Its_Whole_Chain(
+        string account,
+        string[] registered,
+        string[] unregistered,
+        params string[] edits
+    )
     {
-        // Account's `type` says nothing about its value. The mapping names Team's tag
-        // explicitly, and JSON Schema admits it. An implicit tag (a component name) needs a
-        // declaration that says so, so neither Account nor User is one a payload names.
         var result = CompilationHelper.Import(
-            CompilationHelper.BuildSpec(
-                EditedHierarchySchemas([
-                    "\"type\": { \"type\": \"string\", \"enum\": [\"User\", \"team\"] },",
-                    "\"type\": { \"description\": \"The account kind.\" },",
-                ])
-            )
+            CompilationHelper.BuildSpec(EditedHierarchySchemas(edits))
         );
 
         Assert.DoesNotContain(result.Warnings, w => w.Contains("RIV3005"));
         var resource = CompilationHelper.FindFile(result, "Resource.cs");
         Assert.Contains("[JsonDerivedType(typeof(Team), \"team\")]", resource);
-        Assert.DoesNotContain("typeof(User)", resource);
-        Assert.DoesNotContain("typeof(Account)", resource);
-        Assert.Contains(
-            "public abstract record Account : Resource",
-            CompilationHelper.FindFile(result, "Account.cs")
-        );
+        foreach (var name in registered)
+        {
+            Assert.Contains($"[JsonDerivedType(typeof({name}), \"{name}\")]", resource);
+        }
+
+        foreach (var name in unregistered)
+        {
+            Assert.DoesNotContain($"typeof({name})", resource);
+        }
+
+        Assert.Contains(account, CompilationHelper.FindFile(result, "Account.cs"));
         AssertCompiles(result);
     }
 
@@ -1776,12 +1849,14 @@ public sealed class PolymorphismTests
     // A property-less root that admits null: the tag is declared only below it.
     [InlineData("Envelope.cs", "required Resource? Owner {", PropertylessRoot, "")]
     // A leaf that declares nothing under a root that declares nothing: no type, no
-    // properties, still the record its own tag names.
+    // properties, still the record the tag its mapping entry names.
     [InlineData(
         "Envelope.cs",
         "public Leaf Leaf {",
         PropertylessRoot,
         "",
+        TeamMapping,
+        "\"mapping\": { \"team\": \"#/components/schemas/Team\", \"leaf\": \"#/components/schemas/Leaf\" }",
         OwnerProperty,
         "\"properties\": { \"owner\": { \"$ref\": \"#/components/schemas/Resource\" }, \"leaf\": { \"$ref\": \"#/components/schemas/Leaf\" } },",
         "\"AccountLinks\": {",
@@ -1810,6 +1885,38 @@ public sealed class PolymorphismTests
         Assert.DoesNotContain(result.Warnings, w => w.Contains("RIV3005"));
         var content = CompilationHelper.FindFile(result, file);
         Assert.True(content.Contains(expected), content);
+        AssertCompiles(result);
+    }
+
+    [Fact]
+    public void AllOf_Hierarchy_That_Falls_Back_Leaves_No_Record_Naming_Its_Members()
+    {
+        // Team (built first) refers to Labels, whose hierarchy the C# can't hold: Labels
+        // carries extension data that PriorityLabels refuses. It is rejected before anything
+        // is registered, so Team's property is the dictionary Labels imports as.
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(
+                EditedHierarchySchemas([
+                    TeamPart,
+                    "{ \"type\": \"object\", \"properties\": { \"size\": { \"type\": \"integer\" }, \"labels\": { \"$ref\": \"#/components/schemas/Labels\" } } }",
+                    "\"AccountLinks\": {",
+                    "\"Labels\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"string\" }, \"discriminator\": { \"propertyName\": \"kind\" } }, \"PriorityLabels\": { \"allOf\": [{ \"$ref\": \"#/components/schemas/Labels\" }, { \"type\": \"object\", \"additionalProperties\": false, \"properties\": { \"kind\": { \"type\": \"string\" } } }] }, \"AccountLinks\": {",
+                ])
+            )
+        );
+
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3005: Discriminator dropped on 'Labels'")
+                && w.Contains(
+                    "('PriorityLabels' refuses additional properties its ancestor 'Labels' accepts)"
+                )
+        );
+        Assert.DoesNotContain(
+            "public Labels Labels",
+            CompilationHelper.FindFile(result, "Team.cs")
+        );
         AssertCompiles(result);
     }
 

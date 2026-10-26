@@ -467,6 +467,16 @@ public sealed class HostJsonOptionsTests
             "reaches the polymorphic type 'Shape' at 'shape'",
             "a form, not a JSON body"
         ),
+        // ASP.NET's form binder binds public properties only, so a non-public file is no form.
+        ["internal form file member"] = (
+            () =>
+                Define
+                    .Post<HiddenUpload, Payload>("/uploads")
+                    .Bind(new HiddenUpload(new Circle(1)))
+                    .Success(new Payload("u")),
+            "reaches the polymorphic type 'Shape' at 'shape'",
+            null
+        ),
         ["inherited form files"] = (
             () =>
                 Define
@@ -637,6 +647,11 @@ public sealed class HostJsonOptionsTests
     public sealed record Framed(string Name, Frame? Frame);
 
     public sealed record Upload(IFormFile File, Shape Shape);
+
+    public sealed record HiddenUpload(Shape Shape)
+    {
+        internal IFormFile? File { get; init; }
+    }
 
     public record Attachment(List<IFormFile> Files);
 

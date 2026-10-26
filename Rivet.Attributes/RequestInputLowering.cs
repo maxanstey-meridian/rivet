@@ -1,5 +1,8 @@
 namespace Rivet;
 
+using System.Reflection;
+using Microsoft.AspNetCore.Http;
+
 /// <summary>
 /// Where a contract's <c>TInput</c> goes on the wire, decided once. Rivet.Tool lowers the
 /// input there in the spec (<c>ContractWalker.BuildParams</c>), and the runtime expects ASP.NET
@@ -23,7 +26,8 @@ internal static class RequestInputLowering
     /// <param name="binaryContentDeclared">Any <c>.RequestBinaryContent()</c>.</param>
     /// <param name="formDeclared"><c>.FormEncoded()</c> or <c>.AcceptsFile()</c>.</param>
     /// <param name="formFileInput">
-    /// <c>TInput</c> is an <c>IFormFile</c>, or has a property that is one or a list of them.
+    /// <c>TInput</c> is an <c>IFormFile</c>, or one of the properties ASP.NET's form binder
+    /// would bind is one or a list of them: see <see cref="CarriesFormFiles"/>.
     /// </param>
     internal static InputBinding Of(
         string method,
@@ -53,6 +57,66 @@ internal static class RequestInputLowering
             ? InputBinding.Form
             : InputBinding.Json;
     }
+
+    /// <summary>
+    /// The runtime's <c>formFileInput</c>: <c>TInput</c> is an <c>IFormFile</c>, or one of the
+    /// properties ASP.NET's form binder would bind is an <c>IFormFile</c>, an array of them or
+    /// one of the tool's collections of them. Those are the public instance properties that
+    /// aren't indexers, along the whole base chain, the most-derived one per name, so a
+    /// <c>new</c> member hides its base's. Roslyn symbols and <c>System.Type</c> can't share
+    /// code, so the tool keeps its own copy (<c>ContractWalker.HasFormFileProperty</c>), and
+    /// <c>FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files</c> holds the two
+    /// to one table of shapes.
+    /// </summary>
+    internal static bool CarriesFormFiles(Type inputType)
+    {
+        if (inputType == typeof(IFormFile))
+        {
+            return true;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var type = inputType; type is not null; type = type.BaseType)
+        {
+            foreach (
+                var property in type.GetProperties(
+                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly
+                )
+            )
+            {
+                if (
+                    property.GetIndexParameters().Length == 0
+                    && seen.Add(property.Name)
+                    && IsFormFiles(property.PropertyType)
+                )
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    // An IFormFile, or an array, List<T> or sequence interface of them (TypeWalker.IsCollectionOf).
+    private static bool IsFormFiles(Type type) =>
+        type == typeof(IFormFile)
+        || (type.IsArray && type.GetElementType() == typeof(IFormFile))
+        || (
+            type is { IsGenericType: true, GenericTypeArguments: [var element] }
+            && element == typeof(IFormFile)
+            && _formFileCollections.Contains(type.GetGenericTypeDefinition())
+        );
+
+    private static readonly Type[] _formFileCollections =
+    [
+        typeof(List<>),
+        typeof(IList<>),
+        typeof(ICollection<>),
+        typeof(IEnumerable<>),
+        typeof(IReadOnlyList<>),
+        typeof(IReadOnlyCollection<>),
+    ];
 
     private static bool IsForm(string mediaType) =>
         mediaType.Split(';')[0].Trim() is var bare

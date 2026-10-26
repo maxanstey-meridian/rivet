@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Rivet.Tool;
 using Rivet.Tool.Model;
@@ -722,5 +723,69 @@ public sealed class FormFileTests
         Assert.False(bodyProperties.TryGetProperty("taskId", out _));
         Assert.True(bodyProperties.TryGetProperty("document", out _));
         Assert.True(bodyProperties.TryGetProperty("title", out _));
+    }
+
+    /// <summary>
+    /// Whether TInput carries files is worked out twice: from Roslyn symbols in the tool
+    /// (ContractWalker.HasFormFileProperty) and by reflection at runtime
+    /// (RequestInputLowering.CarriesFormFiles). Both must count what ASP.NET's form binder
+    /// binds, so each shape is compiled once, walked by the tool, then emitted, loaded and
+    /// put to the runtime, and the two must give the same answer.
+    /// </summary>
+    [Theory]
+    [InlineData("public IFormFile File { get; init; } = null!;", "", true)]
+    [InlineData("internal IFormFile? File { get; init; }", "", false)]
+    [InlineData(
+        "public new string File { get; init; } = \"\";",
+        "public IFormFile File { get; init; } = null!;",
+        false
+    )]
+    [InlineData("", "public List<IFormFile> Files { get; init; } = [];", true)]
+    public void Tool_and_runtime_agree_on_which_inputs_carry_files(
+        string members,
+        string baseMembers,
+        bool form
+    )
+    {
+        var source = $$"""
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            public class UploadBase { {{baseMembers}} }
+
+            public class Upload : UploadBase
+            {
+                public string Title { get; init; } = "";
+                {{members}}
+            }
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly RouteDefinition<Upload, string> Create =
+                    Define.Post<Upload, string>("/api/uploads");
+            }
+            """;
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        var endpoint = Assert.Single(
+            CompilationHelper.WalkContracts(compilation, discovered, walker)
+        );
+        Assert.Equal(
+            form,
+            endpoint.Params.Any(p => p.Source is ParamSource.File or ParamSource.FormField)
+        );
+
+        using var image = new MemoryStream();
+        Assert.True(compilation.Emit(image).Success);
+        var upload = Assembly.Load(image.ToArray()).GetType("Test.Upload", throwOnError: true);
+        var carriesFormFiles = typeof(Define)
+            .Assembly.GetType("Rivet.RequestInputLowering", throwOnError: true)!
+            .GetMethod("CarriesFormFiles", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Assert.Equal(form, carriesFormFiles.Invoke(null, [upload]));
     }
 }

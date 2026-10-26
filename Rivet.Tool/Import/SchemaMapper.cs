@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
@@ -67,20 +68,19 @@ internal sealed class SchemaMapper
         string? ParentKey,
         string Tag,
         // Itself first when concrete, then every concrete descendant.
-        IReadOnlyList<string> RegisteredKeys
+        IReadOnlyList<string> RegisteredKeys,
+        // Every property it or an ancestor lists in `required`: allOf applies them all.
+        IReadOnlySet<string> Required
     );
 
     // Effective: every member the record has, its own and inherited, keyed by JSON name,
-    // with the member that declares it and the property schema it was mapped from.
-    // ExtensionDataCarrier: the member whose record holds [JsonExtensionData] for this one,
-    // or null when the chain refuses extra properties.
+    // with the member that declares it and the property schema it was last declared by.
     private sealed record BuiltHierarchyRecord(
         GeneratedRecord Record,
         IReadOnlyDictionary<
             string,
             (RecordProperty Property, string Owner, IOpenApiSchema? Source)
-        > Effective,
-        string? ExtensionDataCarrier
+        > Effective
     );
 
     public SchemaMapper(List<string> warnings)
@@ -1447,12 +1447,15 @@ internal sealed class SchemaMapper
     /// <c>object</c>). A component joins its parent's hierarchy through an allOf with exactly
     /// one <c>$ref</c>; its tag is its mapping entry, else its component name. A member is
     /// concrete when every declaration of the discriminator property down its chain admits
-    /// its own tag. A member that is neither concrete nor an ancestor of a concrete one can
-    /// never be named by a payload (Bitbucket's <c>pipeline_selector</c> redefines
-    /// <c>type</c> as a selector kind), so it stays a plain record outside the hierarchy.
-    /// Every member's record is built here, before anything else is mapped, so membership is
-    /// settled before a oneOf could claim a member or a <c>$ref</c> resolve to one. Anything
-    /// the C# can't hold records a rejection reason for the loud RIV3005 fallback.
+    /// its own tag (and, for an implicit tag, one of them constrains the value). A member that
+    /// is neither concrete nor an ancestor of a concrete one can never be named by a payload
+    /// (Bitbucket's <c>pipeline_selector</c> redefines <c>type</c> as a selector kind), so it
+    /// stays a plain record outside the hierarchy. A hierarchy the C# can't hold is rejected
+    /// while it is resolved, before anything is registered, with a reason for the loud
+    /// RIV3005 fallback. Every surviving member's record is then built here, before anything
+    /// else is mapped, so membership is settled before a oneOf could claim a member or a
+    /// <c>$ref</c> resolve to one, and a record built early can't name a member that later
+    /// leaves.
     /// </summary>
     private void DetectPolymorphicHierarchies(IDictionary<string, IOpenApiSchema> schemas)
     {
@@ -1493,7 +1496,7 @@ internal sealed class SchemaMapper
 
         // Every hierarchy's members are registered before any record is built, so a $ref to
         // a member resolves to its record whichever hierarchy is built first.
-        var resolved = new List<(string RootKey, List<(string Key, HierarchyMember Member)>)>();
+        var registered = new List<string>();
         foreach (var (rootKey, root) in schemas)
         {
             if (
@@ -1531,31 +1534,14 @@ internal sealed class SchemaMapper
             foreach (var (key, member) in members)
             {
                 _hierarchyMembers[key] = member;
+                registered.Add(key);
             }
-
-            resolved.Add((rootKey, members));
         }
 
-        foreach (var (rootKey, members) in resolved)
+        // Preorder: a parent's record is built before its children's.
+        foreach (var key in registered)
         {
-            // Preorder: a parent's record is built before its children's.
-            if (
-                members
-                    .Select(entry => TryBuildHierarchyRecord(entry.Key, schemas))
-                    .FirstOrDefault(failure => failure is not null)
-                is not { } failure
-            )
-            {
-                continue;
-            }
-
-            foreach (var (key, _) in members)
-            {
-                _hierarchyMembers.Remove(key);
-                _hierarchyRecords.Remove(key);
-            }
-
-            _hierarchyRejections[rootKey] = failure;
+            BuildHierarchyRecord(key, schemas);
         }
     }
 
@@ -1671,21 +1657,23 @@ internal sealed class SchemaMapper
             }
         }
 
-        // A mapped tag is named explicitly, so a declaration that constrains nothing admits
-        // it. An implicit tag (the component name) needs every declaration to say it does.
+        // Every declaration down the chain applies at once, so each must admit the tag. A
+        // mapped tag is named explicitly, so that is enough. An implicit tag (the component
+        // name) also needs the chain to constrain the value somewhere: a chain that says
+        // nothing, or only documents the property, names no payload.
         var concrete = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var (key, _) in order)
         {
             var tag = tags[key];
-            Func<IOpenApiSchema, string, bool> admits = mapped.Contains(key)
-                ? AdmitsTag
-                : DeclaresTag;
-            var admitted = true;
-            for (string? link = key; link is not null && admitted; link = parents[link])
+            var declarations = new List<IOpenApiSchema>();
+            for (string? link = key; link is not null; link = parents[link])
             {
-                admitted = OwnTagDeclarations(schemas[link], property)
-                    .All(declaration => admits(declaration, tag));
+                declarations.AddRange(OwnTagDeclarations(schemas[link], property));
             }
+
+            var admitted =
+                declarations.All(declaration => AdmitsTag(declaration, tag))
+                && (mapped.Contains(key) || declarations.Any(ConstrainsTag));
 
             if (!admitted && mapped.Contains(key))
             {
@@ -1711,11 +1699,85 @@ internal sealed class SchemaMapper
             return $"no allOf descendant carries a '{property}' tag it admits";
         }
 
+        // What building a member's record would trip over, checked here so that building a
+        // registered hierarchy can't fail. Extension data lives on the root, and a member
+        // that refuses extra properties can't un-inherit its dictionary. C# can't hide a
+        // required member, so a member may restate one only as the schema it inherits, give
+        // or take documentation. This errs loud: a restatement that differs in schema but
+        // would map to the same C# member still rejects the hierarchy.
+        var required = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var sources = new Dictionary<string, Dictionary<string, IOpenApiSchema>>(
+            StringComparer.Ordinal
+        );
+        foreach (var (key, parent) in order.Where(entry => included.Contains(entry.Key)))
+        {
+            var parts = OwnParts(schemas[key]);
+            var own = parts
+                .SelectMany(part => part.Required ?? new HashSet<string>())
+                .ToHashSet(StringComparer.Ordinal);
+            var declared = DeclaredProperties(parts);
+            declared.Remove(property);
+            if (parent is null)
+            {
+                required[key] = own;
+                sources[key] = declared;
+                continue;
+            }
+
+            if (
+                schemas[rootKey].AdditionalPropertiesAllowed
+                && !parts.All(part => part.AdditionalPropertiesAllowed)
+            )
+            {
+                return $"'{key}' refuses additional properties its ancestor '{rootKey}' accepts";
+            }
+
+            var effective = new Dictionary<string, IOpenApiSchema>(
+                sources[parent],
+                StringComparer.Ordinal
+            );
+            foreach (var (name, source) in declared)
+            {
+                if (sources[parent].TryGetValue(name, out var inherited))
+                {
+                    if (
+                        SchemaClassifier.ComputeUndocumentedFingerprint(source)
+                        == SchemaClassifier.ComputeUndocumentedFingerprint(inherited)
+                    )
+                    {
+                        continue;
+                    }
+
+                    if (required[parent].Contains(name))
+                    {
+                        var requirer = parent;
+                        while (
+                            !OwnParts(schemas[requirer])
+                                .Any(part => part.Required?.Contains(name) == true)
+                        )
+                        {
+                            requirer = parents[requirer]!;
+                        }
+
+                        return $"'{key}' redeclares '{name}', which '{requirer}' requires, and C# can't hide a required member";
+                    }
+                }
+
+                effective[name] = source;
+            }
+
+            own.UnionWith(required[parent]);
+            required[key] = own;
+            sources[key] = effective;
+        }
+
         foreach (var (key, parent) in order.Where(entry => included.Contains(entry.Key)))
         {
             var registered = new List<string>();
             CollectConcrete(key);
-            members.Add((key, new HierarchyMember(property, parent, tags[key], registered)));
+            members.Add(
+                (key, new HierarchyMember(property, parent, tags[key], registered, required[key]))
+            );
 
             void CollectConcrete(string current)
             {
@@ -1773,6 +1835,18 @@ internal sealed class SchemaMapper
             .OfType<IOpenApiSchema>();
 
     /// <summary>
+    /// The properties an allOf member's own parts declare, keyed by JSON name. The first
+    /// declaration wins across parts, as in a flattened allOf record.
+    /// </summary>
+    private static Dictionary<string, IOpenApiSchema> DeclaredProperties(
+        List<IOpenApiSchema> parts
+    ) =>
+        parts
+            .SelectMany(part => part.Properties ?? new Dictionary<string, IOpenApiSchema>())
+            .GroupBy(entry => entry.Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.Ordinal);
+
+    /// <summary>
     /// An allOf component flattened into one record: its parts' properties, <c>$ref</c>'d
     /// parts copied rather than inherited, then its own sibling properties.
     /// </summary>
@@ -1787,19 +1861,18 @@ internal sealed class SchemaMapper
         };
 
     /// <summary>
-    /// Builds a hierarchy member's record into <see cref="_hierarchyRecords"/>, or returns
-    /// why the C# can't hold it. The root keeps its own properties. Every other member
-    /// mentions a property by declaring it or by listing it in its own <c>required</c>, and
-    /// allOf applies every <c>required</c> at once, so a mentioned property is required when
-    /// the member or an ancestor requires it. A declaration whose schema differs from the
-    /// inherited one only in documentation is the inherited member. A mentioned member that
-    /// differs from the one it inherits (<see cref="SameMember"/>) is redeclared with <c>new</c> over an optional
-    /// member; over a required one it rejects the hierarchy, since C# can't hide a required
-    /// member. The discriminator property is stripped everywhere — System.Text.Json writes
-    /// it. Extension data lives on the root, and only when every member admits extra
-    /// properties: a member that refuses them can't un-inherit the root's dictionary.
+    /// Builds a hierarchy member's record into <see cref="_hierarchyRecords"/>. The root keeps
+    /// its own properties. Every other member mentions a property by declaring it or by
+    /// listing it in its own <c>required</c>, and allOf applies every <c>required</c> at
+    /// once, so a property is required when the member or an ancestor requires it. A
+    /// declaration whose schema differs from the inherited one only in documentation is the
+    /// inherited member. A mentioned member that differs from the one it inherits
+    /// (<see cref="SameMember"/>) is redeclared with <c>new</c>; the inherited one is optional,
+    /// since <see cref="TryResolveHierarchy"/> rejected every hierarchy where it isn't. The
+    /// discriminator property is stripped everywhere — System.Text.Json writes it. Extension
+    /// data lives on the root only.
     /// </summary>
-    private string? TryBuildHierarchyRecord(string key, IDictionary<string, IOpenApiSchema> schemas)
+    private void BuildHierarchyRecord(string key, IDictionary<string, IOpenApiSchema> schemas)
     {
         var member = _hierarchyMembers[key];
         var schema = schemas[key];
@@ -1816,10 +1889,14 @@ internal sealed class SchemaMapper
 
         if (member.ParentKey is not { } parentKey)
         {
-            var root = _synth.MapRecord(name, schema);
-            root = root with
+            // The tag property is skipped before its type is resolved: System.Text.Json writes
+            // it, and an inline enum synthesized for it would be an orphan.
+            var root = _synth.MapRecord(
+                name,
+                schema,
+                skip: new HashSet<string>(StringComparer.Ordinal) { member.DiscriminatorProperty }
+            ) with
             {
-                Properties = WithoutWireProperty(root.Properties, member.DiscriminatorProperty),
                 Polymorphism = polymorphism,
             };
             _hierarchyRecords[key] = new BuiltHierarchyRecord(
@@ -1836,47 +1913,30 @@ internal sealed class SchemaMapper
                                 : null
                         ),
                     StringComparer.Ordinal
-                ),
-                root.HasExtensionData ? key : null
+                )
             );
-            return null;
+            return;
         }
 
         var parent = _hierarchyRecords[parentKey];
         var parts = OwnParts(schema);
-        if (
-            parent.ExtensionDataCarrier is { } carrier
-            && !parts.All(part => part.AdditionalPropertiesAllowed)
-        )
-        {
-            return $"'{key}' refuses additional properties its ancestor '{carrier}' accepts";
-        }
-
-        var required = parts
-            .SelectMany(part => part.Required ?? new HashSet<string>())
-            .ToHashSet(StringComparer.Ordinal);
-        // First declaration wins across parts, as in a flattened allOf record.
-        var sources = parts
-            .SelectMany(part => part.Properties ?? new Dictionary<string, IOpenApiSchema>())
-            .GroupBy(entry => entry.Key, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.Ordinal);
+        var required = member.Required.ToHashSet(StringComparer.Ordinal);
+        var sources = DeclaredProperties(parts);
         // A restatement that differs from the inherited declaration only in documentation is
         // the inherited member. It isn't extracted, so no inline type is synthesized for it: a
-        // child's own description would otherwise give its inline enum a type of its own.
-        var restated = sources
+        // child's own description would otherwise give its inline enum a type of its own. The
+        // tag property is skipped the same way.
+        var skip = sources
             .Where(entry =>
                 parent.Effective.GetValueOrDefault(entry.Key).Source is { } inherited
                 && SchemaClassifier.ComputeUndocumentedFingerprint(entry.Value)
                     == SchemaClassifier.ComputeUndocumentedFingerprint(inherited)
             )
             .Select(entry => entry.Key)
+            .Append(member.DiscriminatorProperty)
             .ToHashSet(StringComparer.Ordinal);
-        var own = WithoutWireProperty(
-                parts.SelectMany(part =>
-                    _synth.ExtractProperties(part, name, required, skip: restated)
-                ),
-                member.DiscriminatorProperty
-            )
+        var own = parts
+            .SelectMany(part => _synth.ExtractProperties(part, name, required, skip: skip))
             .GroupBy(property => property.JsonName, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
         var mentioned = own
@@ -1911,12 +1971,20 @@ internal sealed class SchemaMapper
                 source ??= inherited.Source;
                 if (SameMember(property, inherited.Property))
                 {
+                    // Still the inherited member, but restated: descendants compare against
+                    // the restatement, as TryResolveHierarchy does.
+                    effective[property.JsonName] = inherited with
+                    {
+                        Source = source,
+                    };
                     continue;
                 }
 
                 if (inherited.Property.IsRequired)
                 {
-                    return $"'{key}' redeclares '{property.JsonName}', which '{inherited.Owner}' requires, and C# can't hide a required member";
+                    throw new UnreachableException(
+                        $"'{key}' redeclares required '{property.JsonName}', which TryResolveHierarchy rejects."
+                    );
                 }
 
                 declared.Add(property with { HidesInherited = true });
@@ -1938,10 +2006,8 @@ internal sealed class SchemaMapper
                 BaseTypeName: _ctx.SchemaNameMap[parentKey],
                 SchemaMetadata: CollectGeneratedSchemaMetadata(schema)
             ),
-            effective,
-            parent.ExtensionDataCarrier
+            effective
         );
-        return null;
     }
 
     /// <summary>
@@ -2239,19 +2305,18 @@ internal sealed class SchemaMapper
             is null;
 
     /// <summary>
-    /// <see cref="AdmitsTag"/>, for a tag no mapping names (an allOf member's implicit tag,
-    /// its component name): the schema must also declare an <c>enum</c>, <c>const</c> or
-    /// <c>type</c>. A member whose tag property declares nothing says nothing about which
-    /// payloads name it, so it is abstract.
+    /// True when a tag property schema constrains the value with an <c>enum</c>,
+    /// <c>const</c> or <c>type</c>. An implicit tag (an allOf member's component name) needs
+    /// one somewhere down its chain: a chain whose tag property says nothing, or only
+    /// documents it, says nothing about which payloads name the member, so it is abstract.
     /// </summary>
-    private bool DeclaresTag(IOpenApiSchema tagSchema, string tag) =>
+    private bool ConstrainsTag(IOpenApiSchema tagSchema) =>
         ResolveTagSchema(tagSchema) is { } resolved
         && (
             resolved.Enum is { Count: > 0 }
             || resolved.Const is not null
             || resolved.Type is not null
-        )
-        && AdmitsTag(resolved, tag);
+        );
 
     private IOpenApiSchema? ResolveTagSchema(IOpenApiSchema tagSchema) =>
         tagSchema is not OpenApiSchemaReference { Reference.Id: { } tagRefId } ? tagSchema

@@ -209,38 +209,8 @@ public abstract partial class RouteDefinitionBase<TSelf>
             contentTypes: state.RequestContentTypes,
             binaryContentDeclared: state.RequestBinaryContentDeclared,
             formDeclared: state.FormEncoded || state.AcceptsFile,
-            formFileInput: inputType is not null && CarriesFormFiles(inputType)
+            formFileInput: inputType is not null && RequestInputLowering.CarriesFormFiles(inputType)
         );
-
-    // The inputs the tool lowers to multipart (ContractWalker.IsFormFileType and
-    // HasFormFileProperty): an IFormFile, or one with a property of files, inherited ones too.
-    private static bool CarriesFormFiles(Type inputType) =>
-        inputType == typeof(IFormFile)
-        || inputType
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Any(property =>
-                property.GetIndexParameters().Length == 0 && IsFormFiles(property.PropertyType)
-            );
-
-    // An IFormFile, or an array, List<T> or sequence interface of them.
-    private static bool IsFormFiles(Type type) =>
-        type == typeof(IFormFile)
-        || (type.IsArray && type.GetElementType() == typeof(IFormFile))
-        || (
-            type is { IsGenericType: true, GenericTypeArguments: [var element] }
-            && element == typeof(IFormFile)
-            && _formFileCollections.Contains(type.GetGenericTypeDefinition())
-        );
-
-    private static readonly Type[] _formFileCollections =
-    [
-        typeof(List<>),
-        typeof(IList<>),
-        typeof(ICollection<>),
-        typeof(IEnumerable<>),
-        typeof(IReadOnlyList<>),
-        typeof(IReadOnlyCollection<>),
-    ];
 
     private ResponseContract BuildResponse(
         RouteState state,

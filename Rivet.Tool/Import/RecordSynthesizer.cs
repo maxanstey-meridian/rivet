@@ -322,14 +322,23 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         };
     }
 
-    public GeneratedRecord MapRecord(string name, IOpenApiSchema schema)
+    /// <summary>
+    /// The record <paramref name="schema"/> maps to. A property whose key is in
+    /// <paramref name="skip"/> is left out before its type is resolved, so no inline type is
+    /// synthesized for it.
+    /// </summary>
+    public GeneratedRecord MapRecord(
+        string name,
+        IOpenApiSchema schema,
+        IReadOnlySet<string>? skip = null
+    )
     {
         if (!ctx.Resolving.Add(name))
         {
             return new GeneratedRecord(name, []);
         }
 
-        var properties = ExtractProperties(schema, name);
+        var properties = ExtractProperties(schema, name, skip: skip);
         var description = string.IsNullOrEmpty(schema.Description) ? null : schema.Description;
         ctx.Resolving.Remove(name);
         return new GeneratedRecord(
