@@ -134,15 +134,26 @@ honest degradation, not full support.
   `account` reads a `user`. A concrete member also registers itself and is never
   `abstract`, and leaves are polymorphic too, which is what makes a `User` you
   return directly still write `"type": "user"`. Children declare only what their
-  parent's record doesn't already carry, a property redeclared with another type
-  is written with `new`, and the discriminator property is stripped everywhere.
-  An unknown tag fails to deserialize: a `type` Rivet never heard of is an error,
-  not a bare base. A component whose own tag property can never hold its tag
-  (Bitbucket's `pipeline_selector` redefines `type` as a selector kind) is named
-  by no payload, so it stays a plain record outside the hierarchy. What C# can't
-  hold (several `$ref`s in one `allOf`, a required member redeclared, two schemas
-  claiming one tag) leaves the whole hierarchy a plain record with a `RIV3005`
-  naming why.
+  parent's record doesn't already carry, and the discriminator property is
+  stripped everywhere. allOf applies every `required` at once, so a property a
+  child restates stays required if an ancestor requires it, and one a child only
+  lists in its own `required` is tightened. A child's property that comes out as
+  the member it inherits (documentation aside: the preserved schema keeps that)
+  is simply inherited; one that differs is written with `new`, which is how
+  Bitbucket's `user.links` gets its own type. Extension data sits on the root,
+  and only when no member refuses extra properties. An unknown tag fails to
+  deserialize: a `type` Rivet never heard of is an error, not a bare base. A
+  component whose own tag property can never hold its tag (Bitbucket's
+  `pipeline_selector` redefines `type` as a selector kind) is named by no
+  payload, so it stays a plain record outside the hierarchy. What C# can't hold
+  leaves the whole hierarchy a plain record with a `RIV3005` naming why: several
+  `$ref`s in one `allOf`, a descendant that also composes a `oneOf`/`anyOf`, a
+  required member redeclared differently (C# can't hide a `required` member), a
+  member refusing extra properties its root accepts, a member with a
+  discriminator of its own or a `mapping` that disagrees with the root's tags, and
+  two schemas claiming one tag. A `discriminator` beside a component's own `allOf`
+  can't root a hierarchy (the root has no parent), and says so with a `RIV3005`
+  too.
 - **Undiscriminated `oneOf`** (no discriminator — e.g. `string | integer`):
   imported as an `As*` wrapper record carrying `[RivetUnion]`. The attribute
   doubles as a `JsonConverter`: the wire value is the BARE variant, and the
@@ -257,7 +268,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3009` | `unresolved-schema` | Schema could not be resolved to a C# type → `JsonElement`. |
 | `RIV3010` | `unsupported-schema-type` | Unhandled JSON Schema `type` → `JsonElement`. |
 | `RIV3011` | `array-missing-items` | Array schema without `items` → `List<JsonElement>`. |
-| `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (a plain object with neither `oneOf` nor `allOf` descendants, an `allOf` hierarchy C#'s single inheritance can't hold, or a `oneOf` whose `mapping` is absent/unusable or whose siblings go beyond the discriminator) — dispatch semantics dropped. |
+| `RIV3005` | `discriminator-dropped` | `discriminator` with no reversible polymorphic shape (a plain object with neither `oneOf` nor `allOf` descendants, an `allOf` hierarchy C# can't hold, a `discriminator` beside a component's own `allOf`, or a `oneOf` whose `mapping` is absent/unusable or whose siblings go beyond the discriminator) — dispatch semantics dropped. |
 | `RIV3001`, `RIV3006`, `RIV3008` | `alias-unresolvable` | Cyclic / dangling `$ref` alias chains broken with placeholders. |
 | `RIV3014` | `dictionary-key-dropped` | A `propertyNames` schema has no C# dictionary-key representation; keys degrade to `string`. |
 | `RIV3015` | `named-scalar-algebra-unsupported` | A named scalar component uses `const`, schema composition, or heterogeneous leaf types; its fallback mapping is retained. |
@@ -327,17 +338,22 @@ release's `dotnet test`; only the generated reports are gitignored.
 Three corpora still fail the gate, and none of them is excused. Each failure is a
 Rivet gap with a known shape, waiting on a design decision rather than a shrug:
 
-- **Jira**: the discriminated variants Rivet synthesizes from the C# hierarchy
-  lose their member descriptions and invent a `const`-like tag `enum` the source
-  never wrote (about 450 findings). Its 144 bodies on 204 statuses and two paths
-  that repeat a template are source defects the profile can bind.
+- **Jira**: its discriminated variants now come back as the source wrote them,
+  so what's left is small and known. The round trip is down to 12
+  `schema-constraints` findings, all one gap: an array's `minLength: 1` is
+  imported as `[MinLength]` and re-emitted as `minItems: 1`. Admission also needs
+  the profile's 146 pins (its 144 bodies on 204 statuses and two paths that
+  repeat a template, source defects the profile can bind) and dispositions for
+  its `x-atlassian-*` and other extensions, which wait for the extension work in
+  0.50.0 part 2. Jira joins the gate then.
 - **DigitalOcean**: it has no reusable components; it reuses by `$ref` into other
   operations (`#/paths/~1v2~11-clicks/get/responses/401`), 2,797 times. The
   importer inlines those and the reference identity is gone, which is nearly all
   of its ~10,000 findings.
-- **Cloudflare**: the largest of them, and the longest list: 9 unusable
+- **Cloudflare**: the largest of them, and the longest list: 10 unusable
   discriminators (`RIV3005`: three `oneOf`s with no mapping, two mappings that
-  send several tags to one schema, two variants whose `allOf` base enum leaves out
-  their own tag, one mapping entry that resolves nowhere, one variant two unions
-  share), 7 scalar compositions (`RIV3015`), 5 identity-only fallbacks
-  (`RIV3010`), and 25 unreviewed extension families.
+  send several tags to one schema, two variants whose `allOf` base enum leaves
+  out their own tag, one mapping entry that resolves nowhere, one variant two
+  unions share, and one beside an `allOf` that can't root a hierarchy), 7 scalar
+  compositions (`RIV3015`), 5 identity-only fallbacks (`RIV3010`), and 25
+  unreviewed extension families.

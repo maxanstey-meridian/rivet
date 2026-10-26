@@ -87,7 +87,11 @@ internal enum InputBinding
     /// <summary>A form or multipart body (<c>.FormEncoded()</c>, <c>.AcceptsFile()</c>).</summary>
     Form,
 
-    /// <summary>The route and query; the body is raw bytes (<c>.AcceptsBinary()</c>).</summary>
+    /// <summary>
+    /// The route and query, wherever there's no JSON body: a method other than POST, PUT or
+    /// PATCH, or one with a declared <c>.Parameter&lt;T&gt;()</c>, unless a body is declared;
+    /// or a raw binary body (<c>.AcceptsBinary()</c>).
+    /// </summary>
     RouteAndQuery,
 }
 

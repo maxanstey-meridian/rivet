@@ -27,9 +27,6 @@ public sealed class OpenApiEmitter
     /// <summary>Canonical shape hash → base component name for tagged unions.</summary>
     private readonly Dictionary<string, string> _taggedUnionNames = [];
 
-    /// <summary>Controller/endpoint/shape identity → assigned route-filtered body component name.</summary>
-    private readonly Dictionary<string, string> _filteredBodyNames = [];
-
     /// <summary>Tagged-union canonical shape hash + variant tag → assigned variant component name.</summary>
     private readonly Dictionary<(string UnionHash, string Tag), string> _variantNames = [];
 
@@ -47,8 +44,10 @@ public sealed class OpenApiEmitter
     private readonly HashSet<string> _preservedSchemaNames = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The one answer to which contract entry's schema lands at each component id, in the
-    /// order <see cref="BuildSchemas"/> writes them. Filled by <see cref="ResolveComponentSources"/>.
+    /// The one answer to which contract entry stands for the schema at each component id, in
+    /// the order <see cref="BuildSchemas"/> writes them. At a preserved id <see cref="BuildSchemas"/>
+    /// writes the preserved schema instead, and the entry stands in for it, so its metadata
+    /// (nullability, say) must mirror that schema. Filled by <see cref="ResolveComponentSources"/>.
     /// </summary>
     private readonly Dictionary<string, ComponentSource> _componentSources = new(
         StringComparer.Ordinal
@@ -1561,29 +1560,7 @@ public sealed class OpenApiEmitter
             return null;
         }
 
-        if (!_filteredBodyNames.ContainsKey(FilteredBodyIdentity(ep, bodyProperties)))
-        {
-            throw new RivetUserException(
-                $"route-filtered request body name was not allocated for endpoint '{ep.ControllerName}.{ep.Name}'"
-            );
-        }
-
         return BuildObjectSchema(bodyProperties, typeName: sourceTypeName);
-    }
-
-    private static string FilteredBodyIdentity(
-        TsEndpointDefinition endpoint,
-        IReadOnlyList<TsPropertyDefinition> properties
-    )
-    {
-        var shape = new TsType.InlineObject(
-            properties.Select(TsType.InlineObjectField.FromProperty).ToList()
-        );
-        return endpoint.ControllerName
-            + "\0"
-            + endpoint.Name
-            + "\0"
-            + InlineTypeExtractor.CanonicalHash(shape);
     }
 
     private bool TryGetRouteFilteredBodyProperties(
@@ -2186,15 +2163,6 @@ public sealed class OpenApiEmitter
         string? context
     )
     {
-        var variantSchema = MapTsTypeToJsonSchema(variant.Type, context);
-        ApplyVariantAnnotations(variantSchema, tu.Discriminator, baseName, variant);
-
-        if (variantSchema.Count == 1 && variantSchema["$ref"] is JsonValue existingRef)
-        {
-            // Variant is already a named schema (TypeRef/Generic/Brand) — ref it directly.
-            return existingRef.GetValue<string>();
-        }
-
         if (
             variant.Metadata?.ComponentId is { } preserved
             && _preservedSchemaNames.Contains(preserved)
@@ -2202,8 +2170,18 @@ public sealed class OpenApiEmitter
         {
             // The producer pinned the variant to a component it also preserved verbatim
             // because the C# type can't carry all of it: that copy is the variant's schema,
-            // and the shape built from the C# type is only an approximation of it.
+            // and the shape built from the C# type is only an approximation of it, so it
+            // isn't built at all.
             return $"#/components/schemas/{JsonPointer.Escape(preserved)}";
+        }
+
+        var variantSchema = MapTsTypeToJsonSchema(variant.Type, context);
+        ApplyVariantAnnotations(variantSchema, tu.Discriminator, variant);
+
+        if (variantSchema.Count == 1 && variantSchema["$ref"] is JsonValue existingRef)
+        {
+            // Variant is already a named schema (TypeRef/Generic/Brand) — ref it directly.
+            return existingRef.GetValue<string>();
         }
 
         var componentName = VariantComponentName(
@@ -2228,54 +2206,32 @@ public sealed class OpenApiEmitter
     /// <summary>
     /// Writes what the derived type says about the variant as a whole: its description and
     /// type-level schema metadata, as its own component would carry them, and its tag property
-    /// as the source authored it in place of the synthesized single-value <c>enum</c>. Only an
-    /// inline variant is a schema of its own to write them on; on a reference to another
-    /// component they would describe nothing.
+    /// as the source authored it in place of the synthesized single-value <c>enum</c>. The
+    /// walker and the contract reader only let a variant carry them when it is an inline object
+    /// with the tag property and a tag schema object that admits its tag.
     /// </summary>
     private static void ApplyVariantAnnotations(
         JsonObject variantSchema,
         string discriminator,
-        string baseName,
         TsType.TaggedUnionVariant variant
     )
     {
-        var authoredTag = variant.Metadata?.DiscriminatorSchema;
-        if (variant is { Description: null, ScalarMetadata: null } && authoredTag is null)
+        if (variant is { Description: null, ScalarMetadata: null, DiscriminatorSchema: null })
         {
             return;
-        }
-
-        var origin = $"variant '{variant.Tag}' of the tagged union '{baseName}'";
-        if (
-            variant.Type is not TsType.InlineObject
-            || variantSchema["properties"] is not JsonObject properties
-            || !properties.ContainsKey(discriminator)
-        )
-        {
-            throw new RivetUserException(
-                $"error: {origin} carries a description, scalarMetadata or metadata.discriminatorSchema, "
-                    + $"but it isn't an inline object with a '{discriminator}' property to put them on. "
-                    + "Give the variant an inline object type with the tag property, or move the "
-                    + "annotations to the component it refers to"
-            );
         }
 
         if (variant.Description is not null)
         {
             variantSchema["description"] = variant.Description;
         }
-        EnrichScalarSchema(variantSchema, variant.ScalarMetadata);
-        if (authoredTag is not null)
+        // The tag goes in before the scalar metadata, so whatever shape nullability gives the
+        // schema already carries it.
+        if (variant.DiscriminatorSchema is { } authoredTag)
         {
-            properties[discriminator] =
-                SchemaEnricher.ParseJsonLiteral(
-                    authoredTag,
-                    $"the discriminator schema of {origin}"
-                ) as JsonObject
-                ?? throw new RivetUserException(
-                    $"error: the discriminator schema of {origin} must be a JSON object, got '{authoredTag}'"
-                );
+            variantSchema["properties"]![discriminator] = JsonNode.Parse(authoredTag)!.AsObject();
         }
+        EnrichScalarSchema(variantSchema, variant.ScalarMetadata);
     }
 
     /// <summary>
@@ -2511,8 +2467,9 @@ public sealed class OpenApiEmitter
     /// <summary>
     /// Whether the schema <paramref name="type"/> maps to admits null. References resolve the
     /// way <see cref="MapTypeReference"/> and <see cref="MapBrandReference"/> resolve them, to
-    /// the component <see cref="BuildSchemas"/> actually writes at the referenced id.
-    /// <paramref name="visited"/> stops an alias cycle.
+    /// the contract entry that stands for the component at the referenced id: the one
+    /// <see cref="BuildSchemas"/> builds there, or, at a preserved id, the one whose metadata
+    /// mirrors the preserved schema. <paramref name="visited"/> stops an alias cycle.
     /// </summary>
     private bool AdmitsNull(TsType type, HashSet<string> visited) =>
         type switch
@@ -2560,7 +2517,10 @@ public sealed class OpenApiEmitter
         definition.ScalarMetadata?.IsNullable == true
         || definition.Type is { } aliased && AdmitsNull(aliased, visited);
 
-    /// <summary>Whether the component schema at <paramref name="componentId"/> admits null, read from what builds it.</summary>
+    /// <summary>
+    /// Whether the component schema at <paramref name="componentId"/> admits null, read from the
+    /// contract entry that stands for it (at a preserved id, its metadata mirrors the preserved schema).
+    /// </summary>
     private bool ComponentAdmitsNull(string componentId, HashSet<string> visited)
     {
         if (
@@ -2596,7 +2556,10 @@ public sealed class OpenApiEmitter
         }
     }
 
-    /// <summary>A contract entry whose schema <see cref="BuildSchemas"/> writes as a component.</summary>
+    /// <summary>
+    /// A contract entry that stands for a component: <see cref="BuildSchemas"/> writes its schema,
+    /// or at a preserved id the preserved schema its metadata mirrors.
+    /// </summary>
     private abstract record ComponentSource
     {
         public sealed record Definition(string Name) : ComponentSource;
@@ -2770,49 +2733,6 @@ public sealed class OpenApiEmitter
             }
 
             _taggedUnionNames[hash] = ClaimName(TsType.GetNameSuffix(tu), usedNames);
-        }
-
-        foreach (var endpoint in endpoints)
-        {
-            var bodyType =
-                endpoint.Params.FirstOrDefault(param => param.Source == ParamSource.Body)?.Type
-                ?? endpoint.RequestType;
-            if (!TryGetRouteFilteredBodyProperties(bodyType, endpoint, out var properties, out _))
-            {
-                continue;
-            }
-
-            var identity = FilteredBodyIdentity(endpoint, properties);
-            if (_filteredBodyNames.ContainsKey(identity))
-            {
-                continue;
-            }
-
-            var endpointName = Naming.ToPascalCaseFromSegments(endpoint.Name) + "Request";
-            var controllerName =
-                Naming.ToPascalCaseFromSegments(endpoint.ControllerName) + endpointName;
-            var matchingDefinitionName = _definitions
-                .Where(pair => pair.Value.TypeParameters.Count == 0 && pair.Value.Type is null)
-                .Where(pair =>
-                    JsonNode.DeepEquals(
-                        BuildDefinitionSchema(pair.Value),
-                        BuildObjectSchema(properties)
-                    )
-                )
-                .OrderByDescending(pair => pair.Key == endpointName)
-                .ThenBy(pair => pair.Key, StringComparer.Ordinal)
-                .Select(pair => pair.Key)
-                .FirstOrDefault();
-            if (matchingDefinitionName is not null)
-            {
-                _filteredBodyNames[identity] = matchingDefinitionName;
-            }
-            else
-            {
-                _filteredBodyNames[identity] = usedNames.Add(endpointName)
-                    ? endpointName
-                    : ClaimName(controllerName, usedNames);
-            }
         }
     }
 

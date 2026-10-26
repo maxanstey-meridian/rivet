@@ -334,8 +334,10 @@ public sealed class HostJsonOptionsTests
         return data;
     }
 
-    // BoundFrom is null for a JSON body, which the setting fixes on .NET 9+; a form,
-    // multipart or binary contract binds TInput without the serializer, so nothing fixes it.
+    // BoundFrom is null for a JSON body, which the setting fixes on .NET 9+. Everything else
+    // binds TInput without the serializer, so nothing fixes it: a form or multipart body, and
+    // the route and query wherever the tool lowers TInput there (a method other than POST, PUT
+    // or PATCH, a declared .Parameter<T>(), a binary body), unless .RequestBody() declares one.
     private static readonly Dictionary<
         string,
         (Func<RivetResult> Result, string Reaches, string? BoundFrom)
@@ -343,7 +345,16 @@ public sealed class HostJsonOptionsTests
     {
         ["body"] = (
             () => Define.Put("/shapes/1").Accepts<Shape>().Bind(new Circle(1)).Success(),
-            $"is the polymorphic type '{typeof(Shape).FullName}'",
+            "Route 'PUT /shapes/1' takes the polymorphic input 'Shape'.",
+            null
+        ),
+        ["list body"] = (
+            () =>
+                Define
+                    .Post<List<Shape>, Payload>("/shapes")
+                    .Bind([new Circle(1)])
+                    .Success(new Payload("s")),
+            "takes input 'List<Shape>', which reaches the polymorphic type 'Shape' in its items.",
             null
         ),
         ["list member"] = (
@@ -352,7 +363,7 @@ public sealed class HostJsonOptionsTests
                     .Post<Drawing, Payload>("/drawings")
                     .Bind(new Drawing("d", [new Circle(1)], new()))
                     .Success(new Payload("d")),
-            $"reaches the polymorphic type '{typeof(Shape).FullName}' at shapes[]",
+            "takes input 'Drawing', which reaches the polymorphic type 'Shape' at 'shapes[]'.",
             null
         ),
         ["dictionary value"] = (
@@ -361,7 +372,48 @@ public sealed class HostJsonOptionsTests
                     .Post<Gallery, Payload>("/galleries")
                     .Bind(new Gallery(new()))
                     .Success(new Payload("g")),
-            $"reaches the polymorphic type '{typeof(Shape).FullName}' at rooms[].shapes[]",
+            "reaches the polymorphic type 'Shape' at 'rooms[].shapes[]'",
+            null
+        ),
+        ["nullable struct member"] = (
+            () =>
+                Define
+                    .Post<Framed, Payload>("/frames")
+                    .Bind(new Framed("f", null))
+                    .Success(new Payload("f")),
+            "reaches the polymorphic type 'Shape' at 'frame.shape'",
+            null
+        ),
+        ["get with a body"] = (
+            () =>
+                Define
+                    .Get<Drawing, Payload>("/drawings")
+                    .RequestBody()
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(new Payload("d")),
+            "at 'shapes[]'",
+            null
+        ),
+        ["get with declared content"] = (
+            () =>
+                Define
+                    .Get<Drawing, Payload>("/drawings")
+                    .RequestContent<Drawing>("application/json")
+                    .RequestBinaryContent("image/png")
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(new Payload("d")),
+            "at 'shapes[]'",
+            null
+        ),
+        ["delete with an optional body"] = (
+            () =>
+                Define
+                    .Delete("/drawings/{name}")
+                    .RequestBodyRequired(false)
+                    .Accepts<Drawing>()
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(),
+            "at 'shapes[]'",
             null
         ),
         ["form"] = (
@@ -371,7 +423,7 @@ public sealed class HostJsonOptionsTests
                     .FormEncoded()
                     .Bind(new Drawing("d", [], new()))
                     .Success(new Payload("d")),
-            "at shapes[]",
+            "at 'shapes[]'",
             "a form, not a JSON body"
         ),
         ["multipart"] = (
@@ -382,7 +434,7 @@ public sealed class HostJsonOptionsTests
                     .Accepts<Drawing>()
                     .Bind(new Drawing("d", [], new()))
                     .Success(),
-            "at shapes[]",
+            "at 'shapes[]'",
             "a form, not a JSON body"
         ),
         ["binary"] = (
@@ -392,8 +444,56 @@ public sealed class HostJsonOptionsTests
                     .AcceptsBinary()
                     .Bind(new Drawing("d", [], new()))
                     .Success(new Payload("d")),
-            "at shapes[]",
-            "the route and query, since the body is raw bytes"
+            "at 'shapes[]'",
+            "the route and query, not a JSON body"
+        ),
+        ["binary content"] = (
+            () =>
+                Define
+                    .Put<Drawing, Payload>("/drawings/{name}")
+                    .RequestBinaryContent("image/png")
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(new Payload("d")),
+            "at 'shapes[]'",
+            "the route and query, not a JSON body"
+        ),
+        ["get"] = (
+            () =>
+                Define
+                    .Get<Drawing, Payload>("/drawings")
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(new Payload("d")),
+            "at 'shapes[]'",
+            "the route and query, not a JSON body"
+        ),
+        ["delete"] = (
+            () =>
+                Define
+                    .Delete("/drawings/{name}")
+                    .Accepts<Drawing>()
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(),
+            "at 'shapes[]'",
+            "the route and query, not a JSON body"
+        ),
+        ["file"] = (
+            () =>
+                Define
+                    .File<Drawing>("/drawings/{name}/export")
+                    .Bind(new Drawing("d", [], new()))
+                    .File([1, 2, 3]),
+            "at 'shapes[]'",
+            "the route and query, not a JSON body"
+        ),
+        ["declared parameter"] = (
+            () =>
+                Define
+                    .Post<Drawing, Payload>("/drawings")
+                    .Parameter<string>("trace", "query", required: false)
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(new Payload("d")),
+            "at 'shapes[]'",
+            "the route and query, not a JSON body"
         ),
     };
 
@@ -492,6 +592,10 @@ public sealed class HostJsonOptionsTests
     public sealed record Drawing(string Name, List<Shape> Shapes, Dictionary<string, Shape> ByName);
 
     public sealed record Gallery(Dictionary<string, Drawing> Rooms);
+
+    public readonly record struct Frame(Shape Shape);
+
+    public sealed record Framed(string Name, Frame? Frame);
 
     public sealed record Folder(
         string Name,

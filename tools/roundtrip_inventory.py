@@ -239,6 +239,23 @@ def json_pointer(pointer):
     return f"#{pointer}" if pointer else "#"
 
 
+def all_of_targets(document):
+    """Every local $ref a component schema's own allOf names: the components it extends."""
+    targets = set()
+    for namespace in (
+        (document.get("components") or {}).get("schemas"),
+        document.get("definitions"),
+    ):
+        if not isinstance(namespace, dict):
+            continue
+        for schema in namespace.values():
+            parts = schema.get("allOf") if isinstance(schema, dict) else None
+            for part in parts if isinstance(parts, list) else []:
+                if isinstance(part, dict) and isinstance(part.get("$ref"), str):
+                    targets.add(part["$ref"])
+    return targets
+
+
 def is_component_schema_root(pointer):
     parts = pointer.split("/")[1:]
     return (
@@ -312,6 +329,7 @@ class CarrierWalker:
         self.corpus_id = corpus_id
         self.document = document
         self.occurrences = []
+        self.all_of_targets = all_of_targets(document)
 
     def collect(self):
         self._collect_components()
@@ -511,15 +529,25 @@ class CarrierWalker:
 
         if isinstance(value.get("discriminator"), dict):
             nested = not is_component_schema_root(pointer)
-            # A discriminator beside oneOf/anyOf dispatches over the union; one on a plain
-            # object is the root of an allOf hierarchy, imported as polymorphic records.
+            # A discriminator beside oneOf/anyOf dispatches over the union. One on a
+            # component that another component's allOf extends roots an allOf hierarchy,
+            # imported as polymorphic records. Anywhere else the importer drops it (RIV3005),
+            # so no runtime carrier proves it.
             union = isinstance(value.get("oneOf"), list) or isinstance(value.get("anyOf"), list)
-            self.add(
-                pointer,
-                "nested-discriminator" if nested else "explicit-discriminator",
-                "union" if union else "record",
-                DISCRIMINATOR_PROOF if union else HIERARCHY_DISCRIMINATOR_PROOF,
-            )
+            if union:
+                self.add(
+                    pointer,
+                    "nested-discriminator" if nested else "explicit-discriminator",
+                    "union",
+                    DISCRIMINATOR_PROOF,
+                )
+            elif not nested and json_pointer(pointer) in self.all_of_targets:
+                self.add(
+                    pointer,
+                    "explicit-discriminator",
+                    "record",
+                    HIERARCHY_DISCRIMINATOR_PROOF,
+                )
 
         if (
             isinstance(value.get("name"), str)

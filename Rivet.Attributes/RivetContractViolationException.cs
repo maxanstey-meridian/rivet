@@ -5,8 +5,8 @@ namespace Rivet;
 /// an undeclared status code, a payload whose runtime type does not match the declared
 /// type, a body where the contract declares none, a content type the contract does not
 /// promise, or a missing header the contract declares required. Also thrown when the
-/// host's JSON options would put a different wire on it than the spec describes, or would
-/// refuse a polymorphic request input whose discriminator isn't its first property.
+/// host's JSON options would put a different wire on it than the spec describes, or when the
+/// host can't read a polymorphic request input the way the spec describes it.
 /// Subclasses <see cref="InvalidOperationException"/> so existing catch blocks and tests
 /// keep working. Map it to the structured failure envelope with
 /// <see cref="RivetContractViolationHandler"/>.

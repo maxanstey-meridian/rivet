@@ -356,13 +356,15 @@ public sealed class GeneratedCarrierFidelityTests
         )
         {
             var ownerJson = written.RootElement.GetProperty("owner");
+            // User is polymorphic in its own right; JsonDocument would accept a second `type`.
+            Assert.Single(ownerJson.EnumerateObject(), property => property.Name == "type");
             Assert.Equal("user", ownerJson.EnumerateObject().First().Value.GetString());
             Assert.Equal("Ada", ownerJson.GetProperty("display_name").GetString());
             Assert.Equal("h", ownerJson.GetProperty("links").GetProperty("html").GetString());
             Assert.Equal(1, ownerJson.GetProperty("extra").GetInt32());
         }
 
-        // The concrete base is its own variant, and the declared type picks no variant.
+        // Account is its own variant: an account-tagged payload reads as an Account.
         var account = JsonSerializer.Deserialize(
             """{"type":"account","display_name":"Team"}""",
             accountType,
@@ -375,6 +377,10 @@ public sealed class GeneratedCarrierFidelityTests
             )
         )
         {
+            Assert.Single(
+                written.RootElement.EnumerateObject(),
+                property => property.Name == "type"
+            );
             Assert.Equal("user", written.RootElement.GetProperty("type").GetString());
         }
 

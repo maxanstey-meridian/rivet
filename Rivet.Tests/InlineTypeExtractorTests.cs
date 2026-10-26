@@ -608,11 +608,11 @@ public sealed class InlineTypeExtractorTests
     {
         var inline1 = new TsType.InlineObject([
             ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("name", new TsType.Primitive("string"), Description: "Shown on the invoice."),
         ]);
         var inline2 = new TsType.InlineObject([
             ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("name", new TsType.Primitive("string"), Description: "Shown on the invoice."),
         ]);
         var endpoints = new[]
         {
@@ -627,6 +627,11 @@ public sealed class InlineTypeExtractorTests
         var extracted = result.ExtractedTypes[0];
         Assert.Equal("BuyerFindDto", extracted.Name);
         Assert.Equal(2, extracted.Properties.Count);
+        // The named type says what the inline field said.
+        Assert.Equal(
+            "Shown on the invoice.",
+            extracted.Properties.Single(p => p.Name == "name").Description
+        );
 
         // Both endpoints replaced with TypeRef
         Assert.IsType<TsType.TypeRef>(result.Endpoints[0].ReturnType);

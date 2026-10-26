@@ -78,6 +78,7 @@ public static class Diagnostics
     public const string InvalidSecurityDeclaration = "RIV1114";
     public const string BindingInferenceUnreadable = "RIV1115";
     public const string AmbiguousJsonConstructor = "RIV1116";
+    public const string MalformedGeneratedMetadata = "RIV1122";
 
     // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
     // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
@@ -96,6 +97,7 @@ public static class Diagnostics
     public const string DuplicateSecuritySchemeDefinition = "RIV2011";
     public const string ConflictingOperations = "RIV2012";
     public const string EquivalentPathTemplates = "RIV2013";
+    public const string InvalidContractJson = "RIV2017";
 
     // ----- RIV3xxx: import -----
     public const string ImportAliasCycleBroken = "RIV3001";
@@ -175,7 +177,7 @@ public static class Diagnostics
         [DictionaryKeyTypeDropped] =
             "Dictionary key type has no contract representation (supported: string, enums, string-backed brands, string-serializable primitives) — keys are emitted as unconstrained strings.",
         [PolymorphicNonStringTag] =
-            "[JsonDerivedType] registration with a non-string (int or absent) discriminator tag — a string-discriminated oneOf cannot represent it; generation fails until every registration has a string tag.",
+            "[JsonDerivedType] registration a string-discriminated oneOf cannot represent: a non-string (int or absent) discriminator tag, or a registered type that isn't a named class, struct or record — generation fails until every registration is a derived type with a string tag.",
         [PolymorphicNoDerivedTypes] =
             "[JsonPolymorphic] base type has no [JsonDerivedType] registrations — System.Text.Json refuses to serialize it, so generation fails until a derived type is registered or the attribute removed.",
         [PolymorphicUnknownHandling] =
@@ -224,6 +226,8 @@ public static class Diagnostics
             "ApiBehaviorOptions.SuppressInferBindingSourcesForParameters is assigned a value that isn't a compile-time constant, so whether MVC infers binding sources can't be read; generation and --check stop. Read only when an annotated MVC action (generation) or a contract's MVC implementation (--check) is on an [ApiController] controller.",
         [AmbiguousJsonConstructor] =
             "A walked type has more than one [JsonConstructor] constructor — System.Text.Json refuses it at runtime, so there is no constructor choice for the spec to follow; generation fails.",
+        [MalformedGeneratedMetadata] =
+            "Generated metadata Rivet reads back is malformed, usually stale or hand-edited generated code: a [RivetGeneratedType] DiscriminatorSchemaJson that isn't a JSON object, or whose enum, const or type can't carry the tag the variant is registered with — generation fails; re-import the OpenAPI document.",
         [TaggedUnionComponentCollision] =
             "A tagged-union variant's producer-pinned component id is already used by a different schema — generation fails, because one id cannot $ref two shapes.",
         [UndefinedSecurityScheme] =
@@ -249,12 +253,14 @@ public static class Diagnostics
             "Two incompatible endpoints declare the same normalized HTTP method + route — generation fails instead of writing a lossy spec.",
         [EquivalentPathTemplates] =
             "Two routes differ only in parameter names — OpenAPI treats them as one path, so generation fails instead of writing an invalid document.",
+        [InvalidContractJson] =
+            "--from contract JSON says something the IR can't hold: a tagged-union variant whose discriminatorSchema isn't a JSON object or can't carry its tag, or a variant with a description, scalarMetadata or discriminatorSchema that isn't an inline object carrying the tag property — generation fails.",
         [ImportAliasCycleBroken] =
             "Alias schema is part of a $ref cycle — replaced with an empty schema; consumers resolve to an untyped object.",
         [ImportOperationMethodDropped] =
             "TRACE operation dropped — the HTTP method has no contract representation.",
         [ImportDiscriminatorDropped] =
-            "Discriminator with no reversible polymorphic shape (plain object without oneOf, or oneOf whose mapping is absent/unusable) — imported without dispatch semantics; or a discriminator mapping entry that points into another file — that entry is dropped and the rest of the discriminator kept.",
+            "Discriminator with no reversible polymorphic shape (a plain object with neither oneOf nor allOf descendants, an allOf hierarchy C#'s single inheritance can't hold, a discriminator beside a component's own allOf, or a oneOf whose mapping is absent/unusable or whose siblings go beyond the discriminator) — imported without dispatch semantics; or a discriminator mapping entry that points into another file — that entry is dropped and the rest of the discriminator kept.",
         [ImportAliasTargetMissing] =
             "Alias schema references a missing schema — consumers fall back to JsonElement.",
         [ImportUnresolvableAliasReference] =

@@ -892,6 +892,8 @@ public static class ContractWalker
         }
 
         var parameters = new List<TsEndpointParam>();
+        // The runtime mirrors this rule to refuse polymorphic inputs it can't read
+        // (RouteDefinitionBase.Binding in Rivet.Attributes/EndpointBuilder.cs): change both together.
         var hasBody =
             hasDeclaredRequestBody
             || (httpMethod is "POST" or "PUT" or "PATCH" && declaredParameters.Count == 0);

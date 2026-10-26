@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace Rivet.Tool.Model;
@@ -196,14 +197,76 @@ public abstract record TsType
     /// One registration of a tagged union. <c>Description</c> and <c>ScalarMetadata</c> are the
     /// derived type's own type-level annotations, as a <see cref="TsTypeDefinition"/> carries
     /// them, so an inline variant's component says what the derived type's would.
+    /// <c>DiscriminatorSchema</c> is the JSON of its tag property's schema as the source
+    /// authored it (a plain <c>{ "type": "string" }</c> with a description, say), emitted in
+    /// place of <c>enum: [tag]</c>. All three need an inline object carrying the tag property
+    /// to sit on.
     /// </summary>
     public sealed record TaggedUnionVariant(
         [property: JsonRequired] string Tag,
         [property: JsonRequired] TsType Type,
         TsTypeMetadata? Metadata = null,
         string? Description = null,
-        TsScalarMetadata? ScalarMetadata = null
-    );
+        TsScalarMetadata? ScalarMetadata = null,
+        string? DiscriminatorSchema = null
+    )
+    {
+        /// <summary>
+        /// Why <paramref name="json"/> can't be the schema of the tag property that carries
+        /// <paramref name="tag"/>, or null when it can: it must be a JSON object, an
+        /// <c>enum</c> or <c>const</c> it has must admit the tag, and a <c>type</c> it has
+        /// must include <c>string</c>. A <c>$ref</c> is taken on trust.
+        /// </summary>
+        public static string? TagSchemaProblem(string json, string tag)
+        {
+            JsonNode? node;
+            try
+            {
+                node = JsonNode.Parse(json);
+            }
+            catch (JsonException)
+            {
+                return "isn't valid JSON";
+            }
+
+            if (node is not JsonObject schema)
+            {
+                return "isn't a JSON object";
+            }
+
+            bool IsTag(JsonNode? value) =>
+                value is JsonValue scalar
+                && scalar.TryGetValue<string>(out var text)
+                && text == tag;
+            bool IsString(JsonNode? value) =>
+                value is JsonValue scalar
+                && scalar.TryGetValue<string>(out var text)
+                && text == "string";
+
+            if (
+                schema.TryGetPropertyValue("enum", out var allowed)
+                && !(allowed is JsonArray values && values.Any(IsTag))
+            )
+            {
+                return $"has an enum that doesn't list the tag '{tag}'";
+            }
+
+            if (schema.TryGetPropertyValue("const", out var constant) && !IsTag(constant))
+            {
+                return $"has a const other than the tag '{tag}'";
+            }
+
+            if (
+                schema.TryGetPropertyValue("type", out var type)
+                && !(IsString(type) || type is JsonArray types && types.Any(IsString))
+            )
+            {
+                return "has a type that doesn't include string, though the tag is one";
+            }
+
+            return null;
+        }
+    }
 
     /// <summary>
     /// Produces a stable, human-readable name suffix for a TsType.

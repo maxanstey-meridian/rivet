@@ -137,6 +137,8 @@ public sealed class RoundTripProfileInventoryTests
                     "PureDictionary": { "type": "object", "additionalProperties": { "type": "string" } },
                     "Nullable": { "anyOf": [{ "type": "string" }, { "type": "string", "nullable": true }] },
                     "HierarchyRoot": { "type": "object", "discriminator": { "propertyName": "type" }, "properties": { "type": { "type": "string" } } },
+                    "HierarchyChild": { "allOf": [{ "$ref": "#/components/schemas/HierarchyRoot" }, { "type": "object", "properties": { "size": { "type": "integer" } } }] },
+                    "LoneDiscriminator": { "type": "object", "discriminator": { "propertyName": "type" }, "properties": { "type": { "type": "string" } } },
                     "Envelope": {
                       "type": "object",
                       "properties": {
@@ -279,6 +281,16 @@ public sealed class RoundTripProfileInventoryTests
             "explicit-discriminator",
             "#/components/schemas/HierarchyRoot",
             "record"
+        );
+        // Nothing extends it, so the importer drops it and no carrier proof is claimed.
+        Assert.DoesNotContain(
+            groups.EnumerateArray(),
+            group =>
+                group.GetProperty("shape").GetString()!.EndsWith("-discriminator")
+                && group
+                    .GetProperty("ownerPointers")
+                    .EnumerateArray()
+                    .Any(pointer => pointer.GetString() == "#/components/schemas/LoneDiscriminator")
         );
         AssertOccurrence(
             groups,

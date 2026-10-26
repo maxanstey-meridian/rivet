@@ -199,9 +199,15 @@ public static class JsonContractReader
             RejectRepeatedSecuritySchemes(endpoint);
         }
 
+        var nodes = AllTypeNodes(contract.Types, endpoints).ToList();
+        foreach (var union in nodes.OfType<TsType.TaggedUnion>())
+        {
+            RefuseUnplaceableVariantAnnotations(union);
+        }
+
         // The contract JSON has no top-level brands dictionary: brands exist only as inline
         // kind:"brand" nodes, and the OpenAPI emitter $refs every brand by name.
-        var brands = CollectBrands(contract.Types, endpoints);
+        var brands = CollectBrands(nodes);
 
         return (contract.Types, enums, endpoints, brands);
     }
@@ -279,23 +285,64 @@ public static class JsonContractReader
             : response;
     }
 
-    private static Dictionary<string, TsType.Brand> CollectBrands(
+    /// <summary>Every type node the contract holds, nested ones included.</summary>
+    private static IEnumerable<TsType> AllTypeNodes(
         IReadOnlyList<TsTypeDefinition> types,
         IReadOnlyList<TsEndpointDefinition> endpoints
-    )
-    {
-        var roots = types
+    ) =>
+        types
             .SelectMany(type =>
                 type.Type is null ? type.Properties.Select(prop => prop.Type) : [type.Type]
             )
-            .Concat(
-                endpoints.SelectMany(endpoint => endpoint.AllTypes().Select(site => site.Type))
-            );
+            .Concat(endpoints.SelectMany(endpoint => endpoint.AllTypes().Select(site => site.Type)))
+            .SelectMany(root => root.SelfAndDescendants());
 
+    /// <summary>
+    /// A variant's description, scalarMetadata and discriminatorSchema describe the variant's
+    /// own component, so they need an inline object carrying the tag property to sit on; and
+    /// the tag schema must be one the variant's tag satisfies. Contract JSON that says
+    /// otherwise is refused here, where it enters, rather than when it's emitted.
+    /// </summary>
+    private static void RefuseUnplaceableVariantAnnotations(TsType.TaggedUnion union)
+    {
+        foreach (var variant in union.Variants)
+        {
+            var site =
+                $"tagged-union variant '{variant.Tag}' (discriminator '{union.Discriminator}')";
+            if (
+                variant.DiscriminatorSchema is { } tagSchema
+                && TsType.TaggedUnionVariant.TagSchemaProblem(tagSchema, variant.Tag) is { } problem
+            )
+            {
+                throw new RivetUserException(
+                    $"error {Diagnostics.InvalidContractJson}: {site} has the discriminatorSchema '{tagSchema}', "
+                        + $"which {problem}, so it can't be the schema of the tag '{variant.Tag}'. Write it as a "
+                        + "JSON schema object that admits the tag, or leave it out for the synthesized enum."
+                );
+            }
+
+            if (
+                variant is { Description: null, ScalarMetadata: null, DiscriminatorSchema: null }
+                || variant.Type is TsType.InlineObject inline
+                    && inline.Fields.Any(field => field.Name == union.Discriminator)
+            )
+            {
+                continue;
+            }
+
+            throw new RivetUserException(
+                $"error {Diagnostics.InvalidContractJson}: {site} carries a description, scalarMetadata "
+                    + $"or discriminatorSchema, but it isn't an inline object with a '{union.Discriminator}' "
+                    + "property to put them on. Give the variant an inline object type with the tag "
+                    + "property, or move the annotations to the type it refers to."
+            );
+        }
+    }
+
+    private static Dictionary<string, TsType.Brand> CollectBrands(IEnumerable<TsType> nodes)
+    {
         var brands = new Dictionary<string, TsType.Brand>();
-        foreach (
-            var brand in roots.SelectMany(root => root.SelfAndDescendants()).OfType<TsType.Brand>()
-        )
+        foreach (var brand in nodes.OfType<TsType.Brand>())
         {
             if (brands.TryAdd(brand.Name, brand))
             {

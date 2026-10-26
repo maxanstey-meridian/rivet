@@ -178,7 +178,11 @@ internal static class SchemaClassifier
     }
 
     /// <summary>
-    /// Returns true if MapSchemas would generate a record, enum, or brand for this schema.
+    /// Returns true if MapSchemas would generate a record, enum, or brand for this schema,
+    /// judged from the schema alone. Hierarchy membership is the mapper's call: an allOf
+    /// hierarchy member is a record whatever it declares (a property-less root included), and
+    /// only <c>SchemaMapper</c> knows the hierarchies, so a caller resolving a <c>$ref</c>
+    /// asks <c>SchemaMapper.ResolveCSharpType</c>.
     /// </summary>
     internal static bool WouldGenerateType(IOpenApiSchema schema)
     {

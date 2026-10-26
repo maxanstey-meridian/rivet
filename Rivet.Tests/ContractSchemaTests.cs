@@ -1156,13 +1156,11 @@ public sealed class ContractSchemaTests
                 [
                     new TsType.TaggedUnionVariant(
                         "a",
-                        new TsType.TypeRef("Thing"),
-                        component with
-                        {
-                            DiscriminatorSchema = "{\"type\":\"string\"}",
-                        },
+                        new TsType.InlineObject([("kind", new TsType.StringUnion(["a"]))]),
+                        component,
                         "d",
-                        scalar
+                        scalar,
+                        "{\"type\":\"string\"}"
                     ),
                 ]
             ),

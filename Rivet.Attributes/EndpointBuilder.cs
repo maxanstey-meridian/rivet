@@ -47,6 +47,13 @@ internal sealed record RouteState(int SuccessStatus)
     public bool AcceptsFile { get; init; }
     public bool FormEncoded { get; init; }
     public string? BinaryRequestContentType { get; init; }
+
+    // What the spec-only request markers declare, for deciding where TInput binds the way the
+    // tool decides where it lowers (ContractWalker.BuildParams).
+    public bool RequestBodyDeclared { get; init; }
+    public bool RequestContentDeclared { get; init; }
+    public bool RequestBinaryContentDeclared { get; init; }
+    public bool ParametersDeclared { get; init; }
     public string? ResponseContentType { get; init; }
     public ImmutableList<RouteErrorResponse> ErrorResponses { get; init; } = [];
     public ImmutableList<RouteResponseContent> ResponseContents { get; init; } = [];
@@ -118,7 +125,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         }
     }
 
-    internal EndpointContract Publish(Type? successPayloadType, Type? inputType)
+    internal EndpointContract Publish(Type? successPayloadType, Type? inputType = null)
     {
         if (_publishedContract is { } published)
         {
@@ -185,15 +192,31 @@ public abstract partial class RouteDefinitionBase<TSelf>
             Method,
             Route,
             inputType,
-            state switch
-            {
-                { FormEncoded: true } or { AcceptsFile: true } => InputBinding.Form,
-                { BinaryRequestContentType: not null } => InputBinding.RouteAndQuery,
-                _ => InputBinding.Json,
-            },
+            Binding(state),
             success,
             new ResponseSet(exact, ranges, fallback)
         );
+    }
+
+    // The tool's rule for where TInput lowers (ContractWalker.BuildParams): a JSON body when one
+    // is declared, or the method carries one by default (POST/PUT/PATCH with no declared
+    // .Parameter<T>()), unless that body is raw binary. Every other input is route and query.
+    private InputBinding Binding(RouteState state)
+    {
+        if (state.FormEncoded || state.AcceptsFile)
+        {
+            return InputBinding.Form;
+        }
+
+        var hasBody =
+            state.RequestBodyDeclared
+            || state.RequestContentDeclared
+            || state.RequestBinaryContentDeclared
+            || (Method is "POST" or "PUT" or "PATCH" && !state.ParametersDeclared);
+        var onlyBinaryContent = state.RequestBinaryContentDeclared && !state.RequestContentDeclared;
+        return hasBody && state.BinaryRequestContentType is null && !onlyBinaryContent
+            ? InputBinding.Json
+            : InputBinding.RouteAndQuery;
     }
 
     private ResponseContract BuildResponse(
@@ -580,10 +603,10 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
     private protected virtual Type? SuccessPayloadType => null;
 
     public RivetResult Error(int statusCode) =>
-        RivetTerminal.Error(Publish(SuccessPayloadType, inputType: null), statusCode);
+        RivetTerminal.Error(Publish(SuccessPayloadType), statusCode);
 
     public RivetResult Error<TError>(int statusCode, TError payload) =>
-        RivetTerminal.Error(Publish(SuccessPayloadType, inputType: null), statusCode, payload);
+        RivetTerminal.Error(Publish(SuccessPayloadType), statusCode, payload);
 
     public RivetResult File(
         byte[] content,
@@ -595,7 +618,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.File(
-            Publish(SuccessPayloadType, inputType: null),
+            Publish(SuccessPayloadType),
             content,
             downloadName,
             enableRangeProcessing,
@@ -615,7 +638,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.File(
-            Publish(SuccessPayloadType, inputType: null),
+            Publish(SuccessPayloadType),
             content,
             downloadName,
             enableRangeProcessing,
@@ -635,7 +658,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.PhysicalFile(
-            Publish(SuccessPayloadType, inputType: null),
+            Publish(SuccessPayloadType),
             physicalPath,
             downloadName,
             enableRangeProcessing,
@@ -654,7 +677,7 @@ public abstract class TerminalRouteDefinitionBase<TSelf> : RouteDefinitionBase<T
         bool inline = false
     ) =>
         RivetTerminal.File(
-            Publish(SuccessPayloadType, inputType: null),
+            Publish(SuccessPayloadType),
             writer,
             downloadName,
             lastModified,
@@ -692,7 +715,7 @@ public sealed class RouteDefinition<TOutput> : TerminalRouteDefinitionBase<Route
     private protected override Type? SuccessPayloadType => typeof(TOutput);
 
     public RivetResult Success(TOutput payload) =>
-        RivetTerminal.Success(Publish(typeof(TOutput), inputType: null), payload);
+        RivetTerminal.Success(Publish(typeof(TOutput)), payload);
 }
 
 /// <summary>
@@ -719,7 +742,7 @@ public sealed class RouteDefinition : TerminalRouteDefinitionBase<RouteDefinitio
     internal RouteDefinition(string method, string route, int defaultStatus = 200)
         : base(method, route, defaultStatus) { }
 
-    public RivetResult Success() => RivetTerminal.Success(Publish(null, inputType: null));
+    public RivetResult Success() => RivetTerminal.Success(Publish(null));
 
     /// <summary>
     /// Convert to an input-only endpoint (accepts a body, returns void).

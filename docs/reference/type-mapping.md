@@ -87,19 +87,25 @@ parameters follow the model binder instead: a nullable parameter is optional.
   constraints, default, example, format, `deprecated`, and `readOnly`/`writeOnly`
   for a member System.Text.Json only writes or only reads). A derived
   type referenced directly keeps its own untagged schema (STJ writes no
-  discriminator for it). Int or missing tags stop generation (`RIV1014`);
-  so does a `[JsonPolymorphic]` with no registrations (`RIV1015`), which
-  System.Text.Json refuses to serialize at all, and an `UnknownDerivedTypeHandling`
-  fallback or `IgnoreUnrecognizedTypeDiscriminators` (`RIV1016`), because the host would
-  then write or read bodies the `oneOf` doesn't admit.
+  discriminator for it). Int or missing tags stop generation (`RIV1014`), as does
+  registering something that isn't a named type at all; so does a `[JsonPolymorphic]`
+  with no registrations (`RIV1015`), which System.Text.Json refuses to serialize at all,
+  and an `UnknownDerivedTypeHandling` fallback or `IgnoreUnrecognizedTypeDiscriminators`
+  (`RIV1016`), because the host would then write or read bodies the `oneOf` doesn't
+  admit. Those last two hold for a generic base too, even though a generic base still
+  flattens to its own members rather than becoming a `oneOf`.
 
   Imported hierarchies keep what their source said. A variant generated with a
   `[RivetGeneratedType]` component id is emitted under that id instead of
   `{Base}_{Tag}`, and one whose `DiscriminatorSchemaJson` records the source's tag
-  schema gets that schema back instead of the synthesized `enum`. A base whose source
-  schema was preserved verbatim (Bitbucket's `allOf` hierarchy hanging off one
-  `object` with a bare `discriminator`, say) is emitted as exactly that schema: no
-  `oneOf`, and no `{Base}_{Tag}` variants invented beside it.
+  schema gets that schema back instead of the synthesized `enum`. That JSON has to be a
+  schema object the tag satisfies: an `enum` or `const` that leaves the tag out, or a
+  `type` without `string`, stops generation (`RIV1122`), since the spec would then refuse
+  the very tag the host writes. A base whose source schema was preserved verbatim
+  (Bitbucket's `allOf` hierarchy hanging off one `object` with a bare `discriminator`, or
+  Jira's `oneOf`, say) is emitted as exactly that schema, with nothing synthesized beside
+  it: no `oneOf` of Rivet's own and no `{Base}_{Tag}` inventions. Variants it names that
+  weren't preserved are still built from their records, under the source's ids.
 
 ## Constraint and metadata flow
 

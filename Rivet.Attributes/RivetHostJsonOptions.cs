@@ -69,8 +69,10 @@ internal static class RivetHostJsonOptions
     /// setting. A form, multipart or route-and-query input never reaches the serializer:
     /// ASP.NET's model binding has no discriminator, so no setting helps there either.
     /// Responses are unaffected: the serializer writes the discriminator first.
-    /// Runs after <see cref="Ensure"/>, which froze the options, and walks the resolver's
-    /// type info, so the graph is the one the host reads. One verdict per options and type.
+    /// Runs after <see cref="Ensure"/>, which froze the options. An object's members, and
+    /// whether a type is polymorphic, come from the resolver's type info, so the graph is the
+    /// one the host reads; see <see cref="ItemTypes"/> for collections. One verdict per
+    /// options and type.
     /// </summary>
     internal static void EnsureInput(
         JsonSerializerOptions options,
@@ -98,22 +100,27 @@ internal static class RivetHostJsonOptions
             return;
         }
 
-        var where =
-            found.Path.Length == 0
-                ? $"is the polymorphic type '{found.Type.FullName}'"
-                : $"reaches the polymorphic type '{found.Type.FullName}' at {found.Path}";
         var takes =
-            $"Route '{contract.Method} {contract.Route}' takes input '{inputType.FullName}', which {where}. ";
+            $"Route '{contract.Method} {contract.Route}' takes "
+            + found.Path switch
+            {
+                "" => $"the polymorphic input '{Name(inputType)}'. ",
+                "[]" =>
+                    $"input '{Name(inputType)}', which reaches the polymorphic type '{Name(found.Type)}' in its items. ",
+                var path =>
+                    $"input '{Name(inputType)}', which reaches the polymorphic type '{Name(found.Type)}' at '{path}'. ",
+            };
         if (contract.InputBinding != InputBinding.Json)
         {
             var source =
                 contract.InputBinding == InputBinding.Form
                     ? "a form, not a JSON body"
-                    : "the route and query, since the body is raw bytes";
+                    : "the route and query, not a JSON body";
             throw new RivetContractViolationException(
                 takes
                     + $"ASP.NET binds it from {source}, and model binding has no '{found.Discriminator}' discriminator: "
-                    + "it builds the declared type and never a variant, so a request the spec admits can't arrive as what it names. "
+                    + "it builds the declared type and never a variant, so a request that sends a variant arrives as "
+                    + "the declared type, or not at all. "
                     + "No JSON setting changes that; take an input that isn't polymorphic, or a JSON body."
             );
         }
@@ -146,15 +153,17 @@ internal static class RivetHostJsonOptions
         pending.Enqueue((root, ""));
         while (pending.TryDequeue(out var next))
         {
-            if (!seen.Add(next.Type))
+            // The serializer reads a Nullable<T> as the T inside it.
+            var type = Nullable.GetUnderlyingType(next.Type) ?? next.Type;
+            if (!seen.Add(type))
             {
                 continue;
             }
 
-            var info = options.GetTypeInfo(next.Type);
+            var info = options.GetTypeInfo(type);
             if (info.PolymorphismOptions is { } polymorphism)
             {
-                return new(next.Type, polymorphism.TypeDiscriminatorPropertyName, next.Path);
+                return new(type, polymorphism.TypeDiscriminatorPropertyName, next.Path);
             }
 
             switch (info.Kind)
@@ -175,7 +184,7 @@ internal static class RivetHostJsonOptions
                     break;
                 case JsonTypeInfoKind.Enumerable:
                 case JsonTypeInfoKind.Dictionary:
-                    foreach (var item in ItemTypes(next.Type))
+                    foreach (var item in ItemTypes(info))
                     {
                         pending.Enqueue((item, $"{next.Path}[]"));
                     }
@@ -188,12 +197,16 @@ internal static class RivetHostJsonOptions
     }
 
     /// <summary>
-    /// A collection's element type, or a dictionary's key and value types, from the
-    /// <c>IEnumerable&lt;T&gt;</c> it implements. (.NET 9 exposes these on the type info,
-    /// .NET 8 doesn't.)
+    /// A collection's element type, or a dictionary's key and value types. .NET 9+ reads them
+    /// off the type info; .NET 8 doesn't expose them there, so it reflects on the
+    /// <c>IEnumerable&lt;T&gt;</c> the type implements.
     /// </summary>
-    private static Type[] ItemTypes(Type type)
+    private static Type[] ItemTypes(JsonTypeInfo info)
     {
+#if NET9_0_OR_GREATER
+        return [.. new[] { info.KeyType, info.ElementType }.OfType<Type>()];
+#else
+        var type = info.Type;
         static bool IsEnumerable(Type candidate) =>
             candidate.IsGenericType
             && candidate.GetGenericTypeDefinition() == typeof(IEnumerable<>);
@@ -210,6 +223,7 @@ internal static class RivetHostJsonOptions
         return item.IsGenericType && item.GetGenericTypeDefinition() == typeof(KeyValuePair<,>)
             ? item.GetGenericArguments()
             : [item];
+#endif
     }
 
     private static string[] Compare(JsonSerializerOptions options)
@@ -362,6 +376,26 @@ internal static class RivetHostJsonOptions
             _ => Name(policy.GetType()),
         };
 
-    private static string Name(Type type) =>
-        type.IsGenericType ? type.Name[..type.Name.IndexOf('`')] : type.Name;
+    /// <summary>A type as C# spells it, without namespaces: <c>Dictionary&lt;string, Shape?&gt;</c>.</summary>
+    private static string Name(Type type)
+    {
+        if (type.IsArray)
+        {
+            return $"{Name(type.GetElementType()!)}[{new string(',', type.GetArrayRank() - 1)}]";
+        }
+
+        if (Nullable.GetUnderlyingType(type) is { } underlying)
+        {
+            return $"{Name(underlying)}?";
+        }
+
+        if (!type.IsGenericType)
+        {
+            return type.Name;
+        }
+
+        // A type nested in a generic one is generic without declaring parameters of its own.
+        var tick = type.Name.IndexOf('`');
+        return $"{(tick < 0 ? type.Name : type.Name[..tick])}<{string.Join(", ", type.GetGenericArguments().Select(Name))}>";
+    }
 }

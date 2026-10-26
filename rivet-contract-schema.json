@@ -175,7 +175,8 @@
                     "type": { "$ref": "#/$defs/tsType" },
                     "metadata": { "$ref": "#/$defs/typeMetadata" },
                     "description": { "type": "string" },
-                    "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
+                    "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" },
+                    "discriminatorSchema": { "type": "string", "description": "The JSON of the variant's tag property schema as the source authored it, emitted in place of enum: [tag]. A JSON object that admits the tag; like description and scalarMetadata, it needs an inlineObject variant carrying the discriminator property." }
                 },
                 "required": ["tag", "type"],
                 "additionalProperties": false
@@ -204,8 +205,7 @@
       "type": "object",
       "properties": {
         "componentId": { "type": ["string", "null"] },
-        "provenance": { "type": "string", "enum": ["component", "synthetic"] },
-        "discriminatorSchema": { "type": "string", "description": "On a polymorphic variant: the JSON of its tag property's schema as the source authored it, emitted in place of enum: [tag]." }
+        "provenance": { "type": "string", "enum": ["component", "synthetic"] }
       },
       "required": ["provenance"],
       "additionalProperties": false

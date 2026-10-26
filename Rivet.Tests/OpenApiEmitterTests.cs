@@ -5337,6 +5337,108 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void TaggedUnion_Nullable_Variant_Keeps_Its_Authored_Tag_Schema()
+    {
+        // A nullable variant's type widens to [object, null]; the authored tag must survive
+        // the root metadata being applied around it.
+        var authoredTag = """{"type":"string","description":"The kind."}""";
+        var variant = Variant("hidden", "reason") with
+        {
+            ScalarMetadata = new TsScalarMetadata(IsNullable: true),
+            DiscriminatorSchema = authoredTag,
+        };
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["DisplayState"] = new("DisplayState", [], new TsType.TaggedUnion("kind", [variant])),
+        };
+
+        using var doc = EmitOpenApiFromModel(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+
+        var hidden = JsonNode.Parse(
+            doc.RootElement.GetProperty("components")
+                .GetProperty("schemas")
+                .GetProperty("DisplayState_Hidden")
+                .GetRawText()
+        )!;
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse("""["object","null"]"""), hidden["type"]),
+            $"the nullable variant came out as {hidden.ToJsonString()}"
+        );
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse(authoredTag), hidden["properties"]!["kind"]),
+            $"the nullable variant came out as {hidden.ToJsonString()}"
+        );
+    }
+
+    [Fact]
+    public void Nullable_Polymorphic_Definition_Is_Referenced_Bare()
+    {
+        // An imported hierarchy member written nullable: its preserved component already admits
+        // null, so a use site wrapping the $ref in a null branch would match null twice, and
+        // oneOf would reject it. The definition's root metadata says so.
+        var preservedJson = """
+            {"type":["object","null"],"properties":{"type":{"type":"string"}},"required":["type"],"discriminator":{"propertyName":"type"}}
+            """;
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["BitbucketObject"] = new(
+                "BitbucketObject",
+                [],
+                new TsType.TaggedUnion("type", [Variant("repository", "slug")]),
+                Metadata: new TsTypeMetadata("object", TsTypeProvenance.Component),
+                ScalarMetadata: new TsScalarMetadata(IsNullable: true)
+            ),
+            ["Holder"] = new(
+                "Holder",
+                [],
+                [
+                    new TsPropertyDefinition(
+                        "item",
+                        new TsType.Nullable(new TsType.TypeRef("BitbucketObject")),
+                        false
+                    ),
+                ]
+            ),
+        };
+        var documentInfo = new OpenApiDocumentInfo(
+            Provenance: new OpenApiDocumentProvenance(
+                new OpenApiInfoProvenance("API", "1.0.0"),
+                [],
+                null,
+                [],
+                [],
+                ComponentSchemas: [new OpenApiRawComponentProvenance("object", preservedJson)]
+            )
+        );
+
+        using var doc = EmitOpenApiFromModel(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            documentInfo: documentInfo
+        );
+
+        var item = JsonNode.Parse(
+            doc.RootElement.GetProperty("components")
+                .GetProperty("schemas")
+                .GetProperty("Holder")
+                .GetProperty("properties")
+                .GetProperty("item")
+                .GetRawText()
+        );
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse("""{"$ref":"#/components/schemas/object"}"""), item),
+            $"the use site came out as {item!.ToJsonString()}"
+        );
+    }
+
+    [Fact]
     public void Global_Tags_Array_Declares_All_Operation_Tags()
     {
         // W4: operations reference tags — the global tags array must declare them

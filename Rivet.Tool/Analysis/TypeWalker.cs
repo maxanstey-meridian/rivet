@@ -821,10 +821,16 @@ public sealed class TypeWalker
 
         // A [JsonPolymorphic]/[JsonDerivedType] base type registers as a
         // TaggedUnion alias definition (oneOf + discriminator + mapping) instead of
-        // silently flattening to its own property surface. Non-string tags (RIV1014)
-        // and zero registrations (RIV1015) are refused.
+        // silently flattening to its own property surface. Non-string tags and
+        // unrepresentable registrations (RIV1014) are refused there; zero registrations
+        // (RIV1015) and an unknown-type fallback or IgnoreUnrecognizedTypeDiscriminators
+        // (RIV1016) are refused first, generic or not, since no host can serve them.
         // Generic polymorphic bases keep the flattening path — a generic alias has
         // no monomorphisation template the emitter could instantiate.
+        // Both union definitions keep the type's root schema metadata, as a record does: an
+        // imported hierarchy member's nullability, say, decides how its use sites ref it.
+        RefuseUnservablePolymorphism(definition, name);
+        RefuseUnregisteredAuthoredTagSchema(definition);
         if (!definition.IsGenericType && TryBuildPolymorphicUnion(definition, name) is { } union)
         {
             _visiting.Remove(name);
@@ -833,7 +839,8 @@ public sealed class TypeWalker
                 typeParams,
                 union,
                 GetTypeDescription(definition),
-                GetTypeMetadata(definition)
+                GetTypeMetadata(definition),
+                ReadGeneratedSchemaMetadata(definition).GetValueOrDefault("")
             );
             return;
         }
@@ -849,7 +856,8 @@ public sealed class TypeWalker
                 typeParams,
                 plainUnion,
                 GetTypeDescription(definition),
-                GetTypeMetadata(definition)
+                GetTypeMetadata(definition),
+                ReadGeneratedSchemaMetadata(definition).GetValueOrDefault("")
             );
             return;
         }
@@ -893,30 +901,12 @@ public sealed class TypeWalker
         string context
     )
     {
-        var memberSurface = member switch
-        {
-            IPropertySymbol propSymbol => GetJsonPropertySurface(propSymbol, owner),
-            IFieldSymbol fieldSymbol => GetJsonFieldSurface(fieldSymbol),
-            _ => JsonPropertySurface.Excluded,
-        };
-        if (memberSurface == JsonPropertySurface.Excluded)
+        if (!IsSchemaMember(member, owner))
         {
             return null;
         }
 
-        if (IsJsonIgnored(member))
-        {
-            return null;
-        }
-
-        // [RivetHeader] properties are request header params, never part
-        // of a JSON schema — ContractWalker/EndpointWalker surface them as
-        // ParamSource.Header params instead.
-        if (member is IPropertySymbol headerCheck && GetHeaderName(headerCheck) is not null)
-        {
-            return null;
-        }
-
+        var memberSurface = GetJsonMemberSurface(member, owner);
         // [JsonPropertyName("x")] → use "x" instead of camelCase(Name)
         var jsonPropertyName = GetJsonMemberName(member);
 
@@ -1082,6 +1072,25 @@ public sealed class TypeWalker
         );
     }
 
+    private JsonPropertySurface GetJsonMemberSurface(ISymbol member, INamedTypeSymbol owner) =>
+        member switch
+        {
+            IPropertySymbol property => GetJsonPropertySurface(property, owner),
+            IFieldSymbol field => GetJsonFieldSurface(field),
+            _ => JsonPropertySurface.Excluded,
+        };
+
+    /// <summary>
+    /// Whether <paramref name="member"/> is a property of <paramref name="owner"/>'s JSON:
+    /// System.Text.Json writes or reads it, and it doesn't bind a header ([RivetHeader]
+    /// properties are request header params, which ContractWalker/EndpointWalker surface as
+    /// ParamSource.Header params instead).
+    /// </summary>
+    private bool IsSchemaMember(ISymbol member, INamedTypeSymbol owner) =>
+        GetJsonMemberSurface(member, owner) != JsonPropertySurface.Excluded
+        && !IsJsonIgnored(member)
+        && !(member is IPropertySymbol header && GetHeaderName(header) is not null);
+
     private string? GetTypeDescription(INamedTypeSymbol definition) =>
         definition.GetAttribute(_types.RivetDescription).StringArgument();
 
@@ -1098,11 +1107,7 @@ public sealed class TypeWalker
             Convert.ToInt32(attribute.ConstructorArguments[1].Value) == 0
                 ? TsTypeProvenance.Component
                 : TsTypeProvenance.Synthetic;
-        return new TsTypeMetadata(
-            componentId,
-            provenance,
-            attribute.NamedArgument("DiscriminatorSchemaJson") as string
-        );
+        return new TsTypeMetadata(componentId, provenance);
     }
 
     private Dictionary<string, TsScalarMetadata> ReadGeneratedSchemaMetadata(ISymbol symbol)
@@ -1258,42 +1263,22 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// Lowers a [JsonPolymorphic]/[JsonDerivedType] base type to a
-    /// TaggedUnion whose variants are the [JsonDerivedType] registrations, matching
-    /// System.Text.Json's wire semantics when serializing AS the base type: the
-    /// discriminator property (default <c>$type</c>) is written first with the
-    /// registration's tag, followed by the derived type's full flattened property
-    /// surface. The base itself is a variant only if explicitly registered. Returns
-    /// null when the symbol carries neither attribute, and callers then take the plain
-    /// flattening path. [JsonPolymorphic] with no registrations is refused (RIV1015), as
-    /// are a registration with an int or missing tag (RIV1014) and an
-    /// UnknownDerivedTypeHandling fallback (RIV1016).
+    /// Refuses a [JsonPolymorphic] type no host can serve, whether or not it's generic:
+    /// an UnknownDerivedTypeHandling fallback or IgnoreUnrecognizedTypeDiscriminators
+    /// (RIV1016), and no [JsonDerivedType] registrations at all (RIV1015).
     /// </summary>
-    private TsType.TaggedUnion? TryBuildPolymorphicUnion(INamedTypeSymbol definition, string name)
+    private void RefuseUnservablePolymorphism(INamedTypeSymbol definition, string name)
     {
-        AttributeData? polymorphicAttr = null;
-        var derivedAttrs = new List<AttributeData>();
-        foreach (var attr in definition.GetAttributes())
+        var polymorphicAttr = definition.GetAttribute(_types.JsonPolymorphic);
+        if (polymorphicAttr is null)
         {
-            if (attr.Is(_types.JsonPolymorphic))
-            {
-                polymorphicAttr = attr;
-            }
-            else if (attr.Is(_types.JsonDerivedType))
-            {
-                derivedAttrs.Add(attr);
-            }
-        }
-
-        if (polymorphicAttr is null && derivedAttrs.Count == 0)
-        {
-            return null;
+            return;
         }
 
         // FailSerialization (0) is STJ's default and what the oneOf describes; a fallback
         // writes an unregistered derived type as its base or nearest registered ancestor,
         // a payload the oneOf, admitting only the registered types, rejects.
-        if (polymorphicAttr?.NamedArgument("UnknownDerivedTypeHandling") is int handling and not 0)
+        if (polymorphicAttr.NamedArgument("UnknownDerivedTypeHandling") is int and not 0)
         {
             throw new RivetUserException(
                 $"error {Diagnostics.PolymorphicUnknownHandling}: [JsonPolymorphic] on '{name}' sets "
@@ -1307,7 +1292,7 @@ public sealed class TypeWalker
 
         // Ignoring unrecognized discriminators reads an unknown tag as the base itself, a
         // payload the oneOf, admitting only the registered tags, rejects.
-        if (polymorphicAttr?.NamedArgument("IgnoreUnrecognizedTypeDiscriminators") is true)
+        if (polymorphicAttr.NamedArgument("IgnoreUnrecognizedTypeDiscriminators") is true)
         {
             throw new RivetUserException(
                 $"error {Diagnostics.PolymorphicUnknownHandling}: [JsonPolymorphic] on '{name}' sets "
@@ -1320,7 +1305,7 @@ public sealed class TypeWalker
 
         // System.Text.Json refuses the type outright once options are frozen ("should
         // specify at least one derived type"), so no host can serve it.
-        if (derivedAttrs.Count == 0)
+        if (!definition.HasAttribute(_types.JsonDerivedType))
         {
             throw new RivetUserException(
                 $"error {Diagnostics.PolymorphicNoDerivedTypes}: [JsonPolymorphic] on '{name}' has no "
@@ -1328,6 +1313,34 @@ public sealed class TypeWalker
                     + "type at all. Register each derived type with "
                     + "[JsonDerivedType(typeof(Derived), \"tag\")], or remove [JsonPolymorphic]."
             );
+        }
+    }
+
+    /// <summary>
+    /// Lowers a [JsonPolymorphic]/[JsonDerivedType] base type to a
+    /// TaggedUnion whose variants are the [JsonDerivedType] registrations, matching
+    /// System.Text.Json's wire semantics when serializing AS the base type: the
+    /// discriminator property (default <c>$type</c>) is written first with the
+    /// registration's tag, followed by the derived type's full flattened property
+    /// surface. The base itself is a variant only if explicitly registered. Returns
+    /// null when the symbol carries neither attribute, and callers then take the plain
+    /// flattening path. A registration with an int or missing tag, or of a type that
+    /// isn't a named class or struct, is refused (RIV1014), as is an authored tag schema
+    /// that isn't a JSON object or can't carry its tag (RIV1122).
+    /// <see cref="RefuseUnservablePolymorphism"/> has already refused no registrations
+    /// (RIV1015) and an UnknownDerivedTypeHandling fallback or
+    /// IgnoreUnrecognizedTypeDiscriminators (RIV1016).
+    /// </summary>
+    private TsType.TaggedUnion? TryBuildPolymorphicUnion(INamedTypeSymbol definition, string name)
+    {
+        var polymorphicAttr = definition.GetAttribute(_types.JsonPolymorphic);
+        var derivedAttrs = definition
+            .GetAttributes()
+            .Where(attr => attr.Is(_types.JsonDerivedType))
+            .ToList();
+        if (derivedAttrs.Count == 0)
+        {
+            return null;
         }
 
         var discriminator = "$type";
@@ -1339,12 +1352,20 @@ public sealed class TypeWalker
         var registrations = new List<(INamedTypeSymbol Type, string Tag)>();
         foreach (var attr in derivedAttrs)
         {
-            if (
-                attr.ConstructorArguments.Length == 0
-                || attr.ConstructorArguments[0].Value is not INamedTypeSymbol derivedType
-            )
+            var registered =
+                attr.ConstructorArguments.Length > 0 ? attr.ConstructorArguments[0].Value : null;
+            if (registered is not INamedTypeSymbol derivedType)
             {
-                continue;
+                // System.Text.Json throws on such a registration once options freeze, and
+                // the oneOf has no named schema to point at; dropping it would describe a
+                // union the host never serves.
+                throw new RivetUserException(
+                    $"error {Diagnostics.PolymorphicNonStringTag}: [JsonDerivedType] on '{name}' registers "
+                        + $"'{(registered as ITypeSymbol)?.ToDisplayString() ?? "nothing"}', which isn't a named "
+                        + "class, struct or record, so the oneOf has no variant schema to give it. Register "
+                        + "only types that derive from the base, as in "
+                        + "[JsonDerivedType(typeof(Derived), \"tag\")]."
+                );
             }
 
             var tagValue =
@@ -1365,11 +1386,6 @@ public sealed class TypeWalker
             }
 
             registrations.Add((derivedType, tag));
-        }
-
-        if (registrations.Count == 0)
-        {
-            return null;
         }
 
         var variants = new List<TsType.TaggedUnionVariant>();
@@ -1404,12 +1420,90 @@ public sealed class TypeWalker
                     new TsType.InlineObject(fields),
                     GetTypeMetadata(derivedType),
                     GetTypeDescription(derivedType),
-                    ReadGeneratedSchemaMetadata(derivedType).GetValueOrDefault("")
+                    ReadGeneratedSchemaMetadata(derivedType).GetValueOrDefault(""),
+                    ReadAuthoredTagSchema(derivedType, tag)
                 )
             );
         }
 
         return new TsType.TaggedUnion(discriminator, variants);
+    }
+
+    /// <summary>
+    /// The tag property's schema the source authored for <paramref name="derivedType"/>
+    /// ([RivetGeneratedType]'s <c>DiscriminatorSchemaJson</c>), checked against the tag it is
+    /// registered with: a schema that can't carry that tag would make the spec refuse the
+    /// payload System.Text.Json writes.
+    /// </summary>
+    private string? ReadAuthoredTagSchema(INamedTypeSymbol derivedType, string tag)
+    {
+        if (
+            derivedType
+                .GetAttribute(_types.RivetGeneratedType)
+                ?.NamedArgument("DiscriminatorSchemaJson")
+            is not string json
+        )
+        {
+            return null;
+        }
+
+        if (TsType.TaggedUnionVariant.TagSchemaProblem(json, tag) is { } problem)
+        {
+            throw new RivetUserException(
+                $"error {Diagnostics.MalformedGeneratedMetadata}: [RivetGeneratedType] on "
+                    + $"'{derivedType.ToDisplayString()}' sets DiscriminatorSchemaJson to '{json}', which "
+                    + $"{problem}, so it can't be the schema of the tag '{tag}' the type is registered with. "
+                    + "Re-import the OpenAPI document, or correct the JSON to a schema object that admits the tag."
+            );
+        }
+
+        return json;
+    }
+
+    /// <summary>
+    /// Refuses an authored tag schema on a type no base (nor the type itself) registers with
+    /// [JsonDerivedType]: only a variant has a tag property for it to describe, so anywhere
+    /// else it would be dropped without a word.
+    /// </summary>
+    private void RefuseUnregisteredAuthoredTagSchema(INamedTypeSymbol definition)
+    {
+        if (
+            definition
+                .GetAttribute(_types.RivetGeneratedType)
+                ?.NamedArgument("DiscriminatorSchemaJson")
+            is null
+        )
+        {
+            return;
+        }
+
+        for (var owner = definition; owner is not null; owner = owner.BaseType)
+        {
+            if (
+                owner
+                    .GetAttributes()
+                    .Any(attr =>
+                        attr.Is(_types.JsonDerivedType)
+                        && attr.ConstructorArguments.Length > 0
+                        && SymbolEqualityComparer.Default.Equals(
+                            (
+                                attr.ConstructorArguments[0].Value as INamedTypeSymbol
+                            )?.OriginalDefinition,
+                            definition.OriginalDefinition
+                        )
+                    )
+            )
+            {
+                return;
+            }
+        }
+
+        throw new RivetUserException(
+            $"error {Diagnostics.MalformedGeneratedMetadata}: [RivetGeneratedType] on "
+                + $"'{definition.ToDisplayString()}' sets DiscriminatorSchemaJson, but no base registers "
+                + "the type with [JsonDerivedType], so there is no tag property for the schema to describe. "
+                + "Re-import the OpenAPI document, or remove DiscriminatorSchemaJson."
+        );
     }
 
     /// <summary>
@@ -2161,17 +2255,7 @@ public sealed class TypeWalker
                 continue;
             }
 
-            var surface = declared switch
-            {
-                IPropertySymbol property => GetJsonPropertySurface(property, definition),
-                IFieldSymbol field => GetJsonFieldSurface(field),
-                _ => JsonPropertySurface.Excluded,
-            };
-            if (
-                surface == JsonPropertySurface.Excluded
-                || IsJsonIgnored(declared)
-                || declared is IPropertySymbol header && GetHeaderName(header) is not null
-            )
+            if (!IsSchemaMember(declared, definition))
             {
                 continue;
             }

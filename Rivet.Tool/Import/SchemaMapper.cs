@@ -32,13 +32,13 @@ internal sealed class SchemaMapper
 
     // A oneOf + discriminator + usable mapping reverses to an abstract
     // [JsonPolymorphic] base record with [JsonDerivedType] registrations. Bases are
-    // keyed by schema key; each conforming variant key maps back to its base key;
-    // bases whose mapping could NOT be reversed record the reason for the loud
+    // keyed by schema key; each conforming variant key maps back to its base key and its
+    // tag; bases whose mapping could NOT be reversed record the reason for the loud
     // RIV3005 fallback warning.
     private readonly Dictionary<string, PolymorphicUnion> _polymorphicBases = new(
         StringComparer.Ordinal
     );
-    private readonly Dictionary<string, string> _polymorphicVariantKeys = new(
+    private readonly Dictionary<string, (string BaseKey, string Tag)> _polymorphicVariantKeys = new(
         StringComparer.Ordinal
     );
     private readonly Dictionary<string, string> _polymorphicRejections = new(
@@ -70,10 +70,13 @@ internal sealed class SchemaMapper
         IReadOnlyList<string> RegisteredKeys
     );
 
+    // Effective: every member the record has, its own and inherited, keyed by JSON name,
+    // with the member that declares it. ExtensionDataCarrier: the member whose record holds
+    // [JsonExtensionData] for this one, or null when the chain refuses extra properties.
     private sealed record BuiltHierarchyRecord(
         GeneratedRecord Record,
-        IReadOnlyDictionary<string, RecordProperty> Effective,
-        bool CarriesExtensionData
+        IReadOnlyDictionary<string, (RecordProperty Property, string Owner)> Effective,
+        string? ExtensionDataCarrier
     );
 
     public SchemaMapper(List<string> warnings)
@@ -116,8 +119,10 @@ internal sealed class SchemaMapper
         if (
             !_ctx.MappedComponentRecords.TryGetValue(name, out var record)
             // A polymorphic record's wire shape isn't its own property list: it adds the tag
-            // and, in an allOf hierarchy, everything it inherits.
+            // and, in an allOf hierarchy, everything it inherits. A oneOf variant's adds the
+            // tag too.
             || record.Polymorphism is not null
+            || record.BaseTypeName is not null
             || record.Properties.Count != properties.Count
         )
         {
@@ -342,12 +347,6 @@ internal sealed class SchemaMapper
             }
         }
 
-        // Detect reversible polymorphic hierarchies and unions BEFORE mapping so members
-        // can be generated as derived records regardless of iteration order. Hierarchies
-        // first: a oneOf can't claim a variant whose record already has an allOf parent.
-        DetectPolymorphicHierarchies(schemas);
-        DetectPolymorphicUnions(schemas);
-
         // A single-ref allOf around a union has no record property surface. Mark these
         // before mapping so earlier consumers resolve through the wrapper instead of
         // naming a C# record that MapSchemas will intentionally skip.
@@ -364,6 +363,13 @@ internal sealed class SchemaMapper
                 _skippedComponentTypes.Add(key);
             }
         }
+
+        // Detect reversible polymorphic hierarchies and unions BEFORE mapping so members
+        // can be generated as derived records regardless of iteration order. Hierarchies
+        // first: a oneOf can't claim a variant whose record already has an allOf parent.
+        // Hierarchy records are built during detection, after the skips above.
+        DetectPolymorphicHierarchies(schemas);
+        DetectPolymorphicUnions(schemas);
 
         foreach (var (key, schema) in schemas)
         {
@@ -430,60 +436,53 @@ internal sealed class SchemaMapper
             // derived record: the discriminator property is STRIPPED (System.Text.Json
             // re-adds it on the wire — keeping it would double-emit) and the record
             // inherits from the abstract base.
-            if (_polymorphicVariantKeys.TryGetValue(key, out var polymorphicBaseKey))
+            if (_polymorphicVariantKeys.TryGetValue(key, out var variantOf))
             {
                 var discriminatorProperty = _polymorphicBases[
-                    polymorphicBaseKey
+                    variantOf.BaseKey
                 ].DiscriminatorProperty;
                 // An allOf variant (a $ref'd base plus its own object) flattens like any
                 // allOf component; the union base is its only C# parent.
                 var derived = schema.AllOf is { Count: > 0 }
-                    ? _synth.MergeWithSiblingProperties(
-                        _synth.ResolveAllOfRecord(
-                            name,
-                            schema.AllOf,
-                            inheritedRequired: schema.Required
-                        ),
-                        schema,
-                        name
-                    ) with
-                    {
-                        SchemaMetadata = CollectGeneratedSchemaMetadata(schema),
-                    }
+                    ? MapAllOfRecord(name, schema)
                     : _synth.MapRecord(name, schema);
 
                 derived = derived with
                 {
                     Properties = WithoutWireProperty(derived.Properties, discriminatorProperty),
-                    BaseTypeName = _ctx.SchemaNameMap[polymorphicBaseKey],
+                    BaseTypeName = _ctx.SchemaNameMap[variantOf.BaseKey],
                     Description = schemaDescription,
                     DiscriminatorSchemaJson = AuthoredTagSchemaJson(
                         schema,
                         discriminatorProperty,
-                        _polymorphicBases[polymorphicBaseKey]
-                            .Variants.First(variant => variant.VariantKey == key)
-                            .Tag
+                        variantOf.Tag
                     ),
                 };
                 records.Add(derived);
                 continue;
             }
 
-            if (_hierarchyMembers.ContainsKey(key))
+            if (_hierarchyRecords.TryGetValue(key, out var hierarchyRecord))
             {
-                records.Add(BuildHierarchyRecord(key, schemas).Record);
+                records.Add(hierarchyRecord.Record);
                 continue;
             }
 
             if (schema.AllOf is { Count: > 0 })
             {
-                var record = _synth.ResolveAllOfRecord(
-                    name,
-                    schema.AllOf,
-                    inheritedRequired: schema.Required
-                );
-                record = _synth.MergeWithSiblingProperties(record, schema, name);
-                record = record with { SchemaMetadata = CollectGeneratedSchemaMetadata(schema) };
+                // A discriminator beside an allOf can't root a hierarchy: the root is the one
+                // member with no parent of its own.
+                if (schema.Discriminator?.PropertyName is { } allOfDiscriminator)
+                {
+                    _ctx.Warnings.Add(
+                        Diagnostics.Prefix(
+                            Diagnostics.ImportDiscriminatorDropped,
+                            $"Discriminator dropped on '{name}': property '{allOfDiscriminator}' sits beside an allOf of its own, so it can't root a hierarchy — imported as a flattened record."
+                        )
+                    );
+                }
+
+                var record = MapAllOfRecord(name, schema);
 
                 // Skip empty allOf records — resolved inline via $ref
                 if (record.Properties.Count == 0 && schema.Properties is not { Count: > 0 })
@@ -528,7 +527,8 @@ internal sealed class SchemaMapper
                             Polymorphism: new PolymorphismInfo(
                                 poly.DiscriminatorProperty,
                                 variantRefs
-                            )
+                            ),
+                            SchemaMetadata: CollectGeneratedSchemaMetadata(schema)
                         )
                     );
                     continue;
@@ -574,7 +574,34 @@ internal sealed class SchemaMapper
                 // A named empty object is still a component identity. Generate an empty
                 // record so import→emit does not erase the component key; anonymous empty
                 // objects continue to resolve as dictionaries in ResolveObjectType.
-                if (schema.Properties is not { Count: > 0 })
+                var propertyless = schema.Properties is not { Count: > 0 };
+
+                // Named diagnostic: a discriminator on a plain object schema with neither a
+                // oneOf union nor an allOf hierarchy to dispatch over has no C# contract
+                // representation — the record is generated but the dispatch semantics are
+                // dropped. A root that declares no properties (its descendants declare the
+                // tag) is no quieter about it.
+                if (schema.Discriminator?.PropertyName is { } discriminatorProperty)
+                {
+                    _ctx.Warnings.Add(
+                        Diagnostics.Prefix(
+                            Diagnostics.ImportDiscriminatorDropped,
+                            $"Discriminator dropped on '{name}': property '{discriminatorProperty}' "
+                                + (
+                                    _hierarchyRejections.TryGetValue(key, out var rejection)
+                                        ? $"has no usable allOf hierarchy ({rejection})"
+                                        : "has no oneOf union and no allOf descendants"
+                                )
+                                + (
+                                    propertyless && schema.AdditionalProperties is not null
+                                        ? " — imported as a dictionary."
+                                        : " — imported as a regular record."
+                                )
+                        )
+                    );
+                }
+
+                if (propertyless)
                 {
                     if (schema.AdditionalProperties is null)
                     {
@@ -589,25 +616,6 @@ internal sealed class SchemaMapper
                         );
                     }
                     continue;
-                }
-
-                // Named diagnostic: a discriminator on a plain object schema with neither a
-                // oneOf union nor an allOf hierarchy to dispatch over has no C# contract
-                // representation — the record is generated but the dispatch semantics are dropped.
-                if (schema.Discriminator?.PropertyName is { } discriminatorProperty)
-                {
-                    _ctx.Warnings.Add(
-                        Diagnostics.Prefix(
-                            Diagnostics.ImportDiscriminatorDropped,
-                            $"Discriminator dropped on '{name}': property '{discriminatorProperty}' "
-                                + (
-                                    _hierarchyRejections.TryGetValue(key, out var rejection)
-                                        ? $"has no usable allOf hierarchy ({rejection})"
-                                        : "has no oneOf union and no allOf descendants"
-                                )
-                                + " — imported as a regular record."
-                        )
-                    );
                 }
 
                 records.Add(_synth.MapRecord(name, schema));
@@ -1427,21 +1435,21 @@ internal sealed class SchemaMapper
     /// its own tag. A member that is neither concrete nor an ancestor of a concrete one can
     /// never be named by a payload (Bitbucket's <c>pipeline_selector</c> redefines
     /// <c>type</c> as a selector kind), so it stays a plain record outside the hierarchy.
-    /// Anything else the C# can't hold records a rejection reason for the loud RIV3005
-    /// fallback.
+    /// Every member's record is built here, before anything else is mapped, so membership is
+    /// settled before a oneOf could claim a member or a <c>$ref</c> resolve to one. Anything
+    /// the C# can't hold records a rejection reason for the loud RIV3005 fallback.
     /// </summary>
     private void DetectPolymorphicHierarchies(IDictionary<string, IOpenApiSchema> schemas)
     {
+        // A descendant with one $ref joins its parent's hierarchy. One with several, or one
+        // that also composes a oneOf/anyOf, can't be a derived record: it rejects the
+        // hierarchy it reaches, by name.
         var children = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var composedChildren = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var unionChildren = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var (key, schema) in schemas)
         {
-            if (
-                schema is OpenApiSchemaReference
-                || schema.OneOf is { Count: > 0 }
-                || schema.AnyOf is { Count: > 0 }
-                || schema.AllOf is not { Count: > 0 } parts
-            )
+            if (schema is OpenApiSchemaReference || schema.AllOf is not { Count: > 0 } parts)
             {
                 continue;
             }
@@ -1453,9 +1461,12 @@ internal sealed class SchemaMapper
                 .Select(id => _aliasTargets.GetValueOrDefault(id!, id!))
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
+            var into =
+                schema.OneOf is { Count: > 0 } || schema.AnyOf is { Count: > 0 } ? unionChildren
+                : parentKeys.Count == 1 ? children
+                : composedChildren;
             foreach (var parentKey in parentKeys)
             {
-                var into = parentKeys.Count == 1 ? children : composedChildren;
                 if (!into.TryGetValue(parentKey, out var list))
                 {
                     into[parentKey] = list = [];
@@ -1474,6 +1485,8 @@ internal sealed class SchemaMapper
                 || root.AnyOf is { Count: > 0 }
                 || root.AllOf is { Count: > 0 }
                 || !children.ContainsKey(rootKey)
+                    && !composedChildren.ContainsKey(rootKey)
+                    && !unionChildren.ContainsKey(rootKey)
             )
             {
                 continue;
@@ -1486,17 +1499,38 @@ internal sealed class SchemaMapper
                 schemas,
                 children,
                 composedChildren,
+                unionChildren,
                 out var members
             );
+            if (failure is null)
+            {
+                foreach (var (key, member) in members)
+                {
+                    _hierarchyMembers[key] = member;
+                }
+
+                // Preorder: a parent's record is built before its children's.
+                foreach (var (key, _) in members)
+                {
+                    if ((failure = TryBuildHierarchyRecord(key, schemas)) is not null)
+                    {
+                        break;
+                    }
+                }
+
+                if (failure is not null)
+                {
+                    foreach (var (key, _) in members)
+                    {
+                        _hierarchyMembers.Remove(key);
+                        _hierarchyRecords.Remove(key);
+                    }
+                }
+            }
+
             if (failure is not null)
             {
                 _hierarchyRejections[rootKey] = failure;
-                continue;
-            }
-
-            foreach (var (key, member) in members)
-            {
-                _hierarchyMembers[key] = member;
             }
         }
     }
@@ -1508,10 +1542,11 @@ internal sealed class SchemaMapper
         IDictionary<string, IOpenApiSchema> schemas,
         Dictionary<string, List<string>> children,
         Dictionary<string, List<string>> composedChildren,
-        out Dictionary<string, HierarchyMember> members
+        Dictionary<string, List<string>> unionChildren,
+        out List<(string Key, HierarchyMember Member)> members
     )
     {
-        members = new(StringComparer.Ordinal);
+        members = [];
 
         // Preorder: a parent always precedes its descendants.
         var order = new List<(string Key, string? Parent)>();
@@ -1525,7 +1560,17 @@ internal sealed class SchemaMapper
                 return $"'{composed}' extends '{key}' and other schemas through allOf, which C# single inheritance can't hold";
             }
 
-            if (schemas[key].Discriminator?.PropertyName is { } other && other != property)
+            if (unionChildren.GetValueOrDefault(key) is [var union, ..])
+            {
+                return $"'{union}' extends '{key}' through allOf and composes a oneOf/anyOf as well, which a derived record can't hold";
+            }
+
+            if (
+                OwnParts(schemas[key])
+                    .Select(part => part.Discriminator?.PropertyName)
+                    .FirstOrDefault(other => other is not null && other != property) is
+                { } other
+            )
             {
                 return $"'{key}' declares a discriminator of its own, '{other}'";
             }
@@ -1536,54 +1581,6 @@ internal sealed class SchemaMapper
             entry => entry.Parent,
             StringComparer.Ordinal
         );
-
-        // A member redeclaring a property its parent's record carries is written with `new`,
-        // but C# can't hide a `required` member.
-        var ownParts = order.ToDictionary(
-            entry => entry.Key,
-            entry =>
-                new[] { schemas[entry.Key] }
-                    .Concat(
-                        schemas[entry.Key].AllOf?.Where(part => part is not OpenApiSchemaReference)
-                            ?? []
-                    )
-                    .ToList(),
-            StringComparer.Ordinal
-        );
-        foreach (var (key, parent) in order)
-        {
-            for (var ancestor = parent; ancestor is not null; ancestor = parents[ancestor])
-            {
-                var required = ownParts[ancestor]
-                    .SelectMany(part => part.Required ?? new HashSet<string>())
-                    .ToHashSet(StringComparer.Ordinal);
-                foreach (
-                    var (name, redeclared) in ownParts[key]
-                        .SelectMany(part =>
-                            part.Properties ?? new Dictionary<string, IOpenApiSchema>()
-                        )
-                        .Where(entry => entry.Key != property && required.Contains(entry.Key))
-                )
-                {
-                    if (
-                        ownParts[ancestor]
-                            .Select(part =>
-                                part.Properties?.TryGetValue(name, out var inherited) == true
-                                    ? inherited
-                                    : null
-                            )
-                            .OfType<IOpenApiSchema>()
-                            .Any(inherited =>
-                                SchemaClassifier.ComputeSchemaFingerprint(inherited)
-                                != SchemaClassifier.ComputeSchemaFingerprint(redeclared)
-                            )
-                    )
-                    {
-                        return $"'{key}' redeclares '{name}', which '{ancestor}' requires, and C# can't hide a required member";
-                    }
-                }
-            }
-        }
 
         var tags = order.ToDictionary(
             entry => entry.Key,
@@ -1622,6 +1619,32 @@ internal sealed class SchemaMapper
         )
         {
             return $"tag '{clash.Key}' names two schemas";
+        }
+
+        // A member below the root may restate the discriminator with a mapping of its own.
+        // The root's tags are the ones registered, so the member's mapping must agree.
+        foreach (var (key, _) in order.Skip(1))
+        {
+            foreach (
+                var (tag, reference) in OwnParts(schemas[key])
+                    .SelectMany(part =>
+                        part.Discriminator?.Mapping
+                        ?? new Dictionary<string, OpenApiSchemaReference>()
+                    )
+            )
+            {
+                var refId = DecodeComponentId(reference.Reference?.Id);
+                var target = refId is null ? null : _aliasTargets.GetValueOrDefault(refId, refId);
+                if (target is null || !tags.TryGetValue(target, out var computed))
+                {
+                    return $"'{key}' maps tag '{tag}' to '{refId ?? reference.Reference?.Id}', which isn't in the hierarchy";
+                }
+
+                if (computed != tag)
+                {
+                    return $"'{key}' maps tag '{tag}' to '{refId}', which the hierarchy tags '{computed}'";
+                }
+            }
         }
 
         var concrete = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -1663,7 +1686,7 @@ internal sealed class SchemaMapper
         {
             var registered = new List<string>();
             CollectConcrete(key);
-            members[key] = new HierarchyMember(property, parent, tags[key], registered);
+            members.Add((key, new HierarchyMember(property, parent, tags[key], registered)));
 
             void CollectConcrete(string current)
             {
@@ -1700,6 +1723,13 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
+    /// What a schema says for itself in an allOf: its inline (non-<c>$ref</c>) parts and
+    /// its own keywords, not what it inherits through a <c>$ref</c>.
+    /// </summary>
+    private static List<IOpenApiSchema> OwnParts(IOpenApiSchema schema) =>
+        [.. schema.AllOf?.Where(part => part is not OpenApiSchemaReference) ?? [], schema];
+
+    /// <summary>
     /// A hierarchy member's own declarations of the discriminator property: its properties
     /// and its inline allOf parts', not its parent's.
     /// </summary>
@@ -1707,30 +1737,40 @@ internal sealed class SchemaMapper
         IOpenApiSchema schema,
         string property
     ) =>
-        new[] { schema }
-            .Concat(schema.AllOf?.Where(part => part is not OpenApiSchemaReference) ?? [])
+        OwnParts(schema)
             .Select(part =>
                 part.Properties?.TryGetValue(property, out var declared) == true ? declared : null
             )
             .OfType<IOpenApiSchema>();
 
     /// <summary>
-    /// A hierarchy member's record: the root keeps its own properties, every other member
-    /// declares only what its parent's record doesn't already carry (a property its parent
-    /// carries with another type or requiredness is redeclared with <c>new</c>). The
-    /// discriminator property is stripped everywhere — System.Text.Json writes it — and
-    /// extension data lives on the first record down the chain that admits it.
+    /// An allOf component flattened into one record: its parts' properties, <c>$ref</c>'d
+    /// parts copied rather than inherited, then its own sibling properties.
     /// </summary>
-    private BuiltHierarchyRecord BuildHierarchyRecord(
-        string key,
-        IDictionary<string, IOpenApiSchema> schemas
-    )
-    {
-        if (_hierarchyRecords.TryGetValue(key, out var built))
+    private GeneratedRecord MapAllOfRecord(string name, IOpenApiSchema schema) =>
+        _synth.MergeWithSiblingProperties(
+            _synth.ResolveAllOfRecord(name, schema.AllOf!, inheritedRequired: schema.Required),
+            schema,
+            name
+        ) with
         {
-            return built;
-        }
+            SchemaMetadata = CollectGeneratedSchemaMetadata(schema),
+        };
 
+    /// <summary>
+    /// Builds a hierarchy member's record into <see cref="_hierarchyRecords"/>, or returns
+    /// why the C# can't hold it. The root keeps its own properties. Every other member
+    /// mentions a property by declaring it or by listing it in its own <c>required</c>, and
+    /// allOf applies every <c>required</c> at once, so a mentioned property is required when
+    /// the member or an ancestor requires it. A mentioned member that differs from the one
+    /// it inherits (<see cref="SameMember"/>) is redeclared with <c>new</c> over an optional
+    /// member; over a required one it rejects the hierarchy, since C# can't hide a required
+    /// member. The discriminator property is stripped everywhere — System.Text.Json writes
+    /// it. Extension data lives on the root, and only when every member admits extra
+    /// properties: a member that refuses them can't un-inherit the root's dictionary.
+    /// </summary>
+    private string? TryBuildHierarchyRecord(string key, IDictionary<string, IOpenApiSchema> schemas)
+    {
         var member = _hierarchyMembers[key];
         var schema = schemas[key];
         var name = _ctx.SchemaNameMap[key];
@@ -1744,80 +1784,158 @@ internal sealed class SchemaMapper
                 .ToList()
         );
 
-        GeneratedRecord record;
-        Dictionary<string, RecordProperty> effective;
-        bool carriesExtensionData;
         if (member.ParentKey is not { } parentKey)
         {
-            record = _synth.MapRecord(name, schema);
-            record = record with
+            var root = _synth.MapRecord(name, schema);
+            root = root with
             {
-                Properties = WithoutWireProperty(record.Properties, member.DiscriminatorProperty),
+                Properties = WithoutWireProperty(root.Properties, member.DiscriminatorProperty),
                 Polymorphism = polymorphism,
             };
-            effective = record.Properties.ToDictionary(p => p.Name, StringComparer.Ordinal);
-            carriesExtensionData = record.HasExtensionData;
-        }
-        else
-        {
-            var parent = BuildHierarchyRecord(parentKey, schemas);
-            var inlineParts = schema
-                .AllOf!.Where(part => part is not OpenApiSchemaReference)
-                .ToList();
-            // First declaration wins across parts, as in a flattened allOf record.
-            var own = inlineParts
-                .SelectMany(part => _synth.ExtractProperties(part, name, schema.Required))
-                .Concat(_synth.ExtractProperties(schema, name))
-                .GroupBy(property => property.Name, StringComparer.Ordinal)
-                .Select(group => group.First());
-
-            var declared = new List<RecordProperty>();
-            effective = new Dictionary<string, RecordProperty>(
-                parent.Effective,
-                StringComparer.Ordinal
+            _hierarchyRecords[key] = new BuiltHierarchyRecord(
+                root,
+                root.Properties.ToDictionary(
+                    property => property.JsonName,
+                    property => (property, key),
+                    StringComparer.Ordinal
+                ),
+                root.HasExtensionData ? key : null
             );
-            foreach (var property in WithoutWireProperty(own, member.DiscriminatorProperty))
-            {
-                if (parent.Effective.TryGetValue(property.Name, out var inherited))
-                {
-                    if (
-                        inherited.CSharpType == property.CSharpType
-                        && inherited.IsRequired == property.IsRequired
-                        && inherited.WireName == property.WireName
-                    )
+            return null;
+        }
+
+        var parent = _hierarchyRecords[parentKey];
+        var parts = OwnParts(schema);
+        if (
+            parent.ExtensionDataCarrier is { } carrier
+            && !parts.All(part => part.AdditionalPropertiesAllowed)
+        )
+        {
+            return $"'{key}' refuses additional properties its ancestor '{carrier}' accepts";
+        }
+
+        var required = parts
+            .SelectMany(part => part.Required ?? new HashSet<string>())
+            .ToHashSet(StringComparer.Ordinal);
+        // First declaration wins across parts, as in a flattened allOf record.
+        var own = WithoutWireProperty(
+                parts.SelectMany(part => _synth.ExtractProperties(part, name, required)),
+                member.DiscriminatorProperty
+            )
+            .GroupBy(property => property.JsonName, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var mentioned = own
+            .Values.Select(property =>
+                parent.Effective.GetValueOrDefault(property.JsonName).Property?.IsRequired == true
+                    ? property with
                     {
-                        continue;
+                        IsRequired = true,
                     }
+                    : property
+            )
+            .Concat(
+                parent
+                    .Effective.Values.Where(inherited =>
+                        required.Contains(inherited.Property.JsonName)
+                        && !own.ContainsKey(inherited.Property.JsonName)
+                    )
+                    .Select(inherited => inherited.Property with { IsRequired = true })
+            );
 
-                    declared.Add(property with { HidesInherited = true });
-                }
-                else
+        var declared = new List<RecordProperty>();
+        var effective = new Dictionary<string, (RecordProperty Property, string Owner)>(
+            parent.Effective,
+            StringComparer.Ordinal
+        );
+        foreach (var property in mentioned)
+        {
+            if (parent.Effective.TryGetValue(property.JsonName, out var inherited))
+            {
+                if (SameMember(property, inherited.Property))
                 {
-                    declared.Add(property);
+                    continue;
                 }
 
-                effective[property.Name] = property;
+                if (inherited.Property.IsRequired)
+                {
+                    return $"'{key}' redeclares '{property.JsonName}', which '{inherited.Owner}' requires, and C# can't hide a required member";
+                }
+
+                declared.Add(property with { HidesInherited = true });
+            }
+            else
+            {
+                declared.Add(property);
             }
 
-            var admitsExtensionData =
-                schema.AdditionalPropertiesAllowed
-                && inlineParts.All(part => part.AdditionalPropertiesAllowed);
-            record = new GeneratedRecord(
+            effective[property.JsonName] = (property, key);
+        }
+
+        _hierarchyRecords[key] = new BuiltHierarchyRecord(
+            new GeneratedRecord(
                 name,
                 declared,
                 Description: string.IsNullOrEmpty(schema.Description) ? null : schema.Description,
                 Polymorphism: polymorphism,
                 BaseTypeName: _ctx.SchemaNameMap[parentKey],
-                SchemaMetadata: CollectGeneratedSchemaMetadata(schema),
-                HasExtensionData: admitsExtensionData && !parent.CarriesExtensionData
-            );
-            carriesExtensionData = parent.CarriesExtensionData || record.HasExtensionData;
-        }
-
-        built = new BuiltHierarchyRecord(record, effective, carriesExtensionData);
-        _hierarchyRecords[key] = built;
-        return built;
+                SchemaMetadata: CollectGeneratedSchemaMetadata(schema)
+            ),
+            effective,
+            parent.ExtensionDataCarrier
+        );
+        return null;
     }
+
+    /// <summary>
+    /// True when two declarations of one property make the same C# member. Documentation
+    /// (descriptions, titles, examples) doesn't count: a derived record can't restate it
+    /// without hiding the member, and the member's preserved schema keeps it anyway.
+    /// </summary>
+    private static bool SameMember(RecordProperty a, RecordProperty b) =>
+        Undocumented(a) == Undocumented(b)
+        && (a.NestedSchemaRefs ?? []).SequenceEqual(b.NestedSchemaRefs ?? [])
+        && UndocumentedMetadata(a.SchemaMetadata)
+            .SequenceEqual(UndocumentedMetadata(b.SchemaMetadata));
+
+    private static RecordProperty Undocumented(RecordProperty property) =>
+        property with
+        {
+            Description = null,
+            Example = null,
+            HidesInherited = false,
+            SchemaMetadata = null,
+            NestedSchemaRefs = null,
+        };
+
+    private static IEnumerable<(
+        string Pointer,
+        TsScalarMetadata Metadata,
+        string Required
+    )> UndocumentedMetadata(IReadOnlyList<GeneratedSchemaMetadata>? metadata) =>
+        (metadata ?? [])
+            .Select(entry =>
+                (
+                    entry.Pointer,
+                    Metadata: entry.Metadata with
+                    {
+                        Description = null,
+                        Title = null,
+                        Example = null,
+                        Examples = null,
+                    }
+                )
+            )
+            .Where(entry => HasGeneratedSchemaMetadata(entry.Metadata))
+            .Select(entry =>
+                (
+                    entry.Pointer,
+                    entry.Metadata with
+                    {
+                        Required = null,
+                    },
+                    string.Join('\0', entry.Metadata.Required ?? [])
+                )
+            );
 
     /// <summary>
     /// Detects oneOf schemas whose <c>discriminator.propertyName</c> +
@@ -1862,9 +1980,9 @@ internal sealed class SchemaMapper
             }
 
             _polymorphicBases[key] = new PolymorphicUnion(discriminatorProperty, variants);
-            foreach (var (_, variantKey) in variants)
+            foreach (var (tag, variantKey) in variants)
             {
-                _polymorphicVariantKeys[variantKey] = key;
+                _polymorphicVariantKeys[variantKey] = (key, tag);
             }
         }
     }
@@ -1890,12 +2008,18 @@ internal sealed class SchemaMapper
         // System.Text.Json has no form for.
         if (
             baseSchema.Properties is { Count: > 0 } siblings
-                && (siblings.Count > 1 || !siblings.ContainsKey(discriminatorProperty))
-            || baseSchema.Required is { } required
-                && required.Any(name => name != discriminatorProperty)
+            && (siblings.Count > 1 || !siblings.ContainsKey(discriminatorProperty))
         )
         {
             return "the schema declares sibling properties alongside oneOf";
+        }
+
+        if (
+            baseSchema.Required?.Where(name => name != discriminatorProperty).ToList() is
+            { Count: > 0 } requiredSiblings
+        )
+        {
+            return $"the schema requires {string.Join(", ", requiredSiblings.Select(name => $"'{name}'"))} beside oneOf";
         }
 
         var siblingTag =
@@ -1941,10 +2065,16 @@ internal sealed class SchemaMapper
                 return $"mapping maps multiple tags to schema '{refId}'";
             }
 
+            if (_hierarchyMembers.TryGetValue(finalKey, out var hierarchyMember))
+            {
+                return hierarchyMember.ParentKey is { } hierarchyParent
+                    ? $"'{refId}' extends the discriminated base '{hierarchyParent}' through allOf"
+                    : $"'{refId}' is the discriminated base of an allOf hierarchy";
+            }
+
             if (
                 _polymorphicVariantKeys.ContainsKey(finalKey)
                 || _polymorphicBases.ContainsKey(finalKey)
-                || _hierarchyMembers.ContainsKey(finalKey)
             )
             {
                 return $"schema '{refId}' is already part of another polymorphic union";
@@ -2093,10 +2223,7 @@ internal sealed class SchemaMapper
     private static List<RecordProperty> WithoutWireProperty(
         IEnumerable<RecordProperty> properties,
         string wireName
-    ) =>
-        properties
-            .Where(property => (property.WireName ?? Naming.ToCamelCase(property.Name)) != wireName)
-            .ToList();
+    ) => properties.Where(property => property.JsonName != wireName).ToList();
 
     private bool TryResolveSchemaReference(
         OpenApiSchemaReference schemaRef,
@@ -2158,7 +2285,8 @@ internal sealed class SchemaMapper
         // (no record was generated for it in MapSchemas) — unless marked as empty record
         if (SchemaClassifier.IsObject(effective) && effective.Properties is not { Count: > 0 })
         {
-            // A hierarchy root is a record whatever it declares: its descendants derive from it.
+            // A hierarchy member is a record whatever it declares: its descendants derive
+            // from it.
             if (
                 effectiveId is not null
                 && (

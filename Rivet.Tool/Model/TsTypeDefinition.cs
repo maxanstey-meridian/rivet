@@ -105,16 +105,10 @@ public enum TsTypeProvenance
     Synthetic,
 }
 
-/// <summary>
-/// A generated type's OpenAPI identity. <c>DiscriminatorSchema</c> belongs to a polymorphic
-/// variant: the JSON of its tag property's schema as the source authored it (a plain
-/// <c>{ "type": "string" }</c> with a description, say), emitted in place of <c>enum: [tag]</c>.
-/// </summary>
+/// <summary>A generated type's OpenAPI identity.</summary>
 public sealed record TsTypeMetadata(
     string? ComponentId,
-    [property: JsonRequired] TsTypeProvenance Provenance,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string? DiscriminatorSchema = null
+    [property: JsonRequired] TsTypeProvenance Provenance
 );
 
 public sealed record TsScalarMetadata(

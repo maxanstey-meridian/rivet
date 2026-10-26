@@ -125,10 +125,15 @@ normally, and constructs a contract-owned response:
   On .NET 8 there's no such setting, so the refusal there is unconditional: move the
   host to .NET 9 or later, or give the endpoint an input that isn't polymorphic.
   The same goes, on every runtime, for an input that never meets the serializer at
-  all: a `.FormEncoded()` or `.AcceptsFile()` form, or the route and query of an
-  `.AcceptsBinary()` endpoint. ASP.NET's model binding has no discriminator. It
-  builds the declared type and never a variant, so no JSON setting can help, and the
-  adapter says so.
+  all. A `.FormEncoded()` or `.AcceptsFile()` form is one. An input read from the
+  route and query is the other, and that's wherever the spec puts `TInput` into
+  parameters rather than a JSON body: a GET, DELETE, HEAD or OPTIONS (so every
+  `Define.File<TInput>`), a POST, PUT or PATCH that declares a `.Parameter<T>()`, and
+  an `.AcceptsBinary()` endpoint, whose body is raw bytes. Declaring a body
+  (`.RequestBody()`) puts the input back in JSON on any method, and back under the
+  setting above. ASP.NET's model binding has no discriminator. It builds the declared
+  type and never a variant, so a request that sends a variant arrives as the declared
+  type, or not at all. No JSON setting can help, and the adapter says so.
   Responses don't care either way, since the serializer writes the discriminator
   first. A `[JsonPolymorphic]` type with no `[JsonDerivedType]` at all never gets this
   far: System.Text.Json won't read or write it on any runtime, so generation refuses

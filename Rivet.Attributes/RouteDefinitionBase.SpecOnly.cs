@@ -1,8 +1,9 @@
 namespace Rivet;
 
 // Builder methods whose arguments (all or some) only Rivet.Tool reads, from the call syntax at
-// generation time. At runtime they record nothing beyond what terminals and adapters validate;
-// they still throw once the definition is published.
+// generation time. At runtime they record nothing beyond what terminals and adapters validate
+// (the request-body and parameter markers record only that they were called, which decides
+// where TInput binds); they still throw once the definition is published.
 // Their parameters are deliberately unused, so the local .editorconfig turns IDE0060 off for
 // this file only. Parameter names are part of the Tool contract (named arguments): don't rename.
 public abstract partial class RouteDefinitionBase<TSelf>
@@ -225,15 +226,18 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? schemaRef = null,
         string? schemaType = null,
         string? format = null
-    ) => Marker();
+    ) => Mutate(static state => state with { RequestContentDeclared = true });
 
-    public TSelf RequestContent(string mediaType) => Marker();
+    public TSelf RequestContent(string mediaType) =>
+        Mutate(static state => state with { RequestContentDeclared = true });
 
-    public TSelf RequestBinaryContent(string mediaType) => Marker();
+    public TSelf RequestBinaryContent(string mediaType) =>
+        Mutate(static state => state with { RequestBinaryContentDeclared = true });
 
-    public TSelf RequestBodyRequired(bool required) => Marker();
+    public TSelf RequestBodyRequired(bool required) =>
+        Mutate(static state => state with { RequestBodyDeclared = true });
 
-    public TSelf RequestBody() => Marker();
+    public TSelf RequestBody() => Mutate(static state => state with { RequestBodyDeclared = true });
 
     public TSelf Parameter<T>(
         string name,
@@ -243,7 +247,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? format = null,
         string? metadataJson = null,
         string? schemaRef = null
-    ) => Marker();
+    ) => Mutate(static state => state with { ParametersDeclared = true });
 
     /// <summary>
     /// Opts this endpoint into query-based authentication, where the auth token is passed

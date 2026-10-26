@@ -83,6 +83,50 @@ public sealed class InlineObjectOptionalityTests
         );
     }
 
+    // Two shapes that differ only in an annotation are two schemas: sharing a hash would give
+    // them one component name and fail the second with a false RIV2001.
+    [Fact]
+    public void CanonicalHash_Distinguishes_Annotations()
+    {
+        var text = new TsType.Primitive("string");
+        TsType.TaggedUnion Union(TsType.TaggedUnionVariant variant) => new("kind", [variant]);
+        var variant = new TsType.TaggedUnionVariant(
+            "a",
+            new TsType.InlineObject([("kind", new TsType.StringUnion(["a"]))])
+        );
+        var stringEnum = new TsType.StringUnion(["a", "b"]);
+        var intEnum = new TsType.IntUnion(["1", "2"]);
+        var component = new TsTypeMetadata("Letters", TsTypeProvenance.Component);
+        var nullable = new TsScalarMetadata(IsNullable: true);
+
+        (TsType Plain, TsType Annotated)[] pairs =
+        [
+            (
+                new TsType.InlineObject([new("value", text)]),
+                new TsType.InlineObject([new("value", text, Description: "d")])
+            ),
+            (Union(variant), Union(variant with { Description = "d" })),
+            (Union(variant), Union(variant with { DiscriminatorSchema = "{\"type\":\"string\"}" })),
+            (stringEnum, stringEnum with { Description = "d" }),
+            (stringEnum, stringEnum with { ScalarMetadata = nullable }),
+            (stringEnum, stringEnum with { Metadata = component }),
+            (stringEnum, stringEnum with { Format = "f" }),
+            (stringEnum, stringEnum with { NamingPolicy = "camelCase" }),
+            (intEnum, intEnum with { Description = "d" }),
+            (intEnum, intEnum with { ScalarMetadata = nullable }),
+            (intEnum, intEnum with { Metadata = component }),
+        ];
+
+        for (var index = 0; index < pairs.Length; index++)
+        {
+            Assert.True(
+                InlineTypeExtractor.CanonicalHash(pairs[index].Plain)
+                    != InlineTypeExtractor.CanonicalHash(pairs[index].Annotated),
+                $"pair {index} hashes alike"
+            );
+        }
+    }
+
     [Fact]
     public void CanonicalHash_Distinguishes_Question_Mark_In_Name_From_Optionality()
     {

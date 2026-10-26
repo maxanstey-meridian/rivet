@@ -321,9 +321,11 @@ public sealed class ImportMetricTests
         // [JsonPolymorphic] hierarchy, and unusable mappings drop loudly with a reason
         // (RIV3005) instead of silently. 0.50.0 flattens allOf variants (a $ref'd base plus
         // an object): 10 bases at last audit — must not shrink. Ratchet (count may only go
-        // DOWN): 9 drops at last audit — 3 missing mappings, 2 mappings that name one schema
+        // DOWN): 10 drops at last audit — 3 missing mappings, 2 mappings that name one schema
         // twice, 2 allOf variants whose base enum excludes their tag, 1 unresolvable mapping
-        // entry, 1 variant shared by two unions.
+        // entry, 1 variant shared by two unions, 1 discriminator beside a component's own allOf
+        // (dns-records_dns-record-response), which can't root a hierarchy and used to drop
+        // silently.
         var polymorphicBases = CountPattern(r, "Types/", "[JsonPolymorphic(");
         Assert.True(
             polymorphicBases >= 10,
@@ -333,8 +335,8 @@ public sealed class ImportMetricTests
             DiagnosticId(w) == Diagnostics.ImportDiscriminatorDropped
         );
         Assert.True(
-            discriminatorDrops <= 9,
-            $"Expected ≤9 discriminator-dropped warnings (ratchet, was 9), got {discriminatorDrops}"
+            discriminatorDrops <= 10,
+            $"Expected ≤10 discriminator-dropped warnings (ratchet, was 10), got {discriminatorDrops}"
         );
     }
 

@@ -27,11 +27,13 @@ public static class InlineTypeExtractor
                 ? $"D:{CanonicalHash(d.Value)}M:{MetadataHash(d.ValueMetadata)}"
                 : $"D[{CanonicalHash(d.Key)}]:{CanonicalHash(d.Value)}M:{MetadataHash(d.ValueMetadata)}",
             TsType.StringUnion su => "SU:"
-                + string.Concat(su.Members.OrderBy(m => m).Select(Encode)),
+                + string.Concat(su.Members.OrderBy(m => m).Select(Encode))
+                + $"M:{Encode(JsonSerializer.Serialize(su with { Members = [] }))}",
             TsType.IntUnion iu => "IU:"
                 + (iu.Format ?? "")
                 + ":"
-                + string.Join(",", iu.Members.OrderBy(m => m)),
+                + string.Join(",", iu.Members.OrderBy(m => m))
+                + $"M:{Encode(JsonSerializer.Serialize(iu with { Members = [] }))}",
             TsType.Literal literal =>
                 $"L:{literal.Value.ValueKind}:{Encode(literal.Value.ToString())}",
             TsType.TypeRef r => $"R:{Encode(r.Name)}",
@@ -70,9 +72,9 @@ public static class InlineTypeExtractor
     private static string MetadataHash(TsScalarMetadata? metadata) =>
         metadata is null ? "" : Encode(JsonSerializer.Serialize(metadata));
 
-    // Every annotation a field or variant carries tells two shapes apart: two variants that
-    // differ only in a description are two component schemas, not one. The type is hashed on
-    // its own.
+    // Every annotation a field, variant or inline enum carries tells two shapes apart: two
+    // variants that differ only in a description are two component schemas, not one. The
+    // type (an enum's members) is hashed on its own.
     private static readonly TsType _hashedElsewhere = new TsType.TypeParam("");
 
     private static string FieldMetadataHash(TsType.InlineObjectField field) =>

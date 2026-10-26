@@ -1125,6 +1125,67 @@ public sealed class JsonContractReaderTests
         Assert.Contains(expected, exception.Message);
     }
 
+    private const string TaggedInline = """
+        { "kind": "inlineObject", "properties": [{ "name": "kind", "type": { "kind": "stringUnion", "values": ["a"] } }] }
+        """;
+
+    // A variant's annotations describe its own inline component, and its tag schema must
+    // admit its tag; the reader refuses anything else where it enters, naming the variant.
+    [Theory]
+    [InlineData(TaggedInline, "\"discriminatorSchema\": \"[]\"", "isn't a JSON object")]
+    [InlineData(TaggedInline, "\"discriminatorSchema\": \"{\\\"type\\\"\"", "isn't valid JSON")]
+    [InlineData(
+        TaggedInline,
+        "\"discriminatorSchema\": \"{\\\"enum\\\":[\\\"b\\\"]}\"",
+        "has an enum that doesn't list the tag 'a'"
+    )]
+    [InlineData(
+        TaggedInline,
+        "\"discriminatorSchema\": \"{\\\"const\\\":\\\"b\\\"}\"",
+        "has a const other than the tag 'a'"
+    )]
+    [InlineData(
+        TaggedInline,
+        "\"discriminatorSchema\": \"{\\\"type\\\":\\\"integer\\\"}\"",
+        "has a type that doesn't include string"
+    )]
+    [InlineData(
+        """{ "kind": "ref", "name": "Thing" }""",
+        "\"description\": \"d\"",
+        "isn't an inline object with a 'kind' property"
+    )]
+    [InlineData(
+        """{ "kind": "inlineObject", "properties": [] }""",
+        "\"scalarMetadata\": { \"isNullable\": true }",
+        "isn't an inline object with a 'kind' property"
+    )]
+    public void Variant_Annotations_The_IR_Cannot_Place_Fail_With_RIV2017(
+        string variantType,
+        string annotation,
+        string expected
+    )
+    {
+        var json = $$"""
+            {
+              "types": [
+                { "name": "Thing", "typeParameters": [], "properties": [] },
+                { "name": "State", "typeParameters": [], "type": { "kind": "taggedUnion", "discriminator": "kind",
+                  "variants": [{ "tag": "a", "type": {{variantType}}, {{annotation}} }] } }
+              ],
+              "enums": [],
+              "endpoints": []
+            }
+            """;
+
+        var message = Assert
+            .Throws<RivetUserException>(() => JsonContractReader.Read(json))
+            .Message;
+
+        Assert.StartsWith("error RIV2017:", message);
+        Assert.Contains("tagged-union variant 'a' (discriminator 'kind')", message);
+        Assert.Contains(expected, message);
+    }
+
     [Theory]
     [InlineData(
         """{ "name": "X-Page", "description": "no type" }""",
@@ -1398,6 +1459,11 @@ public sealed class JsonContractReaderTests
         ] }]
         """;
 
+    private const string UnplaceableVariantTypes = """
+        [{ "name": "State", "typeParameters": [], "type": { "kind": "taggedUnion", "discriminator": "kind",
+          "variants": [{ "tag": "a", "type": { "kind": "primitive", "type": "string" }, "description": "d" }] } }]
+        """;
+
     private const string PageTemplateTypes = """
         [{ "name": "Page", "typeParameters": ["T"], "properties": [
           { "name": "items", "type": { "kind": "array", "element": { "kind": "typeParam", "name": "T" } }, "optional": false }
@@ -1439,6 +1505,7 @@ public sealed class JsonContractReaderTests
         $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200, "dataType": { "kind": "generic", "name": "Page", "typeArgs": [{ "kind": "primitive", "type": "string" }] } }] }]"""
     )]
     [InlineData("RIV2008", BrandConflictTypes, "[]")]
+    [InlineData("RIV2017", UnplaceableVariantTypes, "[]")]
     [InlineData(
         "RIV2010",
         "[]",

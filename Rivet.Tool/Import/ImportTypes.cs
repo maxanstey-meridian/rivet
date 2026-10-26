@@ -90,10 +90,14 @@ internal sealed record RecordProperty(
     // Named scalar components referenced inside the property schema (/items,
     // /additionalProperties), whose $ref the C# element type alone cannot carry.
     IReadOnlyList<(string Pointer, string Name)>? NestedSchemaRefs = null,
-    // An allOf hierarchy member redeclaring a property its parent's record carries with
-    // another type or requiredness (Bitbucket's user.links): written with `new`.
+    // An allOf hierarchy member redeclaring a property its parent's record carries as a
+    // different member (Bitbucket's user.links): written with `new`.
     bool HidesInherited = false
-);
+)
+{
+    /// <summary>The property's JSON name: its pinned wire name, else its C# name in camelCase.</summary>
+    public string JsonName => WireName ?? Naming.ToCamelCase(Name);
+}
 
 internal sealed record GeneratedEnumMember(
     string CSharpName,

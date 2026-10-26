@@ -134,50 +134,12 @@ public sealed class PolymorphismTests
         Assert.Equal("email", tagEnum[0].GetString());
     }
 
-    // A variant field is a member like any other: it says everything the derived record's own
-    // property says ([RivetSchemaType] included, which also lifts the number-handling refusal),
-    // and contract JSON carries all of it to --from.
-    [Fact]
-    public void Variant_Field_Carries_What_Its_Record_Property_Carries()
+    /// <summary>
+    /// The spec emitted straight from the walked C#, and the one emitted after a round trip
+    /// through contract JSON (what --from reads), asserting the two are the same.
+    /// </summary>
+    private static JsonObject EmitDirectlyAndThroughContractJson(string source)
     {
-        var source = """
-            using System;
-            using System.ComponentModel.DataAnnotations;
-            using System.Text.Json.Serialization;
-            using Rivet;
-
-            namespace Test;
-
-            [RivetType]
-            [JsonPolymorphic]
-            [JsonDerivedType(typeof(Coupon), "coupon")]
-            public abstract record Discount;
-
-            [RivetDescription("A code taken off the total.")]
-            public sealed record Coupon(
-                [property: JsonNumberHandling(JsonNumberHandling.WriteAsString), RivetSchemaType("string")]
-                long Cents,
-                [property: RivetDescription("Shown at checkout."), StringLength(12, MinimumLength = 3), RivetExample("\"SPRING\"")]
-                string Code,
-                [property: Range(1, 100), RivetDefault("10")]
-                int Percent,
-                [property: Obsolete, RivetFormat("date")]
-                string? ExpiresOn) : Discount
-            {
-                public string Label => Code;
-            }
-
-            [RivetContract]
-            public static class DiscountsContract
-            {
-                public static readonly RouteDefinition<Discount> GetDiscount =
-                    Define.Get<Discount>("/api/discounts/{id}");
-
-                public static readonly RouteDefinition<Coupon> GetCoupon =
-                    Define.Get<Coupon>("/api/coupons/{id}");
-            }
-            """;
-
         var (endpoints, walker) = CompilationHelper.WalkMerged(source);
         var direct = JsonNode
             .Parse(
@@ -208,8 +170,60 @@ public sealed class PolymorphismTests
         );
         Assert.True(
             JsonNode.DeepEquals(direct, throughContractJson),
-            "contract JSON lost something a variant field carries"
+            "contract JSON lost something the variant carries"
         );
+        return direct;
+    }
+
+    // A variant field is a member like any other: it says everything the derived record's own
+    // property says ([RivetSchemaType] included, which also lifts the number-handling refusal),
+    // and contract JSON carries all of it to --from. A [RivetHeader] member is a header, not a
+    // field, on the variant as on the record.
+    [Fact]
+    public void Variant_Field_Carries_What_Its_Record_Property_Carries()
+    {
+        var source = """
+            using System;
+            using System.ComponentModel.DataAnnotations;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [JsonPolymorphic]
+            [JsonDerivedType(typeof(Coupon), "coupon")]
+            public abstract record Discount;
+
+            [RivetDescription("A code taken off the total.")]
+            public sealed record Coupon(
+                [property: JsonNumberHandling(JsonNumberHandling.WriteAsString), RivetSchemaType("string")]
+                long Cents,
+                [property: RivetDescription("Shown at checkout."), StringLength(12, MinimumLength = 3), RivetExample("\"SPRING\"")]
+                string Code,
+                [property: Range(1, 100), RivetDefault("10")]
+                int Percent,
+                [property: Obsolete, RivetFormat("date")]
+                string? ExpiresOn) : Discount
+            {
+                public string Label => Code;
+
+                [RivetHeader("X-Tenant")]
+                public string Tenant { get; init; } = "";
+            }
+
+            [RivetContract]
+            public static class DiscountsContract
+            {
+                public static readonly RouteDefinition<Discount> GetDiscount =
+                    Define.Get<Discount>("/api/discounts/{id}");
+
+                public static readonly RouteDefinition<Coupon> GetCoupon =
+                    Define.Get<Coupon>("/api/coupons/{id}");
+            }
+            """;
+
+        var direct = EmitDirectlyAndThroughContractJson(source);
 
         // The variant is the derived record's own schema with the tag prepended.
         var schemas = direct["components"]!["schemas"]!;
@@ -238,6 +252,7 @@ public sealed class PolymorphismTests
         Assert.True((bool?)variant["expiresOn"]!["deprecated"]);
         Assert.Equal("date", (string?)variant["expiresOn"]!["format"]);
         Assert.True((bool?)variant["label"]!["readOnly"]);
+        Assert.False(variant.ContainsKey("tenant"));
     }
 
     // An import records the source's own tag schema and component id on the variant; the
@@ -270,37 +285,95 @@ public sealed class PolymorphismTests
             }
             """;
 
-        using var doc = CompilationHelper.EmitOpenApi(source);
-        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
-        var mapping = schemas
-            .GetProperty("Discount")
-            .GetProperty("discriminator")
-            .GetProperty("mapping");
+        var schemas = EmitDirectlyAndThroughContractJson(source)["components"]!["schemas"]!;
 
         Assert.Equal(
             "#/components/schemas/CouponDiscount",
-            mapping.GetProperty("coupon").GetString()
+            (string?)schemas["Discount"]!["discriminator"]!["mapping"]!["coupon"]
         );
         Assert.True(
             JsonNode.DeepEquals(
                 JsonNode.Parse("""{"type":"string","description":"The kind of discount."}"""),
-                JsonNode.Parse(
-                    schemas
-                        .GetProperty("CouponDiscount")
-                        .GetProperty("properties")
-                        .GetProperty("type")
-                        .GetRawText()
-                )
+                schemas["CouponDiscount"]!["properties"]!["type"]
             )
         );
-        Assert.False(schemas.TryGetProperty("Discount_Coupon", out _));
+        Assert.Null(schemas["Discount_Coupon"]);
 
         // Without the metadata, the tag is still the synthesized single-value enum.
-        var voucherTag = schemas
-            .GetProperty("Discount_Voucher")
-            .GetProperty("properties")
-            .GetProperty("type");
-        Assert.Equal("voucher", voucherTag.GetProperty("enum")[0].GetString());
+        Assert.Equal(
+            "voucher",
+            (string?)schemas["Discount_Voucher"]!["properties"]!["type"]!["enum"]![0]
+        );
+    }
+
+    // The authored tag schema must be one the tag satisfies: the spec would otherwise refuse
+    // the very tag System.Text.Json writes.
+    [Theory]
+    [InlineData("[]", "isn't a JSON object")]
+    [InlineData("{", "isn't valid JSON")]
+    [InlineData(
+        "{\\\"enum\\\":[\\\"voucher\\\"]}",
+        "has an enum that doesn't list the tag 'coupon'"
+    )]
+    [InlineData("{\\\"const\\\":\\\"voucher\\\"}", "has a const other than the tag 'coupon'")]
+    [InlineData(
+        "{\\\"type\\\":[\\\"integer\\\",\\\"null\\\"]}",
+        "has a type that doesn't include string"
+    )]
+    public void Authored_Tag_Schema_That_Cannot_Carry_The_Tag_Fails_With_RIV1122(
+        string tagSchema,
+        string problem
+    )
+    {
+        var source = $$"""
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+            [JsonDerivedType(typeof(Coupon), "coupon")]
+            public abstract record Discount;
+
+            [RivetGeneratedType("CouponDiscount", RivetGeneratedTypeProvenance.Component, DiscriminatorSchemaJson = "{{tagSchema}}")]
+            public sealed record Coupon(string Code) : Discount;
+            """;
+
+        var message = Assert
+            .Throws<Rivet.Tool.RivetUserException>(() =>
+                CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
+            )
+            .Message;
+
+        Assert.StartsWith("error RIV1122:", message);
+        Assert.Contains("[RivetGeneratedType] on 'Test.Coupon'", message);
+        Assert.Contains(problem, message);
+        Assert.Contains("Re-import", message);
+    }
+
+    // Only a registered variant has a tag property for the authored schema to describe.
+    [Fact]
+    public void Authored_Tag_Schema_On_A_Type_No_Base_Registers_Fails_With_RIV1122()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [RivetGeneratedType("Coupon", RivetGeneratedTypeProvenance.Component, DiscriminatorSchemaJson = "{\"type\":\"string\"}")]
+            public sealed record Coupon(string Code);
+            """;
+
+        var message = Assert
+            .Throws<Rivet.Tool.RivetUserException>(() =>
+                CompilationHelper.DiscoverAndWalk(CompilationHelper.CreateCompilation(source))
+            )
+            .Message;
+
+        Assert.StartsWith("error RIV1122:", message);
+        Assert.Contains("no base registers the type with [JsonDerivedType]", message);
     }
 
     [Fact]
@@ -354,11 +427,14 @@ public sealed class PolymorphismTests
 
     // Do NOT stringify int tags: a spec validating string tags against an int wire value
     // is a lie, and flattening the base describes a payload STJ never writes. A tagless
-    // registration writes no discriminator at all. Both are refused.
+    // registration writes no discriminator at all, and a registered type that isn't a named
+    // type has no variant schema; dropping it would describe a union the host never serves.
+    // All are refused.
     [Theory]
-    [InlineData("typeof(Circle), 1", "a non-string")]
-    [InlineData("typeof(Circle)", "no")]
-    public void Non_String_Discriminator_Tag_Fails_With_RIV1014(string registration, string kind)
+    [InlineData("typeof(Circle), 1", "'Test.Circle' with a non-string discriminator tag")]
+    [InlineData("typeof(Circle)", "'Test.Circle' with no discriminator tag")]
+    [InlineData("typeof(int[]), \"ints\"", "'int[]', which isn't a named class, struct or record")]
+    public void Unrepresentable_Registration_Fails_With_RIV1014(string registration, string problem)
     {
         var source = $$"""
             using System.Text.Json.Serialization;
@@ -388,9 +464,8 @@ public sealed class PolymorphismTests
             .Message;
 
         Assert.StartsWith("error RIV1014:", message);
-        Assert.Contains($"with {kind} discriminator tag", message);
-        Assert.Contains("'Test.Circle'", message);
-        Assert.Contains("[JsonDerivedType(typeof(Circle), \"circle\")]", message);
+        Assert.Contains($"[JsonDerivedType] on 'Shape' registers {problem}", message);
+        Assert.Contains("as in [JsonDerivedType(typeof(", message);
     }
 
     [Fact]
@@ -420,11 +495,17 @@ public sealed class PolymorphismTests
     }
 
     // System.Text.Json throws on such a type once options are frozen (Rivet.RuntimeTests pins
-    // it), so there is no payload to describe.
-    [Fact]
-    public void JsonPolymorphic_Without_Registrations_Fails_With_RIV1015()
+    // it), so there is no payload to describe. A generic base, which otherwise flattens, is
+    // no exception.
+    [Theory]
+    [InlineData("Shape(string Id)", "Shape")]
+    [InlineData("Shape<T>(T Id)", "Shape<string>")]
+    public void JsonPolymorphic_Without_Registrations_Fails_With_RIV1015(
+        string declaration,
+        string usage
+    )
     {
-        var source = """
+        var source = $$"""
             using System.Text.Json.Serialization;
             using Rivet;
 
@@ -432,13 +513,13 @@ public sealed class PolymorphismTests
 
             [RivetType]
             [JsonPolymorphic]
-            public abstract record Shape(string Id);
+            public abstract record {{declaration}};
 
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly RouteDefinition<Shape> GetShape =
-                    Define.Get<Shape>("/api/shapes/{id}");
+                public static readonly RouteDefinition<{{usage}}> GetShape =
+                    Define.Get<{{usage}}>("/api/shapes/{id}");
             }
             """;
 
@@ -451,7 +532,7 @@ public sealed class PolymorphismTests
         Assert.Contains("remove [JsonPolymorphic]", message);
     }
 
-    private static string PolymorphicSettingSource(string setting) =>
+    private static string PolymorphicSettingSource(string setting, bool generic = false) =>
         $$"""
             using System.Text.Json.Serialization;
             using Rivet;
@@ -461,31 +542,45 @@ public sealed class PolymorphismTests
             [RivetType]
             [JsonPolymorphic({{setting}})]
             [JsonDerivedType(typeof(Circle), "circle")]
-            public abstract record Shape(string Id);
+            public abstract record {{(generic ? "Shape<T>(T Id)" : "Shape(string Id)")}};
 
-            public sealed record Circle(string Id, double Radius) : Shape(Id);
+            public sealed record Circle(string Id, double Radius) : {{(
+                generic ? "Shape<string>" : "Shape"
+            )}}(Id);
 
             [RivetContract]
             public static class ShapesContract
             {
-                public static readonly RouteDefinition<Shape> GetShape =
-                    Define.Get<Shape>("/api/shapes/{id}");
+                public static readonly RouteDefinition<{{(
+                generic ? "Shape<string>" : "Shape"
+            )}}> GetShape =
+                    Define.Get<{{(generic ? "Shape<string>" : "Shape")}}>("/api/shapes/{id}");
             }
             """;
 
     // A fallback writes an unregistered derived type as a base the oneOf doesn't admit;
-    // ignoring unrecognized tags reads one as the base, which the oneOf rejects.
+    // ignoring unrecognized tags reads one as the base, which the oneOf rejects. A generic
+    // base, which otherwise flattens, is no exception.
     [Theory]
-    [InlineData("UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType")]
     [InlineData(
-        "UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToNearestAncestor"
+        "UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType",
+        false
     )]
-    [InlineData("IgnoreUnrecognizedTypeDiscriminators = true")]
-    public void Unknown_Type_Fallback_Fails_With_RIV1016(string setting)
+    [InlineData(
+        "UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToNearestAncestor",
+        false
+    )]
+    [InlineData("IgnoreUnrecognizedTypeDiscriminators = true", false)]
+    [InlineData(
+        "UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType",
+        true
+    )]
+    [InlineData("IgnoreUnrecognizedTypeDiscriminators = true", true)]
+    public void Unknown_Type_Fallback_Fails_With_RIV1016(string setting, bool generic)
     {
         var message = Assert
             .Throws<Rivet.Tool.RivetUserException>(() =>
-                CompilationHelper.EmitOpenApi(PolymorphicSettingSource(setting))
+                CompilationHelper.EmitOpenApi(PolymorphicSettingSource(setting, generic))
             )
             .Message;
 
@@ -656,8 +751,6 @@ public sealed class PolymorphismTests
         );
     }
 
-    // The variants say what a source variant can: a type-level description, member
-    // descriptions and constraints.
     // PolymorphicSpecSchemas with what a source variant can say beyond its shape: a
     // type-level description, a member description and a constraint.
     private const string AnnotatedSpecSchemas = """
@@ -891,12 +984,17 @@ public sealed class PolymorphismTests
 
     [Theory]
     [InlineData(
-        "\"properties\": { \"type\": { \"type\": \"string\" }, \"id\": { \"type\": \"string\" } }"
+        "\"properties\": { \"type\": { \"type\": \"string\" }, \"id\": { \"type\": \"string\" } }",
+        "the schema declares sibling properties alongside oneOf"
     )]
     [InlineData(
-        "\"properties\": { \"type\": { \"type\": \"string\" } }, \"required\": [\"type\", \"id\"]"
+        "\"properties\": { \"type\": { \"type\": \"string\" } }, \"required\": [\"type\", \"id\"]",
+        "the schema requires 'id' beside oneOf"
     )]
-    public void OneOf_Sibling_Beyond_The_Discriminator_Falls_Back_Loudly(string siblings)
+    public void OneOf_Sibling_Beyond_The_Discriminator_Falls_Back_Loudly(
+        string siblings,
+        string reason
+    )
     {
         var schemas = $$"""
             "Variable": {
@@ -919,7 +1017,7 @@ public sealed class PolymorphismTests
             result.Warnings,
             w =>
                 w.StartsWith("RIV3005: Discriminator dropped on 'Variable'")
-                && w.Contains("sibling properties alongside oneOf")
+                && w.Contains($"({reason})")
         );
     }
 
@@ -1028,11 +1126,12 @@ public sealed class PolymorphismTests
     }
 
     // Bitbucket's shape: a discriminator on a base with no oneOf, descendants by allOf, tags
-    // implicit (the component name) unless the mapping names one.
+    // implicit (the component name) unless the mapping names one. Account's own `type` admits
+    // only its descendants' tags, so no payload names an Account itself. The root is
+    // nullable, and Envelope refers to it.
     private const string AllOfHierarchySchemas = """
         "Resource": {
-            "type": "object",
-            "additionalProperties": true,
+            "type": ["object", "null"], "additionalProperties": true,
             "discriminator": {
                 "propertyName": "type",
                 "mapping": { "team": "#/components/schemas/Team" }
@@ -1048,6 +1147,7 @@ public sealed class PolymorphismTests
                     "title": "Account",
                     "additionalProperties": true,
                     "properties": {
+                        "type": { "type": "string", "enum": ["User", "team"] },
                         "links": { "$ref": "#/components/schemas/AccountLinks" },
                         "name": { "type": "string" }
                     }
@@ -1093,8 +1193,58 @@ public sealed class PolymorphismTests
         "UserLinks": {
             "type": "object",
             "properties": { "html": { "type": "string" } }
+        },
+        "Envelope": {
+            "type": "object",
+            "properties": { "owner": { "$ref": "#/components/schemas/Resource" } },
+            "required": ["owner"]
         }
         """;
+
+    /// <summary>AllOfHierarchySchemas with each (original, replacement) pair applied.</summary>
+    private static string EditedHierarchySchemas(string[] edits)
+    {
+        var schemas = AllOfHierarchySchemas;
+        for (var index = 0; index < edits.Length; index += 2)
+        {
+            Assert.Contains(edits[index], schemas, StringComparison.Ordinal);
+            schemas = schemas.Replace(edits[index], edits[index + 1], StringComparison.Ordinal);
+        }
+
+        return schemas;
+    }
+
+    private static void AssertCompiles(Rivet.Tool.Import.ImportResult result)
+    {
+        var errors = CompilationHelper
+            .CompileImportResult(result)
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        Assert.True(errors.Count == 0, string.Join("\n", errors));
+    }
+
+    // The CLI's import → emit path, provenance included, as the round-trip gate runs it.
+    private static JsonDocument ImportAndEmit(string schemas)
+    {
+        var compilation = CompilationHelper.CompileImportResult(
+            CompilationHelper.Import(CompilationHelper.BuildSpec(schemas))
+        );
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        return JsonDocument.Parse(
+            OpenApiEmitter.Emit(
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                security: null,
+                new OpenApiDocumentInfo(
+                    Provenance: OpenApiProvenanceWalker.Walk(compilation, walker)
+                )
+            )
+        );
+    }
 
     [Fact]
     public void AllOf_Hierarchy_Under_A_Discriminator_Imports_As_JsonPolymorphic_Records()
@@ -1114,12 +1264,16 @@ public sealed class PolymorphismTests
         Assert.DoesNotContain("PipelineSelector", resource);
 
         // An intermediate base registers its own subtree, and declares only its own members.
+        // Its `type` admits no "Account", so it registers only its descendants and is
+        // abstract.
         var account = CompilationHelper.FindFile(result, "Account.cs");
-        Assert.Contains("[JsonDerivedType(typeof(Account), \"Account\")]", account);
+        Assert.DoesNotContain("typeof(Account)", account);
         Assert.Contains("[JsonDerivedType(typeof(User), \"User\")]", account);
-        Assert.Contains("public record Account : Resource", account);
+        Assert.Contains("[JsonDerivedType(typeof(Team), \"team\")]", account);
+        Assert.Contains("public abstract record Account : Resource", account);
         Assert.DoesNotContain("[RivetType]", account);
         Assert.DoesNotContain("[JsonExtensionData]", account);
+        Assert.DoesNotContain("typeof(Account)", resource);
 
         // A leaf is polymorphic too, so it writes its tag when it's the declared type, and it
         // redeclares a member its parent carries with another type.
@@ -1135,51 +1289,176 @@ public sealed class PolymorphismTests
         Assert.Contains("public sealed record PipelineSelector", selector);
         Assert.DoesNotContain(": Resource", selector);
 
-        var errors = CompilationHelper
-            .CompileImportResult(result)
-            .GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
-        Assert.True(errors.Count == 0, string.Join("\n", errors));
+        // The root is nullable, so a property referring to it is too.
+        Assert.Contains("Resource? Owner", CompilationHelper.FindFile(result, "Envelope.cs"));
+
+        AssertCompiles(result);
+    }
+
+    private const string AccountTitle = "\"title\": \"Account\",";
+    private const string UserName = "\"name\": { \"type\": \"string\" },";
+    private const string TeamPart =
+        "{ \"type\": \"object\", \"properties\": { \"size\": { \"type\": \"integer\" } } }";
+
+    // Each row is a property a member mentions again, by declaring it or listing it in its own
+    // `required`. Every one compiles: an inherited member is either the member, or one C# can
+    // redeclare with `new`.
+    [Theory]
+    // Restated as it is, without the `required` its ancestor gives it: still required, so the
+    // same member, inherited.
+    [InlineData(
+        "User.cs",
+        "",
+        " Links {",
+        AccountTitle,
+        "\"title\": \"Account\", \"required\": [\"links\"],",
+        "\"links\": { \"$ref\": \"#/components/schemas/UserLinks\" },",
+        "\"links\": { \"$ref\": \"#/components/schemas/AccountLinks\" },"
+    )]
+    // Only a description differs: documentation, which the preserved schema keeps.
+    [InlineData(
+        "User.cs",
+        "",
+        " Name {",
+        AccountTitle,
+        "\"title\": \"Account\", \"required\": [\"name\"],",
+        UserName,
+        "\"name\": { \"type\": \"string\", \"description\": \"What the user goes by.\" },"
+    )]
+    // Required by the member alone, without declaring it again.
+    [InlineData(
+        "Team.cs",
+        "public new required string Name { get; init; }",
+        "",
+        TeamPart,
+        "{ \"type\": \"object\", \"properties\": { \"size\": { \"type\": \"integer\" } }, \"required\": [\"name\"] }"
+    )]
+    // Restated and required beside the allOf.
+    [InlineData(
+        "User.cs",
+        "public new required string Name { get; init; }",
+        "",
+        "\"User\": {",
+        "\"User\": { \"required\": [\"name\"],"
+    )]
+    // An ancestor refuses extra properties, so nothing below it takes them either.
+    [InlineData(
+        "Account.cs",
+        "",
+        "[JsonExtensionData]",
+        "\"type\": [\"object\", \"null\"], \"additionalProperties\": true,",
+        "\"type\": [\"object\", \"null\"], \"additionalProperties\": false,"
+    )]
+    public void AllOf_Hierarchy_Member_Mentioning_An_Inherited_Property_Gets_The_Member_It_Means(
+        string file,
+        string expected,
+        string absent,
+        params string[] edits
+    )
+    {
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(EditedHierarchySchemas(edits))
+        );
+
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("RIV3005"));
+        var content = CompilationHelper.FindFile(result, file);
+        if (expected.Length > 0)
+        {
+            Assert.Contains(expected, content);
+        }
+
+        if (absent.Length > 0)
+        {
+            Assert.DoesNotContain(absent, content);
+        }
+
+        AssertCompiles(result);
     }
 
     private const string TeamMapping = "\"mapping\": { \"team\": \"#/components/schemas/Team\" }";
 
     [Theory]
     [InlineData(
+        "mapping entry 'links' references 'AccountLinks', which doesn't extend 'Resource' through allOf",
+        TeamMapping,
+        "\"mapping\": { \"links\": \"#/components/schemas/AccountLinks\" }"
+    )]
+    // The same, on a root that declares no properties of its own.
+    [InlineData(
+        "mapping entry 'links' references 'AccountLinks', which doesn't extend 'Resource' through allOf",
         TeamMapping,
         "\"mapping\": { \"links\": \"#/components/schemas/AccountLinks\" }",
-        "mapping entry 'links' references 'AccountLinks', which doesn't extend 'Resource' through allOf"
+        "\"properties\": { \"type\": { \"type\": \"string\" } },",
+        ""
     )]
     [InlineData(
+        "mapping entry 'selector' names 'PipelineSelector', whose 'type' doesn't admit it",
         TeamMapping,
-        "\"mapping\": { \"selector\": \"#/components/schemas/PipelineSelector\" }",
-        "mapping entry 'selector' names 'PipelineSelector', whose 'type' doesn't admit it"
+        "\"mapping\": { \"selector\": \"#/components/schemas/PipelineSelector\" }"
     )]
     [InlineData(
+        "tag 'Team' names two schemas",
         TeamMapping,
-        "\"mapping\": { \"Team\": \"#/components/schemas/User\" }",
-        "tag 'Team' names two schemas"
+        "\"mapping\": { \"Team\": \"#/components/schemas/User\" }"
     )]
     [InlineData(
-        "\"title\": \"Account\",",
-        "\"title\": \"Account\", \"required\": [\"links\"],",
-        "'User' redeclares 'links', which 'Account' requires, and C# can't hide a required member"
+        "no allOf descendant carries a 'type' tag it admits",
+        TeamMapping,
+        "\"mapping\": {}",
+        "\"properties\": { \"type\": { \"type\": \"string\" } },",
+        "\"properties\": { \"type\": { \"type\": \"string\", \"enum\": [\"other\"] } },"
+    )]
+    [InlineData(
+        "'User' redeclares 'links', which 'Account' requires, and C# can't hide a required member",
+        AccountTitle,
+        "\"title\": \"Account\", \"required\": [\"links\"],"
+    )]
+    [InlineData(
+        "'User' redeclares 'name', which 'Account' requires, and C# can't hide a required member",
+        AccountTitle,
+        "\"title\": \"Account\", \"required\": [\"name\"],",
+        UserName,
+        "\"name\": { \"type\": \"string\", \"maxLength\": 10 },"
+    )]
+    [InlineData(
+        "'Team' refuses additional properties its ancestor 'Resource' accepts",
+        TeamPart,
+        "{ \"type\": \"object\", \"properties\": { \"size\": { \"type\": \"integer\" } }, \"additionalProperties\": false }"
+    )]
+    // Reached only through allOfs that $ref several schemas.
+    [InlineData(
+        "'Account' extends 'Resource' and other schemas through allOf, which C# single inheritance can't hold",
+        "{ \"$ref\": \"#/components/schemas/Resource\" },",
+        "{ \"$ref\": \"#/components/schemas/Resource\" }, { \"$ref\": \"#/components/schemas/UserLinks\" },"
+    )]
+    [InlineData(
+        "'User' extends 'Account' and other schemas through allOf, which C# single inheritance can't hold",
+        "{ \"$ref\": \"#/components/schemas/Account\" },",
+        "{ \"$ref\": \"#/components/schemas/Account\" }, { \"$ref\": \"#/components/schemas/UserLinks\" },"
+    )]
+    [InlineData(
+        "'Bot' extends 'Account' through allOf and composes a oneOf/anyOf as well, which a derived record can't hold",
+        "\"AccountLinks\": {",
+        "\"Bot\": { \"allOf\": [{ \"$ref\": \"#/components/schemas/Account\" }], \"oneOf\": [{ \"type\": \"object\" }] }, \"AccountLinks\": {"
+    )]
+    [InlineData(
+        "'Account' declares a discriminator of its own, 'kind'",
+        AccountTitle,
+        "\"title\": \"Account\", \"discriminator\": { \"propertyName\": \"kind\" },"
+    )]
+    [InlineData(
+        "'Account' maps tag 'member' to 'User', which the hierarchy tags 'User'",
+        AccountTitle,
+        "\"title\": \"Account\", \"discriminator\": { \"propertyName\": \"type\", \"mapping\": { \"member\": \"#/components/schemas/User\" } },"
     )]
     public void AllOf_Hierarchy_The_CSharp_Cannot_Hold_Falls_Back_Loudly(
-        string original,
-        string replacement,
-        string reason
+        string reason,
+        params string[] edits
     )
     {
-        Assert.Contains(original, AllOfHierarchySchemas, StringComparison.Ordinal);
-        var schemas = AllOfHierarchySchemas.Replace(
-            original,
-            replacement,
-            StringComparison.Ordinal
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(EditedHierarchySchemas(edits))
         );
-
-        var result = CompilationHelper.Import(CompilationHelper.BuildSpec(schemas));
 
         Assert.Contains(
             result.Warnings,
@@ -1188,5 +1467,106 @@ public sealed class PolymorphismTests
                 && w.Contains($"has no usable allOf hierarchy ({reason})")
         );
         Assert.DoesNotContain("JsonPolymorphic", CompilationHelper.FindFile(result, "Resource.cs"));
+    }
+
+    [Fact]
+    public void AllOf_Hierarchy_Mapping_Entry_Outside_The_Document_Is_Dropped_Loudly()
+    {
+        // The entry can't resolve in the one document Rivet imports, so it goes before the
+        // hierarchy is read, and the hierarchy imports without it. (Team's implicit tag,
+        // "Team", is one Account's `type` doesn't admit, so Team leaves the hierarchy.)
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(
+                EditedHierarchySchemas([
+                    TeamMapping,
+                    "\"mapping\": { \"team\": \"https://example.test/schemas.json#/Team\" }",
+                ])
+            )
+        );
+
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3005: Discriminator mapping entry dropped: 'team'")
+                && w.Contains("outside this document")
+        );
+        Assert.DoesNotContain(
+            result.Warnings,
+            w => w.StartsWith("RIV3005: Discriminator dropped on 'Resource'")
+        );
+        var resource = CompilationHelper.FindFile(result, "Resource.cs");
+        Assert.Contains("[JsonDerivedType(typeof(User), \"User\")]", resource);
+        Assert.DoesNotContain("typeof(Team)", resource);
+    }
+
+    [Fact]
+    public void AllOf_Hierarchy_Member_With_A_Discriminator_Beside_Its_AllOf_Falls_Back_Loudly()
+    {
+        // OpenAPI 3.0's Pet extends a base and roots its own discriminator. The root of a
+        // hierarchy has no parent of its own, so the discriminator can't be kept, and says so.
+        var schemas = """
+            "Base": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "Pet": {
+                "allOf": [{ "$ref": "#/components/schemas/Base" }],
+                "discriminator": { "propertyName": "petType" },
+                "properties": { "petType": { "type": "string" } }
+            },
+            "Cat": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/Pet" },
+                    { "type": "object", "properties": { "lives": { "type": "integer" } } }
+                ]
+            }
+            """;
+
+        var result = CompilationHelper.Import(CompilationHelper.BuildSpec(schemas));
+
+        Assert.Contains(
+            result.Warnings,
+            w =>
+                w.StartsWith("RIV3005: Discriminator dropped on 'Pet'")
+                && w.Contains("sits beside an allOf of its own, so it can't root a hierarchy")
+        );
+    }
+
+    [Fact]
+    public void Imported_AllOf_Hierarchy_Emits_Back_Every_Member_Including_An_Abstract_One()
+    {
+        // User's and Team's preserved schemas $ref Account, which no payload names: its
+        // component must still be there, exactly as the source wrote it.
+        using var doc = ImportAndEmit(AllOfHierarchySchemas);
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        foreach (var name in new[] { "Resource", "Account", "User", "Team" })
+        {
+            var source = JsonNode.Parse("{" + AllOfHierarchySchemas + "}")![name];
+            Assert.True(schemas.TryGetProperty(name, out var emitted), $"{name} is missing");
+            Assert.True(
+                JsonNode.DeepEquals(source, JsonNode.Parse(emitted.GetRawText())),
+                $"{name} came back as {emitted.GetRawText()}"
+            );
+        }
+    }
+
+    [Fact]
+    public void Imported_Nullable_Hierarchy_Root_Admits_Null_Once_Where_It_Is_Used()
+    {
+        // Resource admits null itself, so Envelope's owner is a bare $ref: a null branch
+        // beside it would match null twice, and oneOf would reject it.
+        using var doc = ImportAndEmit(AllOfHierarchySchemas);
+
+        var owner = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Envelope")
+            .GetProperty("properties")
+            .GetProperty("owner");
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse("""{ "$ref": "#/components/schemas/Resource" }"""),
+                JsonNode.Parse(owner.GetRawText())
+            ),
+            $"owner came back as {owner.GetRawText()}"
+        );
     }
 }
