@@ -136,6 +136,7 @@ public static class Diagnostics
     public const string ImportPathItemOutsidePathsDropped = "RIV3028";
     public const string ImportEquivalentPathTemplateMerged = "RIV3029";
     public const string ImportUnsatisfiableSecurity = "RIV3030";
+    public const string ImportIntegerEnumValueUnheld = "RIV3031";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -288,6 +289,8 @@ public static class Diagnostics
             "Path repeats an earlier path's template under other parameter names, which OpenAPI forbids — its operations merge into the earlier path and adopt its path parameter names.",
         [ImportUnsatisfiableSecurity] =
             "A security alternative names a scheme components.securitySchemes never defines, so no caller can satisfy it — the alternative is dropped, and an operation left with none is dropped too rather than imported as open.",
+        [ImportIntegerEnumValueUnheld] =
+            "Integer enum lists a value its C# integer type can't hold — the values stay in the spec, but a client can't receive that one.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

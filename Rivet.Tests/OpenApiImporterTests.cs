@@ -4342,7 +4342,11 @@ public sealed class OpenApiImporterTests
         // instead of generating uncompilable C# (enum : ulong with a negative member).
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("ImpossibleVals.cs"));
         Assert.Contains("long Code", CompilationHelper.FindFile(result, "OrderDto.cs"));
-        Assert.Empty(result.Warnings);
+        // The long can't receive 18446744073709551615, so the import says so.
+        var warning = Assert.Single(result.Warnings);
+        Assert.StartsWith("RIV3031:", warning);
+        Assert.Contains("component 'ImpossibleVals' lists 18446744073709551615", warning);
+        Assert.Contains("'long'", warning);
         Assert.Equal(["-1", "18446744073709551615"], EmittedComponentEnum(spec, "ImpossibleVals"));
     }
 

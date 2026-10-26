@@ -81,6 +81,7 @@ public sealed class ImportMetricTests
             Diagnostics.ImportPathItemOutsidePathsDropped => "path-item-outside-paths-dropped",
             Diagnostics.ImportEquivalentPathTemplateMerged => "equivalent-path-template-merged",
             Diagnostics.ImportUnsatisfiableSecurity => "unsatisfiable-security-dropped",
+            Diagnostics.ImportIntegerEnumValueUnheld => "integer-enum-value-unheld",
             _ => $"UNCATEGORIZED: {warning}",
         };
 

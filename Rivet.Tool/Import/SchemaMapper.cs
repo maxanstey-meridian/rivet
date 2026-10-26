@@ -26,6 +26,7 @@ internal sealed class SchemaMapper
     private readonly HashSet<string> _skippedComponentTypes = new(StringComparer.Ordinal);
     private IDictionary<string, IOpenApiSchema>? _componentSchemas;
     private readonly HashSet<string> _unsupportedNamedScalarsWarned = new(StringComparer.Ordinal);
+    private readonly HashSet<IOpenApiSchema> _unheldIntegerEnumsWarned = [];
     private readonly HashSet<string> _requiredComponentSchemas = new(StringComparer.Ordinal);
 
     // A oneOf + discriminator + usable mapping reverses to an abstract
@@ -735,6 +736,14 @@ internal sealed class SchemaMapper
 
         var metadata = BuildScalarMetadata(schema, declared.HasFlag(JsonSchemaType.Null));
         var isEnum = SchemaClassifier.IsStringEnum(schema) || SchemaClassifier.IsIntEnum(schema);
+        if (!isEnum && declared.HasFlag(JsonSchemaType.Integer))
+        {
+            WarnUnheldIntegerEnumValues(
+                schema,
+                SchemaClassifier.ResolveIntegerType(schema),
+                $"component '{componentId}'"
+            );
+        }
         scalar = new GeneratedScalarSchema(
             name,
             componentId,
@@ -1012,6 +1021,58 @@ internal sealed class SchemaMapper
         || metadata.Xml is not null
         || metadata.Enum is not null
         || metadata.EnumListsNull;
+
+    /// <summary>
+    /// An integer literal enum keeps its values as metadata whatever its C# type, but a whole
+    /// value outside that type's range (<c>[-1, 18446744073709551615]</c> as a long) can't
+    /// be received, so the import says which.
+    /// </summary>
+    private void WarnUnheldIntegerEnumValues(IOpenApiSchema schema, string carrier, string site)
+    {
+        // A $ref use site leaves it to the component, which warns for itself.
+        if (
+            schema is OpenApiSchemaReference
+            || schema.Enum is not { Count: > 0 }
+            || !_unheldIntegerEnumsWarned.Add(schema)
+        )
+        {
+            return;
+        }
+        var unheld = schema
+            .Enum.OfType<JsonValue>()
+            .Where(value =>
+                value.GetValueKind() == System.Text.Json.JsonValueKind.Number
+                && value.TryGetValue<decimal>(out var number)
+                && number == decimal.Truncate(number)
+                && !IntegerCarrierHolds(carrier, number)
+            )
+            .Select(value => value.ToJsonString())
+            .ToList();
+        if (unheld.Count == 0)
+        {
+            return;
+        }
+        _ctx.Warnings.Add(
+            Diagnostics.Prefix(
+                Diagnostics.ImportIntegerEnumValueUnheld,
+                $"Integer enum at {site} lists {string.Join(", ", unheld)}, which its C# type '{carrier}' can't hold; the values stay in the spec, but a client can't receive "
+                    + (unheld.Count == 1 ? "it." : "them.")
+            )
+        );
+    }
+
+    private static bool IntegerCarrierHolds(string carrier, decimal value) =>
+        carrier switch
+        {
+            "sbyte" => value is >= sbyte.MinValue and <= sbyte.MaxValue,
+            "byte" => value is >= byte.MinValue and <= byte.MaxValue,
+            "short" => value is >= short.MinValue and <= short.MaxValue,
+            "ushort" => value is >= ushort.MinValue and <= ushort.MaxValue,
+            "int" => value is >= int.MinValue and <= int.MaxValue,
+            "uint" => value is >= uint.MinValue and <= uint.MaxValue,
+            "ulong" => value is >= ulong.MinValue and <= ulong.MaxValue,
+            _ => value is >= long.MinValue and <= long.MaxValue,
+        };
 
     private void WarnUnsupportedNamedScalar(string componentId, string reason)
     {
@@ -1936,7 +1997,13 @@ internal sealed class SchemaMapper
                 return SynthesizeInlineEnum(schema, context, SchemaClassifier.MapIntEnum);
             }
 
-            return SchemaClassifier.ResolveIntegerType(schema);
+            var carrier = SchemaClassifier.ResolveIntegerType(schema);
+            WarnUnheldIntegerEnumValues(
+                schema,
+                carrier,
+                context is null ? "an inline schema" : $"'{context}'"
+            );
+            return carrier;
         }
 
         if (type.HasFlag(JsonSchemaType.Number))

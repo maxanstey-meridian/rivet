@@ -696,10 +696,49 @@ public sealed class ComponentProvenanceTests
         );
     }
 
+    // No CLR integer holds both -1 and 2^64-1, and an int32 can't hold 2^31: the values
+    // still ride as metadata, and the import names what a client can't receive.
+    [Theory]
+    [InlineData(
+        "{ \"type\": \"integer\", \"enum\": [-1, 18446744073709551615] }",
+        "long",
+        "18446744073709551615"
+    )]
+    [InlineData(
+        "{ \"type\": \"integer\", \"format\": \"int32\", \"enum\": [1, 2147483648, 1.5] }",
+        "int",
+        "2147483648"
+    )]
+    public void Integer_enum_value_its_type_cannot_hold_is_named_on_import(
+        string schema,
+        string csharpType,
+        string unheld
+    )
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: $$"""
+            "Envelope": {
+                "type": "object",
+                "properties": { "value": {{schema}} },
+                "required": ["value"]
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec, "LiteralEnum");
+
+        Assert.Contains(
+            $" {csharpType} Value",
+            CompilationHelper.FindFile(imported, "Envelope.cs")
+        );
+        var warning = Assert.Single(imported.Warnings);
+        Assert.StartsWith("RIV3031:", warning);
+        Assert.Contains($"lists {unheld}, which its C# type '{csharpType}' can't hold", warning);
+    }
+
     [Theory]
     [InlineData("{ \"type\": \"boolean\", \"enum\": [false] }", "bool")]
     [InlineData("{ \"type\": \"number\", \"enum\": [1, 2.5] }", "double")]
-    [InlineData("{ \"type\": \"integer\", \"enum\": [-1, 18446744073709551615] }", "long")]
     [InlineData("{ \"enum\": [true] }", "bool")]
     [InlineData("{ \"enum\": [0.5, 1.5] }", "double")]
     [InlineData("{ \"enum\": [[]] }", "System.Text.Json.JsonElement")]
