@@ -28,9 +28,10 @@ public sealed class RivetGeneratedTypeAttribute : Attribute
 
     /// <summary>
     /// On a polymorphic variant: the JSON of the tag property's schema as the source authored
-    /// it, emitted in place of the synthesized single-value <c>enum</c>. It must be a JSON
-    /// schema object that admits the variant's tag (an <c>enum</c> or <c>const</c> listing it,
-    /// a <c>type</c> including <c>string</c>); anything else stops generation (RIV1122).
+    /// it, emitted in place of the synthesized single-value <c>enum</c>. It must be valid JSON,
+    /// a schema object that admits the variant's tag (an <c>enum</c> or <c>const</c> listing
+    /// it, a <c>type</c> including <c>string</c>), on a type some base registers with
+    /// <c>[JsonDerivedType]</c>; anything else stops generation (RIV1122).
     /// </summary>
     public string? DiscriminatorSchemaJson { get; set; }
 }

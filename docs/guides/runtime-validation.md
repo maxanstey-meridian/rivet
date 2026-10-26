@@ -125,15 +125,19 @@ normally, and constructs a contract-owned response:
   On .NET 8 there's no such setting, so the refusal there is unconditional: move the
   host to .NET 9 or later, or give the endpoint an input that isn't polymorphic.
   The same goes, on every runtime, for an input that never meets the serializer at
-  all. A `.FormEncoded()` or `.AcceptsFile()` form is one. An input read from the
-  route and query is the other, and that's wherever the spec puts `TInput` into
-  parameters rather than a JSON body: a GET, DELETE, HEAD or OPTIONS (so every
-  `Define.File<TInput>`), a POST, PUT or PATCH that declares a `.Parameter<T>()`, and
-  an `.AcceptsBinary()` endpoint, whose body is raw bytes. Declaring a body
-  (`.RequestBody()`) puts the input back in JSON on any method, and back under the
-  setting above. ASP.NET's model binding has no discriminator. It builds the declared
-  type and never a variant, so a request that sends a variant arrives as the declared
-  type, or not at all. No JSON setting can help, and the adapter says so.
+  all. A form is one: `.FormEncoded()` or `.AcceptsFile()`, a
+  `.RequestContent("multipart/form-data")` or `application/x-www-form-urlencoded`
+  one, or an input carrying an `IFormFile` (or a list of them), which the spec sends
+  as multipart anyway. An input read from the route and query is the other, and
+  that's wherever the spec puts `TInput` into parameters rather than a body: a GET,
+  DELETE, HEAD or OPTIONS (so every `Define.File<TInput>`), a POST, PUT or PATCH that
+  declares a `.Parameter<T>()`, and an `.AcceptsBinary()` endpoint, whose body is raw
+  bytes. Declaring a body puts the input back in it on any method: `.RequestBody()`
+  makes it JSON, back under the setting above, and `.FormEncoded()` makes it a form,
+  so even a GET's input arrives that way. ASP.NET's model binding has no
+  discriminator. It builds the declared type and never a variant, so a request that
+  sends a variant arrives as the declared type, or not at all. No JSON setting can
+  help, and the adapter says so.
   Responses don't care either way, since the serializer writes the discriminator
   first. A `[JsonPolymorphic]` type with no `[JsonDerivedType]` at all never gets this
   far: System.Text.Json won't read or write it on any runtime, so generation refuses

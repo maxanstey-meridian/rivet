@@ -504,10 +504,36 @@ public static class InlineTypeExtractor
         Dictionary<string, TsType.TypeRef> replacements
     ) =>
         type.Rewrite(node =>
-            node is TsType.InlineObject inline
-            && replacements.TryGetValue(CanonicalHash(inline), out var typeRef)
-                ? typeRef
-                : null
+            node switch
+            {
+                TsType.InlineObject inline
+                    when replacements.TryGetValue(CanonicalHash(inline), out var typeRef) =>
+                    typeRef,
+                TsType.TaggedUnion union => union with
+                {
+                    Variants = union
+                        .Variants.Select(variant =>
+                            variant with
+                            {
+                                Type = variant.Type is TsType.InlineObject own
+                                    ? own with
+                                    {
+                                        Fields = own
+                                            .Fields.Select(field =>
+                                                field with
+                                                {
+                                                    Type = ReplaceInType(field.Type, replacements),
+                                                }
+                                            )
+                                            .ToList(),
+                                    }
+                                    : ReplaceInType(variant.Type, replacements),
+                            }
+                        )
+                        .ToList(),
+                },
+                _ => null,
+            }
         );
 
     private static HashSet<string> CollectArrayElementHashes(
@@ -538,10 +564,29 @@ public static class InlineTypeExtractor
                 }
 
                 break;
+            // A variant's own inline object is never extracted: it already becomes its
+            // {Base}_{Tag} component, and that component carries the variant's description,
+            // scalar metadata and authored tag schema, which a Dto reference would cut off.
+            // ReplaceInType keeps it inline for the same reason. What sits inside it is fair game.
             case TsType.TaggedUnion tu:
                 foreach (var variant in tu.Variants)
                 {
-                    CollectFromType(variant.Type, $"{context}.variant.{variant.Tag}", results);
+                    var variantContext = $"{context}.variant.{variant.Tag}";
+                    if (variant.Type is TsType.InlineObject own)
+                    {
+                        foreach (var field in own.Fields)
+                        {
+                            CollectFromType(
+                                field.Type,
+                                $"{variantContext}.field.{field.Name}",
+                                results
+                            );
+                        }
+                    }
+                    else
+                    {
+                        CollectFromType(variant.Type, variantContext, results);
+                    }
                 }
 
                 break;

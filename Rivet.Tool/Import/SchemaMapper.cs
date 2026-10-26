@@ -71,11 +71,15 @@ internal sealed class SchemaMapper
     );
 
     // Effective: every member the record has, its own and inherited, keyed by JSON name,
-    // with the member that declares it. ExtensionDataCarrier: the member whose record holds
-    // [JsonExtensionData] for this one, or null when the chain refuses extra properties.
+    // with the member that declares it and the property schema it was mapped from.
+    // ExtensionDataCarrier: the member whose record holds [JsonExtensionData] for this one,
+    // or null when the chain refuses extra properties.
     private sealed record BuiltHierarchyRecord(
         GeneratedRecord Record,
-        IReadOnlyDictionary<string, (RecordProperty Property, string Owner)> Effective,
+        IReadOnlyDictionary<
+            string,
+            (RecordProperty Property, string Owner, IOpenApiSchema? Source)
+        > Effective,
         string? ExtensionDataCarrier
     );
 
@@ -471,13 +475,24 @@ internal sealed class SchemaMapper
             if (schema.AllOf is { Count: > 0 })
             {
                 // A discriminator beside an allOf can't root a hierarchy: the root is the one
-                // member with no parent of its own.
+                // member with no parent of its own. One whose allOf nests a union of its own
+                // (Cloudflare's dns-record-response) dispatches over that union instead.
                 if (schema.Discriminator?.PropertyName is { } allOfDiscriminator)
                 {
+                    var nestsUnion = schema.AllOf.Any(part =>
+                        part is not OpenApiSchemaReference
+                        && (part.OneOf is { Count: > 0 } || part.AnyOf is { Count: > 0 })
+                    );
                     _ctx.Warnings.Add(
                         Diagnostics.Prefix(
                             Diagnostics.ImportDiscriminatorDropped,
-                            $"Discriminator dropped on '{name}': property '{allOfDiscriminator}' sits beside an allOf of its own, so it can't root a hierarchy — imported as a flattened record."
+                            $"Discriminator dropped on '{name}': property '{allOfDiscriminator}' "
+                                + (
+                                    nestsUnion
+                                        ? "dispatches over a oneOf/anyOf nested in its allOf, which Rivet can't reverse"
+                                        : "sits beside an allOf of its own, so it can't root a hierarchy"
+                                )
+                                + " — imported as a flattened record."
                         )
                     );
                 }
@@ -1476,6 +1491,9 @@ internal sealed class SchemaMapper
             }
         }
 
+        // Every hierarchy's members are registered before any record is built, so a $ref to
+        // a member resolves to its record whichever hierarchy is built first.
+        var resolved = new List<(string RootKey, List<(string Key, HierarchyMember Member)>)>();
         foreach (var (rootKey, root) in schemas)
         {
             if (
@@ -1492,46 +1510,52 @@ internal sealed class SchemaMapper
                 continue;
             }
 
-            var failure = TryResolveHierarchy(
-                rootKey,
-                property,
-                discriminator.Mapping,
-                schemas,
-                children,
-                composedChildren,
-                unionChildren,
-                out var members
-            );
-            if (failure is null)
-            {
-                foreach (var (key, member) in members)
-                {
-                    _hierarchyMembers[key] = member;
-                }
-
-                // Preorder: a parent's record is built before its children's.
-                foreach (var (key, _) in members)
-                {
-                    if ((failure = TryBuildHierarchyRecord(key, schemas)) is not null)
-                    {
-                        break;
-                    }
-                }
-
-                if (failure is not null)
-                {
-                    foreach (var (key, _) in members)
-                    {
-                        _hierarchyMembers.Remove(key);
-                        _hierarchyRecords.Remove(key);
-                    }
-                }
-            }
-
-            if (failure is not null)
+            if (
+                TryResolveHierarchy(
+                    rootKey,
+                    property,
+                    discriminator.Mapping,
+                    schemas,
+                    children,
+                    composedChildren,
+                    unionChildren,
+                    out var members
+                ) is
+                { } failure
+            )
             {
                 _hierarchyRejections[rootKey] = failure;
+                continue;
             }
+
+            foreach (var (key, member) in members)
+            {
+                _hierarchyMembers[key] = member;
+            }
+
+            resolved.Add((rootKey, members));
+        }
+
+        foreach (var (rootKey, members) in resolved)
+        {
+            // Preorder: a parent's record is built before its children's.
+            if (
+                members
+                    .Select(entry => TryBuildHierarchyRecord(entry.Key, schemas))
+                    .FirstOrDefault(failure => failure is not null)
+                is not { } failure
+            )
+            {
+                continue;
+            }
+
+            foreach (var (key, _) in members)
+            {
+                _hierarchyMembers.Remove(key);
+                _hierarchyRecords.Remove(key);
+            }
+
+            _hierarchyRejections[rootKey] = failure;
         }
     }
 
@@ -1647,15 +1671,20 @@ internal sealed class SchemaMapper
             }
         }
 
+        // A mapped tag is named explicitly, so a declaration that constrains nothing admits
+        // it. An implicit tag (the component name) needs every declaration to say it does.
         var concrete = new Dictionary<string, bool>(StringComparer.Ordinal);
         foreach (var (key, _) in order)
         {
             var tag = tags[key];
+            Func<IOpenApiSchema, string, bool> admits = mapped.Contains(key)
+                ? AdmitsTag
+                : DeclaresTag;
             var admitted = true;
             for (string? link = key; link is not null && admitted; link = parents[link])
             {
                 admitted = OwnTagDeclarations(schemas[link], property)
-                    .All(declaration => AdmitsTag(declaration, tag));
+                    .All(declaration => admits(declaration, tag));
             }
 
             if (!admitted && mapped.Contains(key))
@@ -1762,8 +1791,9 @@ internal sealed class SchemaMapper
     /// why the C# can't hold it. The root keeps its own properties. Every other member
     /// mentions a property by declaring it or by listing it in its own <c>required</c>, and
     /// allOf applies every <c>required</c> at once, so a mentioned property is required when
-    /// the member or an ancestor requires it. A mentioned member that differs from the one
-    /// it inherits (<see cref="SameMember"/>) is redeclared with <c>new</c> over an optional
+    /// the member or an ancestor requires it. A declaration whose schema differs from the
+    /// inherited one only in documentation is the inherited member. A mentioned member that
+    /// differs from the one it inherits (<see cref="SameMember"/>) is redeclared with <c>new</c> over an optional
     /// member; over a required one it rejects the hierarchy, since C# can't hide a required
     /// member. The discriminator property is stripped everywhere — System.Text.Json writes
     /// it. Extension data lives on the root, and only when every member admits extra
@@ -1796,7 +1826,15 @@ internal sealed class SchemaMapper
                 root,
                 root.Properties.ToDictionary(
                     property => property.JsonName,
-                    property => (property, key),
+                    property =>
+                        (
+                            property,
+                            key,
+                            schema.Properties?.TryGetValue(property.JsonName, out var source)
+                            == true
+                                ? source
+                                : null
+                        ),
                     StringComparer.Ordinal
                 ),
                 root.HasExtensionData ? key : null
@@ -1818,8 +1856,25 @@ internal sealed class SchemaMapper
             .SelectMany(part => part.Required ?? new HashSet<string>())
             .ToHashSet(StringComparer.Ordinal);
         // First declaration wins across parts, as in a flattened allOf record.
+        var sources = parts
+            .SelectMany(part => part.Properties ?? new Dictionary<string, IOpenApiSchema>())
+            .GroupBy(entry => entry.Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Value, StringComparer.Ordinal);
+        // A restatement that differs from the inherited declaration only in documentation is
+        // the inherited member. It isn't extracted, so no inline type is synthesized for it: a
+        // child's own description would otherwise give its inline enum a type of its own.
+        var restated = sources
+            .Where(entry =>
+                parent.Effective.GetValueOrDefault(entry.Key).Source is { } inherited
+                && SchemaClassifier.ComputeUndocumentedFingerprint(entry.Value)
+                    == SchemaClassifier.ComputeUndocumentedFingerprint(inherited)
+            )
+            .Select(entry => entry.Key)
+            .ToHashSet(StringComparer.Ordinal);
         var own = WithoutWireProperty(
-                parts.SelectMany(part => _synth.ExtractProperties(part, name, required)),
+                parts.SelectMany(part =>
+                    _synth.ExtractProperties(part, name, required, skip: restated)
+                ),
                 member.DiscriminatorProperty
             )
             .GroupBy(property => property.JsonName, StringComparer.Ordinal)
@@ -1843,14 +1898,17 @@ internal sealed class SchemaMapper
             );
 
         var declared = new List<RecordProperty>();
-        var effective = new Dictionary<string, (RecordProperty Property, string Owner)>(
-            parent.Effective,
-            StringComparer.Ordinal
-        );
+        var effective = new Dictionary<
+            string,
+            (RecordProperty Property, string Owner, IOpenApiSchema? Source)
+        >(parent.Effective, StringComparer.Ordinal);
         foreach (var property in mentioned)
         {
+            // A member required here but declared above keeps the declaration it inherits.
+            var source = sources.GetValueOrDefault(property.JsonName);
             if (parent.Effective.TryGetValue(property.JsonName, out var inherited))
             {
+                source ??= inherited.Source;
                 if (SameMember(property, inherited.Property))
                 {
                     continue;
@@ -1868,7 +1926,7 @@ internal sealed class SchemaMapper
                 declared.Add(property);
             }
 
-            effective[property.JsonName] = (property, key);
+            effective[property.JsonName] = (property, key, source);
         }
 
         _hierarchyRecords[key] = new BuiltHierarchyRecord(
@@ -2165,38 +2223,40 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
-    /// True when a tag property schema admits <paramref name="tag"/>: a string-typed
-    /// property, or an enum/const that contains the tag. The schema may itself be a
-    /// <c>$ref</c> (e.g. to a shared enum).
+    /// True when a tag property schema admits <paramref name="tag"/>, by the rule the walker
+    /// holds an authored tag schema to (<see cref="TsType.TaggedUnionVariant.TagSchemaProblem"/>),
+    /// so the importer never writes one the next generation refuses: every <c>enum</c>,
+    /// <c>const</c> and <c>type</c> it has admits the tag, and one with none of them admits
+    /// any tag, as JSON Schema says. That fits a tag a mapping names explicitly. The schema
+    /// may itself be a <c>$ref</c> (e.g. to a shared enum).
     /// </summary>
-    private bool AdmitsTag(IOpenApiSchema tagSchema, string tag)
-    {
-        if (tagSchema is OpenApiSchemaReference { Reference.Id: { } tagRefId })
-        {
-            if (!TryResolveComponent(tagRefId, out var resolved))
-            {
-                return false;
-            }
+    private bool AdmitsTag(IOpenApiSchema tagSchema, string tag) =>
+        ResolveTagSchema(tagSchema) is { } resolved
+        && TsType.TaggedUnionVariant.TagSchemaProblem(
+            SchemaClassifier.SerializeAsV31(resolved),
+            tag
+        )
+            is null;
 
-            tagSchema = resolved;
-        }
+    /// <summary>
+    /// <see cref="AdmitsTag"/>, for a tag no mapping names (an allOf member's implicit tag,
+    /// its component name): the schema must also declare an <c>enum</c>, <c>const</c> or
+    /// <c>type</c>. A member whose tag property declares nothing says nothing about which
+    /// payloads name it, so it is abstract.
+    /// </summary>
+    private bool DeclaresTag(IOpenApiSchema tagSchema, string tag) =>
+        ResolveTagSchema(tagSchema) is { } resolved
+        && (
+            resolved.Enum is { Count: > 0 }
+            || resolved.Const is not null
+            || resolved.Type is not null
+        )
+        && AdmitsTag(resolved, tag);
 
-        if (tagSchema.Enum is { Count: > 0 } allowed)
-        {
-            return allowed.Any(v =>
-                v?.GetValueKind() == System.Text.Json.JsonValueKind.String
-                && v.GetValue<string>() == tag
-            );
-        }
-
-        if (tagSchema.Const is { } constValue)
-        {
-            return constValue == tag;
-        }
-
-        return tagSchema.Type is { } type
-            && (type & JsonSchemaType.String) == JsonSchemaType.String;
-    }
+    private IOpenApiSchema? ResolveTagSchema(IOpenApiSchema tagSchema) =>
+        tagSchema is not OpenApiSchemaReference { Reference.Id: { } tagRefId } ? tagSchema
+        : TryResolveComponent(tagRefId, out var resolved) ? resolved
+        : null;
 
     /// <summary>
     /// The variant's own tag property schema as the source wrote it (Jira's
@@ -2271,6 +2331,19 @@ internal sealed class SchemaMapper
             effectiveId = finalKey;
         }
 
+        // A hierarchy member is a record whatever it declares: its descendants derive from
+        // it, and the payloads it stands for are its own members. Typeless, empty or
+        // property-less, it still resolves to its record.
+        if (
+            effectiveId is not null
+            && _hierarchyMembers.ContainsKey(effectiveId)
+            && _ctx.SchemaNameMap.TryGetValue(effectiveId, out var memberName)
+        )
+        {
+            result = AdmitsNull(effective) ? memberName + "?" : memberName;
+            return true;
+        }
+
         if (
             effectiveId is not null
             && _skippedComponentTypes.Contains(effectiveId)
@@ -2285,14 +2358,9 @@ internal sealed class SchemaMapper
         // (no record was generated for it in MapSchemas) — unless marked as empty record
         if (SchemaClassifier.IsObject(effective) && effective.Properties is not { Count: > 0 })
         {
-            // A hierarchy member is a record whatever it declares: its descendants derive
-            // from it.
             if (
                 effectiveId is not null
-                && (
-                    effective.AdditionalProperties is null
-                    || _hierarchyMembers.ContainsKey(effectiveId)
-                )
+                && effective.AdditionalProperties is null
                 && _ctx.SchemaNameMap.TryGetValue(effectiveId, out var emptyRecordName)
             )
             {
@@ -2333,7 +2401,7 @@ internal sealed class SchemaMapper
             // Null flag) makes every bare $ref use-site nullable. Dropping this
             // typed 139 github-corpus properties non-nullable that the API can
             // return as null — clients broke at runtime on an over-claim.
-            if (effective.Type is { } targetType && targetType.HasFlag(JsonSchemaType.Null))
+            if (AdmitsNull(effective))
             {
                 result += "?";
             }
@@ -2344,6 +2412,13 @@ internal sealed class SchemaMapper
         // Primitive alias — fall through to type resolution on the resolved schema
         return false;
     }
+
+    /// <summary>
+    /// True when a component is itself nullable (3.0 <c>nullable: true</c> and 3.1 null in
+    /// the type array both parse to the Null flag), so every bare <c>$ref</c> to it is too.
+    /// </summary>
+    private static bool AdmitsNull(IOpenApiSchema schema) =>
+        schema.Type is { } type && type.HasFlag(JsonSchemaType.Null);
 
     internal static string? DecodeComponentId(string? value) =>
         value is null ? null : JsonPointer.Unescape(Uri.UnescapeDataString(value));

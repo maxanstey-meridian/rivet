@@ -2,8 +2,8 @@ namespace Rivet;
 
 // Builder methods whose arguments (all or some) only Rivet.Tool reads, from the call syntax at
 // generation time. At runtime they record nothing beyond what terminals and adapters validate
-// (the request-body and parameter markers record only that they were called, which decides
-// where TInput binds); they still throw once the definition is published.
+// (the request-body and parameter markers record that they were called, and .RequestContent its
+// media type, which decide where TInput binds); they still throw once the definition is published.
 // Their parameters are deliberately unused, so the local .editorconfig turns IDE0060 off for
 // this file only. Parameter names are part of the Tool contract (named arguments): don't rename.
 public abstract partial class RouteDefinitionBase<TSelf>
@@ -226,10 +226,17 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? schemaRef = null,
         string? schemaType = null,
         string? format = null
-    ) => Mutate(static state => state with { RequestContentDeclared = true });
+    ) => AddRequestContentType(mediaType);
 
-    public TSelf RequestContent(string mediaType) =>
-        Mutate(static state => state with { RequestContentDeclared = true });
+    public TSelf RequestContent(string mediaType) => AddRequestContentType(mediaType);
+
+    private TSelf AddRequestContentType(string mediaType) =>
+        Mutate(state =>
+            state with
+            {
+                RequestContentTypes = state.RequestContentTypes.Add(mediaType),
+            }
+        );
 
     public TSelf RequestBinaryContent(string mediaType) =>
         Mutate(static state => state with { RequestBinaryContentDeclared = true });

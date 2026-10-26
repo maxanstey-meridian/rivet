@@ -127,10 +127,16 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         );
     }
 
+    /// <summary>
+    /// The record properties <paramref name="schema"/> declares, each type resolved (and any
+    /// inline type synthesized) under <paramref name="context"/>. A property whose key is in
+    /// <paramref name="skip"/> is left out before its type is resolved.
+    /// </summary>
     public List<RecordProperty> ExtractProperties(
         IOpenApiSchema schema,
         string context,
-        ISet<string>? inheritedRequired = null
+        ISet<string>? inheritedRequired = null,
+        IReadOnlySet<string>? skip = null
     )
     {
         var properties = new List<RecordProperty>();
@@ -145,6 +151,11 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         {
             foreach (var (propKey, propSchema) in schema.Properties)
             {
+                if (skip?.Contains(propKey) == true)
+                {
+                    continue;
+                }
+
                 var propName = Naming.ToPascalCaseFromSegments(propKey);
                 if (propName == context || Naming.IsReservedRecordMemberName(propName))
                 {

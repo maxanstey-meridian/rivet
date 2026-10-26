@@ -3059,6 +3059,11 @@ public sealed class ContractEndpointTests
         var endpoints = Generate(source);
         var ep = Assert.Single(endpoints);
         Assert.True(ep.IsFormEncoded);
+        // .FormEncoded() declares the body, so even a DELETE's input is the form, not the
+        // query (RequestInputLowering; the runtime binds it the same way).
+        var body = Assert.Single(ep.Params);
+        Assert.Equal(ParamSource.Body, body.Source);
+        Assert.Equal(["email", "password"], ep.FormFieldNames);
     }
 
     [Fact]

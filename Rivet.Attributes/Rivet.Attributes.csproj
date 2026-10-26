@@ -22,4 +22,9 @@
     <ItemGroup>
         <FrameworkReference Include="Microsoft.AspNetCore.App" />
     </ItemGroup>
+
+    <ItemGroup>
+        <!-- RequestInputLowering: the tool lowers TInput by the rule the runtime binds it by. -->
+        <InternalsVisibleTo Include="Rivet.Tool" />
+    </ItemGroup>
 </Project>

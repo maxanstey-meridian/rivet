@@ -684,6 +684,55 @@ public sealed class InlineTypeExtractorTests
         Assert.IsType<TsType.TypeRef>(result.Endpoints[0].ReturnType);
     }
 
+    /// <summary>
+    /// A variant's own object is its {Base}_{Tag} component, carrying the variant's
+    /// annotations, so extraction leaves it inline even when the same shape is extracted
+    /// somewhere else; only what sits inside the variant is extracted.
+    /// </summary>
+    [Fact]
+    public void Tagged_Union_Variant_Object_Stays_Inline_While_Its_Fields_Are_Extracted()
+    {
+        var address = new TsType.InlineObject([
+            ("line1", new TsType.Primitive("string")),
+            ("line2", new TsType.Primitive("string")),
+            ("city", new TsType.Primitive("string")),
+            ("region", new TsType.Primitive("string")),
+            ("postcode", new TsType.Primitive("string")),
+        ]);
+        var cat = new TsType.InlineObject([
+            ("kind", new TsType.StringUnion(["cat"])),
+            ("name", new TsType.Primitive("string")),
+            ("colour", new TsType.Primitive("string")),
+            ("lives", new TsType.Primitive("number")),
+            ("home", address),
+        ]);
+        var union = new TsType.TaggedUnion(
+            "kind",
+            [new TsType.TaggedUnionVariant("cat", cat, Description: "A cat.")]
+        );
+        var endpoints = new[]
+        {
+            MakeEndpoint("Pets", "find", returnType: union),
+            MakeEndpoint("Pets", "list", returnType: union),
+            MakeEndpoint("Pets", "bare", returnType: cat),
+        };
+
+        var result = InlineTypeExtractor.Extract(endpoints, []);
+
+        foreach (var endpoint in result.Endpoints.Take(2))
+        {
+            var variant = Assert.Single(
+                Assert.IsType<TsType.TaggedUnion>(endpoint.ReturnType).Variants
+            );
+            Assert.Equal("A cat.", variant.Description);
+            var own = Assert.IsType<TsType.InlineObject>(variant.Type);
+            Assert.IsType<TsType.TypeRef>(own.Fields.Single(field => field.Name == "home").Type);
+        }
+
+        // The bare occurrence of the same shape is still extracted.
+        Assert.IsType<TsType.TypeRef>(result.Endpoints[2].ReturnType);
+    }
+
     [Fact]
     public void SmallSingleOccurrence_NotExtracted()
     {

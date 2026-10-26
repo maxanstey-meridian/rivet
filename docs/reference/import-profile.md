@@ -123,7 +123,13 @@ honest degradation, not full support.
   are flattened in, and the union base stays its only parent. A tag the source
   wrote as something richer than a one-value enum (Jira's described
   `{ "type": "string" }`) travels on the variant as `DiscriminatorSchemaJson`, so
-  the spec comes back as written. `properties`/`required` beside the `oneOf` are
+  the spec comes back as written. Every declaration of a variant's tag property
+  has to admit its tag by the rule generation holds that schema to: each `enum`,
+  `const` and `type` present must allow it, and one that constrains nothing (a
+  bare `{ "description": "Kind" }`) admits it, as JSON Schema says. A variant that
+  contradicts itself (`{ "type": "integer", "enum": ["cat"] }`) drops the union
+  with a `RIV3005` here, rather than stopping the next generation at `RIV1122`.
+  `properties`/`required` beside the `oneOf` are
   fine when they only restate the discriminator; anything more is a base-plus-union
   shape STJ can't express, and stays a `RIV3005`.
 - **`allOf` inheritance under a discriminator** (OpenAPI 3.0's style, Bitbucket's
@@ -137,15 +143,21 @@ honest degradation, not full support.
   parent's record doesn't already carry, and the discriminator property is
   stripped everywhere. allOf applies every `required` at once, so a property a
   child restates stays required if an ancestor requires it, and one a child only
-  lists in its own `required` is tightened. A child's property that comes out as
-  the member it inherits (documentation aside: the preserved schema keeps that)
-  is simply inherited; one that differs is written with `new`, which is how
+  lists in its own `required` is tightened. A child's property whose schema
+  differs from the inherited one only in documentation (`description`, `title`,
+  `example`, `examples`, at any depth: the preserved schema keeps them) is simply
+  inherited, inline enums and objects included, so no twin type turns up for
+  it; one that differs is written with `new`, which is how
   Bitbucket's `user.links` gets its own type. Extension data sits on the root,
   and only when no member refuses extra properties. An unknown tag fails to
   deserialize: a `type` Rivet never heard of is an error, not a bare base. A
   component whose own tag property can never hold its tag (Bitbucket's
   `pipeline_selector` redefines `type` as a selector kind) is named by no
-  payload, so it stays a plain record outside the hierarchy. What C# can't hold
+  payload, so it stays a plain record outside the hierarchy. A tag the `mapping`
+  names is admitted by a declaration that constrains nothing; an implicit one
+  (the component's name) needs every declaration down its chain to say so with
+  an `enum`, `const` or `type`, and a member whose tag property declares nothing
+  is abstract. What C# can't hold
   leaves the whole hierarchy a plain record with a `RIV3005` naming why: several
   `$ref`s in one `allOf`, a descendant that also composes a `oneOf`/`anyOf`, a
   required member redeclared differently (C# can't hide a `required` member), a
@@ -153,7 +165,8 @@ honest degradation, not full support.
   discriminator of its own or a `mapping` that disagrees with the root's tags, and
   two schemas claiming one tag. A `discriminator` beside a component's own `allOf`
   can't root a hierarchy (the root has no parent), and says so with a `RIV3005`
-  too.
+  too; so does one that dispatches over a `oneOf`/`anyOf` nested in its `allOf`,
+  which Rivet can't reverse.
 - **Undiscriminated `oneOf`** (no discriminator — e.g. `string | integer`):
   imported as an `As*` wrapper record carrying `[RivetUnion]`. The attribute
   doubles as a `JsonConverter`: the wire value is the BARE variant, and the
@@ -354,6 +367,6 @@ Rivet gap with a known shape, waiting on a design decision rather than a shrug:
   discriminators (`RIV3005`: three `oneOf`s with no mapping, two mappings that
   send several tags to one schema, two variants whose `allOf` base enum leaves
   out their own tag, one mapping entry that resolves nowhere, one variant two
-  unions share, and one beside an `allOf` that can't root a hierarchy), 7 scalar
+  unions share, and one that dispatches over a union nested in its `allOf`), 7 scalar
   compositions (`RIV3015`), 5 identity-only fallbacks (`RIV3010`), and 25
   unreviewed extension families.

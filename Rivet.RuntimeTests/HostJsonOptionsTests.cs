@@ -335,9 +335,10 @@ public sealed class HostJsonOptionsTests
     }
 
     // BoundFrom is null for a JSON body, which the setting fixes on .NET 9+. Everything else
-    // binds TInput without the serializer, so nothing fixes it: a form or multipart body, and
-    // the route and query wherever the tool lowers TInput there (a method other than POST, PUT
-    // or PATCH, a declared .Parameter<T>(), a binary body), unless .RequestBody() declares one.
+    // binds TInput without the serializer, so nothing fixes it: a form or multipart body (a
+    // form marker, form or multipart content, or an input carrying files), and the route and
+    // query wherever the tool lowers TInput there (a method other than POST, PUT or PATCH, a
+    // declared .Parameter<T>(), a binary body), unless .RequestBody() declares one.
     private static readonly Dictionary<
         string,
         (Func<RivetResult> Result, string Reaches, string? BoundFrom)
@@ -435,6 +436,44 @@ public sealed class HostJsonOptionsTests
                     .Bind(new Drawing("d", [], new()))
                     .Success(),
             "at 'shapes[]'",
+            "a form, not a JSON body"
+        ),
+        ["get form"] = (
+            () =>
+                Define
+                    .Get<Drawing, Payload>("/drawings")
+                    .FormEncoded()
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(new Payload("d")),
+            "at 'shapes[]'",
+            "a form, not a JSON body"
+        ),
+        ["multipart content"] = (
+            () =>
+                Define
+                    .Post<Drawing, Payload>("/drawings")
+                    .RequestContent<Drawing>("multipart/form-data")
+                    .Bind(new Drawing("d", [], new()))
+                    .Success(new Payload("d")),
+            "at 'shapes[]'",
+            "a form, not a JSON body"
+        ),
+        ["form file member"] = (
+            () =>
+                Define
+                    .Post<Upload, Payload>("/uploads")
+                    .Bind(new Upload(null!, new Circle(1)))
+                    .Success(new Payload("u")),
+            "reaches the polymorphic type 'Shape' at 'shape'",
+            "a form, not a JSON body"
+        ),
+        ["inherited form files"] = (
+            () =>
+                Define
+                    .Post<Sketch, Payload>("/sketches")
+                    .Bind(new Sketch([], new Circle(1)))
+                    .Success(new Payload("s")),
+            "reaches the polymorphic type 'Shape' at 'shape'",
             "a form, not a JSON body"
         ),
         ["binary"] = (
@@ -596,6 +635,12 @@ public sealed class HostJsonOptionsTests
     public readonly record struct Frame(Shape Shape);
 
     public sealed record Framed(string Name, Frame? Frame);
+
+    public sealed record Upload(IFormFile File, Shape Shape);
+
+    public record Attachment(List<IFormFile> Files);
+
+    public sealed record Sketch(List<IFormFile> Files, Shape Shape) : Attachment(Files);
 
     public sealed record Folder(
         string Name,

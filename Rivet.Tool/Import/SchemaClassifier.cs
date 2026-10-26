@@ -746,18 +746,41 @@ internal static class SchemaClassifier
     /// <c>required</c> order do not split one shape into two types. Vendor extensions are
     /// left out: they do not change the generated type.
     /// </summary>
-    internal static string ComputeSchemaFingerprint(IOpenApiSchema schema)
+    internal static string ComputeSchemaFingerprint(IOpenApiSchema schema) =>
+        Fingerprint(schema, keyword => !keyword.StartsWith("x-", StringComparison.Ordinal));
+
+    /// <summary>
+    /// <see cref="ComputeSchemaFingerprint"/> with the documentation keywords
+    /// (<c>description</c>, <c>title</c>, <c>example</c>, <c>examples</c>) left out at every
+    /// depth, outside data keywords and property names, and vendor extensions kept. Two
+    /// schemas with the same one validate the same instances and map to the same C#.
+    /// </summary>
+    internal static string ComputeUndocumentedFingerprint(IOpenApiSchema schema) =>
+        Fingerprint(schema, keyword => !_documentationKeywords.Contains(keyword));
+
+    private static readonly HashSet<string> _documentationKeywords =
+    [
+        "description",
+        "title",
+        "example",
+        "examples",
+    ];
+
+    /// <summary>
+    /// A schema's 3.1 serialisation canonicalised (key order, <c>required</c> order), keeping
+    /// only the keywords <paramref name="keep"/> admits.
+    /// </summary>
+    private static string Fingerprint(IOpenApiSchema schema, Func<string, bool> keep)
     {
         return Canonical(JsonNode.Parse(SerializeAsV31(schema)), null)?.ToJsonString() ?? "null";
 
-        static JsonNode? Canonical(JsonNode? node, string? key) =>
+        JsonNode? Canonical(JsonNode? node, string? key) =>
             node switch
             {
                 _ when key is not null && _schemaDataKeywords.Contains(key) => node?.DeepClone(),
                 JsonObject obj => new JsonObject(
                     obj.Where(entry =>
-                            key is not null && _schemaNameMaps.Contains(key)
-                            || !entry.Key.StartsWith("x-", StringComparison.Ordinal)
+                            key is not null && _schemaNameMaps.Contains(key) || keep(entry.Key)
                         )
                         .OrderBy(entry => entry.Key, StringComparer.Ordinal)
                         .Select(entry =>

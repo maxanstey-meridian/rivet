@@ -99,9 +99,11 @@ parameters follow the model binder instead: a nullable parameter is optional.
   `[RivetGeneratedType]` component id is emitted under that id instead of
   `{Base}_{Tag}`, and one whose `DiscriminatorSchemaJson` records the source's tag
   schema gets that schema back instead of the synthesized `enum`. That JSON has to be a
-  schema object the tag satisfies: an `enum` or `const` that leaves the tag out, or a
-  `type` without `string`, stops generation (`RIV1122`), since the spec would then refuse
-  the very tag the host writes. A base whose source schema was preserved verbatim
+  schema object the tag satisfies: invalid JSON, an `enum` or `const` that leaves the tag
+  out, or a `type` without `string`, stops generation (`RIV1122`), since the spec would
+  then refuse the very tag the host writes. So does a `DiscriminatorSchemaJson` on a type
+  no base registers with `[JsonDerivedType]`: there's no tag property for it to describe,
+  so re-import or delete it. A base whose source schema was preserved verbatim
   (Bitbucket's `allOf` hierarchy hanging off one `object` with a bare `discriminator`, or
   Jira's `oneOf`, say) is emitted as exactly that schema, with nothing synthesized beside
   it: no `oneOf` of Rivet's own and no `{Base}_{Tag}` inventions. Variants it names that

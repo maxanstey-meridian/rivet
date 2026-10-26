@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Rivet.Tool.Import;
 
 namespace Rivet.Tests;
 
@@ -139,6 +140,10 @@ public sealed class RoundTripProfileInventoryTests
                     "HierarchyRoot": { "type": "object", "discriminator": { "propertyName": "type" }, "properties": { "type": { "type": "string" } } },
                     "HierarchyChild": { "allOf": [{ "$ref": "#/components/schemas/HierarchyRoot" }, { "type": "object", "properties": { "size": { "type": "integer" } } }] },
                     "LoneDiscriminator": { "type": "object", "discriminator": { "propertyName": "type" }, "properties": { "type": { "type": "string" } } },
+                    "OwnAllOfRoot": { "allOf": [{ "$ref": "#/components/schemas/Closed" }], "discriminator": { "propertyName": "type" }, "properties": { "type": { "type": "string" } } },
+                    "OwnAllOfChild": { "allOf": [{ "$ref": "#/components/schemas/OwnAllOfRoot" }, { "type": "object", "properties": { "size": { "type": "integer" } } }] },
+                    "SeveralRefRoot": { "type": "object", "discriminator": { "propertyName": "type" }, "properties": { "type": { "type": "string" } } },
+                    "SeveralRefChild": { "allOf": [{ "$ref": "#/components/schemas/SeveralRefRoot" }, { "$ref": "#/components/schemas/Closed" }] },
                     "Envelope": {
                       "type": "object",
                       "properties": {
@@ -282,16 +287,22 @@ public sealed class RoundTripProfileInventoryTests
             "#/components/schemas/HierarchyRoot",
             "record"
         );
-        // Nothing extends it, so the importer drops it and no carrier proof is claimed.
-        Assert.DoesNotContain(
-            groups.EnumerateArray(),
-            group =>
-                group.GetProperty("shape").GetString()!.EndsWith("-discriminator")
-                && group
-                    .GetProperty("ownerPointers")
-                    .EnumerateArray()
-                    .Any(pointer => pointer.GetString() == "#/components/schemas/LoneDiscriminator")
-        );
+        // The importer drops each of these, so no carrier proof is claimed: nothing extends
+        // the first; the second sits beside an allOf of its own, so it can't root a
+        // hierarchy; the third is extended only by an allOf that $refs another schema too,
+        // which C# single inheritance can't hold.
+        foreach (var dropped in new[] { "LoneDiscriminator", "OwnAllOfRoot", "SeveralRefRoot" })
+        {
+            Assert.DoesNotContain(
+                groups.EnumerateArray(),
+                group =>
+                    group.GetProperty("shape").GetString()!.EndsWith("-discriminator")
+                    && group
+                        .GetProperty("ownerPointers")
+                        .EnumerateArray()
+                        .Any(pointer => pointer.GetString() == $"#/components/schemas/{dropped}")
+            );
+        }
         AssertOccurrence(
             groups,
             "empty-schema",
@@ -524,6 +535,67 @@ public sealed class RoundTripProfileInventoryTests
 
         Assert.Equal(2, result.ExitCode);
         Assert.Contains("reviewed source-defect policy changed", result.StdErr);
+    }
+
+    [Fact]
+    public void Every_Cited_AllOf_Hierarchy_Root_Imports_As_A_Hierarchy()
+    {
+        // The inventory cites an allOf target as a candidate hierarchy root without running
+        // the importer, which can still refuse the hierarchy (a mapping or tag conflict, a
+        // required member redeclared). This holds the Python copy to the importer's answer.
+        const string proof =
+            $"{nameof(GeneratedCarrierFidelityTests)}.{nameof(GeneratedCarrierFidelityTests.Bitbucket_allOf_hierarchy_discriminator_dispatches_every_descendant_at_runtime)}";
+        var cited = ReadProfile()["facts"]!["carrierSensitiveGroups"]!
+            .AsArray()
+            .Where(group => group!["behaviorTest"]!.GetValue<string>() == proof)
+            .GroupBy(group => group!["corpusId"]!.GetValue<string>())
+            .ToList();
+        Assert.NotEmpty(cited);
+        var manifest = JsonNode.Parse(
+            File.ReadAllText(CliRunner.RepoPath("corpus", "openapi-manifest.json"))
+        )!;
+
+        foreach (var corpus in cited)
+        {
+            var file = manifest["corpora"]!
+                .AsArray()
+                .Single(entry => entry!["id"]!.GetValue<string>() == corpus.Key)![
+                "file"
+            ]!.GetValue<string>();
+            var result = OpenApiImporter.Import(
+                File.ReadAllText(CliRunner.RepoPath("openapi", file)),
+                new ImportOptions("Test")
+            );
+
+            foreach (
+                var pointer in corpus.SelectMany(group =>
+                    group!["ownerPointers"]!.AsArray().Select(item => item!.GetValue<string>())
+                )
+            )
+            {
+                const string prefix = "#/components/schemas/";
+                Assert.StartsWith(prefix, pointer);
+                var componentId = pointer[prefix.Length..];
+                var record = Assert.Single(
+                    result.Files,
+                    generated =>
+                        generated.Content.Contains(
+                            $"[RivetGeneratedType(\"{componentId}\",",
+                            StringComparison.Ordinal
+                        )
+                );
+                var typeName = Path.GetFileNameWithoutExtension(record.FileName);
+                Assert.DoesNotContain(
+                    result.Warnings,
+                    warning =>
+                        warning.StartsWith(
+                            $"RIV3005: Discriminator dropped on '{typeName}'",
+                            StringComparison.Ordinal
+                        )
+                );
+                Assert.Contains("[JsonPolymorphic(", record.Content);
+            }
+        }
     }
 
     [Fact]

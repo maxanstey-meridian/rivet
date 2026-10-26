@@ -376,6 +376,65 @@ public sealed class PolymorphismTests
         Assert.Contains("no base registers the type with [JsonDerivedType]", message);
     }
 
+    // The registration check finds the registering base wherever it is: the type itself (a
+    // self-registering base), its direct base, or a base that registers a closed generic
+    // whose open definition is what the walker reaches. Each variant is also referenced on
+    // its own so the walker walks it; a null component id keeps the standalone component
+    // and the variant apart.
+    [Fact]
+    public void Authored_Tag_Schema_On_A_Registered_Variant_Walked_Directly_Is_Emitted()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [JsonPolymorphic]
+            [JsonDerivedType(typeof(Shape), "shape")]
+            [JsonDerivedType(typeof(Circle), "circle")]
+            [JsonDerivedType(typeof(Tagged<int>), "tagged")]
+            [RivetGeneratedType(null, RivetGeneratedTypeProvenance.Component, DiscriminatorSchemaJson = "{\"type\":\"string\",\"description\":\"shape tag\"}")]
+            public record Shape(string Id);
+
+            [RivetGeneratedType(null, RivetGeneratedTypeProvenance.Component, DiscriminatorSchemaJson = "{\"type\":\"string\",\"description\":\"circle tag\"}")]
+            public sealed record Circle(string Id, double Radius) : Shape(Id);
+
+            [RivetGeneratedType(null, RivetGeneratedTypeProvenance.Component, DiscriminatorSchemaJson = "{\"type\":\"string\",\"description\":\"tagged tag\"}")]
+            public sealed record Tagged<T>(string Id, T Value) : Shape(Id);
+
+            [RivetContract]
+            public static class ShapesContract
+            {
+                public static readonly RouteDefinition<Shape> GetShape =
+                    Define.Get<Shape>("/api/shapes/{id}");
+
+                public static readonly RouteDefinition<Circle> GetCircle =
+                    Define.Get<Circle>("/api/circles/{id}");
+
+                public static readonly RouteDefinition<Tagged<int>> GetTagged =
+                    Define.Get<Tagged<int>>("/api/tagged/{id}");
+            }
+            """;
+
+        var schemas = EmitDirectlyAndThroughContractJson(source)["components"]!["schemas"]!;
+
+        foreach (var tag in new[] { "shape", "circle", "tagged" })
+        {
+            var variant = (string)schemas["Shape"]!["discriminator"]!["mapping"]![tag]!;
+            Assert.True(
+                JsonNode.DeepEquals(
+                    JsonNode.Parse($$"""{"type":"string","description":"{{tag}} tag"}"""),
+                    schemas[variant.Split('/')[^1]]!["properties"]!["$type"]
+                ),
+                variant
+            );
+        }
+
+        Assert.NotNull(schemas["Circle"]);
+    }
+
     [Fact]
     public void Derived_Type_Referenced_Directly_Stays_Untagged()
     {
@@ -1325,6 +1384,19 @@ public sealed class PolymorphismTests
         UserName,
         "\"name\": { \"type\": \"string\", \"description\": \"What the user goes by.\" },"
     )]
+    // Only a description differs on an inline enum: the member inherits it, and no type of its
+    // own is synthesized for the restatement.
+    [InlineData(
+        "User.cs",
+        "",
+        " Status {",
+        AccountTitle,
+        "\"title\": \"Account\", \"required\": [\"status\"],",
+        "\"name\": { \"type\": \"string\" }\n",
+        "\"name\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [\"active\", \"closed\"] }\n",
+        "\"nickname\": { \"type\": \"string\" }",
+        "\"nickname\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [\"active\", \"closed\"], \"description\": \"Whether the user can sign in.\" }"
+    )]
     // Required by the member alone, without declaring it again.
     [InlineData(
         "Team.cs",
@@ -1372,7 +1444,31 @@ public sealed class PolymorphismTests
             Assert.DoesNotContain(absent, content);
         }
 
+        AssertEverySyntheticTypeIsUsed(result);
         AssertCompiles(result);
+    }
+
+    // A type synthesized for an inline schema that nothing refers to is an orphan.
+    private static void AssertEverySyntheticTypeIsUsed(Rivet.Tool.Import.ImportResult result)
+    {
+        foreach (
+            var synthetic in result.Files.Where(file =>
+                file.Content.Contains("RivetGeneratedTypeProvenance.Synthetic")
+            )
+        )
+        {
+            var name = Path.GetFileNameWithoutExtension(synthetic.FileName);
+            Assert.True(
+                result.Files.Any(file =>
+                    file != synthetic
+                    && System.Text.RegularExpressions.Regex.IsMatch(
+                        file.Content,
+                        $@"\b{System.Text.RegularExpressions.Regex.Escape(name)}\b"
+                    )
+                ),
+                $"{name} is synthesized but nothing refers to it"
+            );
+        }
     }
 
     private const string TeamMapping = "\"mapping\": { \"team\": \"#/components/schemas/Team\" }";
@@ -1445,6 +1541,11 @@ public sealed class PolymorphismTests
         "'Account' declares a discriminator of its own, 'kind'",
         AccountTitle,
         "\"title\": \"Account\", \"discriminator\": { \"propertyName\": \"kind\" },"
+    )]
+    [InlineData(
+        "'Account' maps tag 'links' to 'AccountLinks', which isn't in the hierarchy",
+        AccountTitle,
+        "\"title\": \"Account\", \"discriminator\": { \"propertyName\": \"type\", \"mapping\": { \"links\": \"#/components/schemas/AccountLinks\" } },"
     )]
     [InlineData(
         "'Account' maps tag 'member' to 'User', which the hierarchy tags 'User'",
@@ -1527,6 +1628,189 @@ public sealed class PolymorphismTests
                 w.StartsWith("RIV3005: Discriminator dropped on 'Pet'")
                 && w.Contains("sits beside an allOf of its own, so it can't root a hierarchy")
         );
+    }
+
+    // A $ref to a component that discriminates over nothing Rivet can reverse still says why.
+    [Theory]
+    // Cloudflare's dns-record-response: the discriminator dispatches over a union its allOf
+    // nests, not over descendants.
+    [InlineData(
+        "Record",
+        "property 'type' dispatches over a oneOf/anyOf nested in its allOf, which Rivet can't reverse — imported as a flattened record.",
+        """
+            "Record": {
+                "allOf": [
+                    {
+                        "type": "object",
+                        "anyOf": [
+                            { "$ref": "#/components/schemas/ARecord" },
+                            { "$ref": "#/components/schemas/MxRecord" }
+                        ]
+                    },
+                    { "properties": { "id": { "type": "string" } } }
+                ],
+                "discriminator": { "propertyName": "type" }
+            },
+            "ARecord": { "type": "object", "properties": { "type": { "type": "string" } } },
+            "MxRecord": { "type": "object", "properties": { "type": { "type": "string" } } }
+            """
+    )]
+    // A property-less object whose extra properties have a schema is a dictionary, which has
+    // nowhere to put a tag.
+    [InlineData(
+        "Labels",
+        "property 'kind' has no oneOf union and no allOf descendants — imported as a dictionary.",
+        """
+            "Labels": {
+                "type": "object",
+                "additionalProperties": { "type": "string" },
+                "discriminator": { "propertyName": "kind" }
+            }
+            """
+    )]
+    public void Discriminator_With_Nothing_Rivet_Can_Dispatch_Over_Falls_Back_Loudly(
+        string name,
+        string reason,
+        string schemas
+    )
+    {
+        var result = CompilationHelper.Import(CompilationHelper.BuildSpec(schemas));
+
+        Assert.Contains($"RIV3005: Discriminator dropped on '{name}': {reason}", result.Warnings);
+    }
+
+    // The importer admits a variant's tag by the walker's own rule, so what it writes as the
+    // authored tag schema never stops the next generation at RIV1122.
+    [Theory]
+    // A tag property that constrains nothing admits whatever tag the mapping names.
+    [InlineData("{ \"description\": \"The pet kind.\" }", null)]
+    // Self-contradictory: every keyword present must admit the tag, not just the first read.
+    [InlineData(
+        "{ \"type\": \"integer\", \"enum\": [\"cat\"] }",
+        "variant 'Cat' has no conforming 'kind' tag property"
+    )]
+    [InlineData(
+        "{ \"enum\": [\"cat\"], \"const\": \"dog\" }",
+        "variant 'Cat' has no conforming 'kind' tag property"
+    )]
+    public void OneOf_Variant_Tag_Schema_Is_Admitted_By_The_Walkers_Rule(
+        string tagSchema,
+        string? rejection
+    )
+    {
+        var schemas = $$"""
+            "Pet": {
+                "oneOf": [{ "$ref": "#/components/schemas/Cat" }],
+                "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": { "cat": "#/components/schemas/Cat" }
+                }
+            },
+            "Cat": {
+                "type": "object",
+                "properties": { "kind": {{tagSchema}}, "lives": { "type": "integer" } },
+                "required": ["kind"]
+            }
+            """;
+
+        var result = CompilationHelper.Import(CompilationHelper.BuildSpec(schemas));
+
+        if (rejection is not null)
+        {
+            Assert.Contains(
+                result.Warnings,
+                w =>
+                    w.StartsWith("RIV3005: Discriminator dropped on 'Pet'") && w.Contains(rejection)
+            );
+            return;
+        }
+
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("RIV3005"));
+        using var doc = ImportAndEmit(schemas);
+        var kind = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Cat")
+            .GetProperty("properties")
+            .GetProperty("kind");
+        Assert.True(
+            JsonNode.DeepEquals(JsonNode.Parse(tagSchema), JsonNode.Parse(kind.GetRawText())),
+            $"kind came back as {kind.GetRawText()}"
+        );
+    }
+
+    [Fact]
+    public void AllOf_Hierarchy_Tag_Declaration_That_Constrains_Nothing_Admits_Only_A_Mapped_Tag()
+    {
+        // Account's `type` says nothing about its value. The mapping names Team's tag
+        // explicitly, and JSON Schema admits it. An implicit tag (a component name) needs a
+        // declaration that says so, so neither Account nor User is one a payload names.
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(
+                EditedHierarchySchemas([
+                    "\"type\": { \"type\": \"string\", \"enum\": [\"User\", \"team\"] },",
+                    "\"type\": { \"description\": \"The account kind.\" },",
+                ])
+            )
+        );
+
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("RIV3005"));
+        var resource = CompilationHelper.FindFile(result, "Resource.cs");
+        Assert.Contains("[JsonDerivedType(typeof(Team), \"team\")]", resource);
+        Assert.DoesNotContain("typeof(User)", resource);
+        Assert.DoesNotContain("typeof(Account)", resource);
+        Assert.Contains(
+            "public abstract record Account : Resource",
+            CompilationHelper.FindFile(result, "Account.cs")
+        );
+        AssertCompiles(result);
+    }
+
+    private const string PropertylessRoot =
+        "\"properties\": { \"type\": { \"type\": \"string\" } },";
+    private const string OwnerProperty =
+        "\"properties\": { \"owner\": { \"$ref\": \"#/components/schemas/Resource\" } },";
+
+    // A hierarchy member is a record whatever it declares, so a $ref names its record.
+    [Theory]
+    // A property-less root that admits null: the tag is declared only below it.
+    [InlineData("Envelope.cs", "required Resource? Owner {", PropertylessRoot, "")]
+    // A leaf that declares nothing under a root that declares nothing: no type, no
+    // properties, still the record its own tag names.
+    [InlineData(
+        "Envelope.cs",
+        "public Leaf Leaf {",
+        PropertylessRoot,
+        "",
+        OwnerProperty,
+        "\"properties\": { \"owner\": { \"$ref\": \"#/components/schemas/Resource\" }, \"leaf\": { \"$ref\": \"#/components/schemas/Leaf\" } },",
+        "\"AccountLinks\": {",
+        "\"Leaf\": { \"allOf\": [{ \"$ref\": \"#/components/schemas/Resource\" }] }, \"AccountLinks\": {"
+    )]
+    // A member of one hierarchy refers to the property-less root of a hierarchy built after
+    // it, whose extra properties have a schema: still that root's record, not a dictionary.
+    [InlineData(
+        "Team.cs",
+        "public Labels Labels {",
+        TeamPart,
+        "{ \"type\": \"object\", \"properties\": { \"size\": { \"type\": \"integer\" }, \"labels\": { \"$ref\": \"#/components/schemas/Labels\" } } }",
+        "\"AccountLinks\": {",
+        "\"Labels\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"string\" }, \"discriminator\": { \"propertyName\": \"kind\" } }, \"PriorityLabels\": { \"allOf\": [{ \"$ref\": \"#/components/schemas/Labels\" }, { \"type\": \"object\", \"properties\": { \"kind\": { \"type\": \"string\" } } }] }, \"AccountLinks\": {"
+    )]
+    public void AllOf_Hierarchy_Member_Is_Its_Record_Wherever_A_Ref_Names_It(
+        string file,
+        string expected,
+        params string[] edits
+    )
+    {
+        var result = CompilationHelper.Import(
+            CompilationHelper.BuildSpec(EditedHierarchySchemas(edits))
+        );
+
+        Assert.DoesNotContain(result.Warnings, w => w.Contains("RIV3005"));
+        var content = CompilationHelper.FindFile(result, file);
+        Assert.True(content.Contains(expected), content);
+        AssertCompiles(result);
     }
 
     [Fact]

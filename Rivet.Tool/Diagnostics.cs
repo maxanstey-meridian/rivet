@@ -227,7 +227,7 @@ public static class Diagnostics
         [AmbiguousJsonConstructor] =
             "A walked type has more than one [JsonConstructor] constructor — System.Text.Json refuses it at runtime, so there is no constructor choice for the spec to follow; generation fails.",
         [MalformedGeneratedMetadata] =
-            "Generated metadata Rivet reads back is malformed, usually stale or hand-edited generated code: a [RivetGeneratedType] DiscriminatorSchemaJson that isn't a JSON object, or whose enum, const or type can't carry the tag the variant is registered with — generation fails; re-import the OpenAPI document.",
+            "Generated metadata Rivet reads back is malformed, usually stale or hand-edited generated code: a [RivetGeneratedType] DiscriminatorSchemaJson that isn't valid JSON or a JSON object, whose enum, const or type can't carry the tag the variant is registered with, or that sits on a type no base registers with [JsonDerivedType] — generation fails; re-import the OpenAPI document, or remove DiscriminatorSchemaJson.",
         [TaggedUnionComponentCollision] =
             "A tagged-union variant's producer-pinned component id is already used by a different schema — generation fails, because one id cannot $ref two shapes.",
         [UndefinedSecurityScheme] =

@@ -23,9 +23,11 @@ Verified limits of the current tool, so you don't discover them in production.
   .NET 9+); without it the adapters refuse to serve the contract. On .NET 8 they always
   do, because System.Text.Json there only reads the discriminator as the first property.
   They refuse it on every runtime when the input isn't a JSON body too (a form or
-  multipart contract, or one whose input comes from the route and query, such as a GET,
-  a DELETE, a `Define.File<TInput>` or an `.AcceptsBinary()` endpoint), because model
-  binding reads that input with no discriminator at all
+  multipart contract, declared with `.FormEncoded()`, `.AcceptsFile()` or form
+  `.RequestContent`, or implied by an `IFormFile` in the input; or one whose input
+  comes from the route and query, such as a GET, a DELETE, a `Define.File<TInput>` or
+  an `.AcceptsBinary()` endpoint), because model binding reads that input with no
+  discriminator at all
   ([why](/guides/runtime-validation#runtime-guarantees-contract-responses)).
 - A response header declared `required: true` has to be on the response when the
   adapter runs, which means set before the handler returns. One a middleware only

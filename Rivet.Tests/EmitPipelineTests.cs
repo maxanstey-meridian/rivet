@@ -188,6 +188,73 @@ public sealed class EmitPipelineTests : IDisposable
         Assert.True(extracted.TryGetProperty("y", out _));
     }
 
+    /// <summary>
+    /// A variant's own inline object is its {Base}_{Tag} component, never an extracted Dto:
+    /// extraction used to swap a five-field (or repeated) variant for a $ref, which cut it
+    /// off from its authored tag schema and crashed the emitter. What sits inside the variant
+    /// is still extracted.
+    /// </summary>
+    [Fact]
+    public async Task Endpoint_Inline_Tagged_Union_Variant_Keeps_Its_Authored_Tag_Schema()
+    {
+        const string str = """{ "kind": "primitive", "type": "string" }""";
+        var address = $$"""
+            { "kind": "inlineObject", "properties": [
+              { "name": "line1", "type": {{str}} }, { "name": "line2", "type": {{str}} },
+              { "name": "city", "type": {{str}} }, { "name": "region", "type": {{str}} },
+              { "name": "postcode", "type": {{str}} }] }
+            """;
+        var union = $$"""
+            { "kind": "taggedUnion", "discriminator": "kind", "variants": [{
+              "tag": "cat",
+              "discriminatorSchema": "{\"type\":\"string\",\"enum\":[\"cat\"],\"description\":\"authored\"}",
+              "type": { "kind": "inlineObject", "properties": [
+                { "name": "kind", "type": { "kind": "stringUnion", "values": ["cat"] } },
+                { "name": "name", "type": {{str}} }, { "name": "colour", "type": {{str}} },
+                { "name": "lives", "type": {{str}} }, { "name": "home", "type": {{address}} }] }
+            }] }
+            """;
+        var json = $$"""
+            {
+              "types": [], "enums": [],
+              "endpoints": [
+                { "name": "get", "httpMethod": "GET", "routeTemplate": "/api/pets/{id}", "params": [],
+                  "controllerName": "pets", "returnType": {{union}},
+                  "responses": [{ "statusCode": 200, "dataType": {{union}} }] },
+                { "name": "list", "httpMethod": "GET", "routeTemplate": "/api/pets", "params": [],
+                  "controllerName": "pets", "returnType": {{union}},
+                  "responses": [{ "statusCode": 200, "dataType": {{union}} }] }
+              ]
+            }
+            """;
+        var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
+        var input = new EmitPipeline.EmitInput(
+            enums,
+            endpoints,
+            types.ToDictionary(type => type.Name),
+            brands
+        );
+
+        Assert.Equal(0, await EmitPipeline.RunAsync(input, new RivetOptions(_output.FullName, [])));
+
+        using var doc = JsonDocument.Parse(
+            await File.ReadAllTextAsync(Path.Combine(_output.FullName, "openapi.json"))
+        );
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        var variant = schemas
+            .EnumerateObject()
+            .Single(schema =>
+                schema.Value.TryGetProperty("properties", out var properties)
+                && properties.TryGetProperty("lives", out _)
+            );
+        Assert.Equal("KindUnion_Cat", variant.Name);
+        var tag = variant.Value.GetProperty("properties").GetProperty("kind");
+        Assert.Equal("authored", tag.GetProperty("description").GetString());
+        Assert.Equal("cat", Assert.Single(tag.GetProperty("enum").EnumerateArray()).GetString());
+        var home = variant.Value.GetProperty("properties").GetProperty("home");
+        Assert.StartsWith("#/components/schemas/", home.GetProperty("$ref").GetString());
+    }
+
     // ========== --verify: the drift gate ==========
 
     [Fact]

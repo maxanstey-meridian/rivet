@@ -323,9 +323,9 @@ public sealed class ImportMetricTests
         // an object): 10 bases at last audit — must not shrink. Ratchet (count may only go
         // DOWN): 10 drops at last audit — 3 missing mappings, 2 mappings that name one schema
         // twice, 2 allOf variants whose base enum excludes their tag, 1 unresolvable mapping
-        // entry, 1 variant shared by two unions, 1 discriminator beside a component's own allOf
-        // (dns-records_dns-record-response), which can't root a hierarchy and used to drop
-        // silently.
+        // entry, 1 variant shared by two unions, 1 discriminator that dispatches over a union
+        // nested in its allOf (dns-records_dns-record-response's allOf[0].anyOf), which Rivet
+        // can't reverse and which used to drop silently.
         var polymorphicBases = CountPattern(r, "Types/", "[JsonPolymorphic(");
         Assert.True(
             polymorphicBases >= 10,

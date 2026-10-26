@@ -1,6 +1,8 @@
 namespace Rivet;
 
 using System.Collections.Immutable;
+using System.Reflection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Net.Http.Headers;
 
 /// <summary>An OpenAPI response key: an exact status, an nXX range (<see cref="RangeClass"/>), or default.</summary>
@@ -48,10 +50,10 @@ internal sealed record RouteState(int SuccessStatus)
     public bool FormEncoded { get; init; }
     public string? BinaryRequestContentType { get; init; }
 
-    // What the spec-only request markers declare, for deciding where TInput binds the way the
-    // tool decides where it lowers (ContractWalker.BuildParams).
+    // What the spec-only request markers declare, for deciding where TInput binds
+    // (RequestInputLowering). RequestContentTypes holds the non-binary .RequestContent types.
     public bool RequestBodyDeclared { get; init; }
-    public bool RequestContentDeclared { get; init; }
+    public ImmutableList<string> RequestContentTypes { get; init; } = [];
     public bool RequestBinaryContentDeclared { get; init; }
     public bool ParametersDeclared { get; init; }
     public string? ResponseContentType { get; init; }
@@ -192,32 +194,53 @@ public abstract partial class RouteDefinitionBase<TSelf>
             Method,
             Route,
             inputType,
-            Binding(state),
+            Binding(state, inputType),
             success,
             new ResponseSet(exact, ranges, fallback)
         );
     }
 
-    // The tool's rule for where TInput lowers (ContractWalker.BuildParams): a JSON body when one
-    // is declared, or the method carries one by default (POST/PUT/PATCH with no declared
-    // .Parameter<T>()), unless that body is raw binary. Every other input is route and query.
-    private InputBinding Binding(RouteState state)
-    {
-        if (state.FormEncoded || state.AcceptsFile)
-        {
-            return InputBinding.Form;
-        }
+    private InputBinding Binding(RouteState state, Type? inputType) =>
+        RequestInputLowering.Of(
+            Method,
+            bodyDeclared: state.RequestBodyDeclared,
+            parametersDeclared: state.ParametersDeclared,
+            acceptsBinary: state.BinaryRequestContentType is not null,
+            contentTypes: state.RequestContentTypes,
+            binaryContentDeclared: state.RequestBinaryContentDeclared,
+            formDeclared: state.FormEncoded || state.AcceptsFile,
+            formFileInput: inputType is not null && CarriesFormFiles(inputType)
+        );
 
-        var hasBody =
-            state.RequestBodyDeclared
-            || state.RequestContentDeclared
-            || state.RequestBinaryContentDeclared
-            || (Method is "POST" or "PUT" or "PATCH" && !state.ParametersDeclared);
-        var onlyBinaryContent = state.RequestBinaryContentDeclared && !state.RequestContentDeclared;
-        return hasBody && state.BinaryRequestContentType is null && !onlyBinaryContent
-            ? InputBinding.Json
-            : InputBinding.RouteAndQuery;
-    }
+    // The inputs the tool lowers to multipart (ContractWalker.IsFormFileType and
+    // HasFormFileProperty): an IFormFile, or one with a property of files, inherited ones too.
+    private static bool CarriesFormFiles(Type inputType) =>
+        inputType == typeof(IFormFile)
+        || inputType
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Any(property =>
+                property.GetIndexParameters().Length == 0 && IsFormFiles(property.PropertyType)
+            );
+
+    // An IFormFile, or an array, List<T> or sequence interface of them.
+    private static bool IsFormFiles(Type type) =>
+        type == typeof(IFormFile)
+        || (type.IsArray && type.GetElementType() == typeof(IFormFile))
+        || (
+            type is { IsGenericType: true, GenericTypeArguments: [var element] }
+            && element == typeof(IFormFile)
+            && _formFileCollections.Contains(type.GetGenericTypeDefinition())
+        );
+
+    private static readonly Type[] _formFileCollections =
+    [
+        typeof(List<>),
+        typeof(IList<>),
+        typeof(ICollection<>),
+        typeof(IEnumerable<>),
+        typeof(IReadOnlyList<>),
+        typeof(IReadOnlyCollection<>),
+    ];
 
     private ResponseContract BuildResponse(
         RouteState state,

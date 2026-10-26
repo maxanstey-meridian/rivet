@@ -484,7 +484,8 @@ public static class ContractWalker
             binaryRequestContentType,
             declaredParameters,
             requestBodyPresent,
-            requestContents.Count > 0 && requestContents.All(content => content.IsBinary)
+            requestContents,
+            isFormEncoded
         );
         var parameters = builtParameters.ToList();
         requestBodyPresent |= parameters.Any(parameter =>
@@ -877,7 +878,8 @@ public static class ContractWalker
         string? binaryContentType,
         IReadOnlyList<TsEndpointParam> declaredParameters,
         bool hasDeclaredRequestBody,
-        bool hasOnlyBinaryRequestBody
+        IReadOnlyList<TsMediaTypeContent> requestContents,
+        bool isFormEncoded
     )
     {
         var routeParamNames = RouteParser.ParseRouteParamNames(route);
@@ -892,15 +894,26 @@ public static class ContractWalker
         }
 
         var parameters = new List<TsEndpointParam>();
-        // The runtime mirrors this rule to refuse polymorphic inputs it can't read
-        // (RouteDefinitionBase.Binding in Rivet.Attributes/EndpointBuilder.cs): change both together.
-        var hasBody =
-            hasDeclaredRequestBody
-            || (httpMethod is "POST" or "PUT" or "PATCH" && declaredParameters.Count == 0);
-        // .AcceptsBinary(): the request body is the raw bytes (host code reads the
-        // stream), so TInput never lowers to a JSON body — its properties become
-        // route/query params exactly like a GET/DELETE input.
-        var lowersBody = hasBody && binaryContentType is null && !hasOnlyBinaryRequestBody;
+        var isFormFileInput = tInput is not null && IsFormFileType(wkt, tInput);
+        var hasFormFileProperty =
+            tInput is not null && !isFormFileInput && HasFormFileProperty(wkt, typeWalker, tInput);
+        // The runtime binds TInput by the same rule. With no body, or a raw binary one
+        // (.AcceptsBinary(): host code reads the stream), TInput's properties become route/query
+        // params exactly like a GET/DELETE input.
+        var lowersBody =
+            RequestInputLowering.Of(
+                httpMethod,
+                bodyDeclared: hasDeclaredRequestBody,
+                parametersDeclared: declaredParameters.Count > 0,
+                acceptsBinary: binaryContentType is not null,
+                contentTypes: requestContents
+                    .Where(content => !content.IsBinary)
+                    .Select(content => content.MediaType)
+                    .ToList(),
+                binaryContentDeclared: requestContents.Any(content => content.IsBinary),
+                formDeclared: isFormEncoded || acceptsFile,
+                formFileInput: isFormFileInput || hasFormFileProperty
+            ) != InputBinding.RouteAndQuery;
         string? inputTypeName = null;
         IReadOnlyList<string>? bodyFieldNames = null;
 
@@ -1013,14 +1026,14 @@ public static class ContractWalker
             if (tInput is not null)
             {
                 // Check if TInput itself is IFormFile
-                if (IsFormFileType(wkt, tInput))
+                if (isFormFileInput)
                 {
                     parameters.Add(
                         new TsEndpointParam("file", new TsType.Primitive("File"), ParamSource.File)
                     );
                 }
                 // Check if TInput is a record containing IFormFile properties
-                else if (HasFormFileProperty(wkt, typeWalker, tInput))
+                else if (hasFormFileProperty)
                 {
                     // A route-split input cannot safely reference its complete definition:
                     // that would put route properties back into the multipart body. Inputs
@@ -1124,7 +1137,8 @@ public static class ContractWalker
         else
         {
             // GET/DELETE (and .AcceptsBinary() bodies): TInput properties matched by name
-            // to route → Route, remaining → Query — never a JSON body param
+            // to route → Route, remaining → Query — never a JSON body param. A body declared
+            // here can only be the binary one.
             if (tInput is not null && !typeWalker.IsParamLowerable(tInput))
             {
                 // A dictionary/collection/scalar has no property surface to lower to
@@ -1134,14 +1148,14 @@ public static class ContractWalker
                     $"error {Diagnostics.InputTypeNotParamLowerable}: input type '{tInput.ToDisplayString()}' on "
                         + $"{httpMethod} {route} is a dictionary, collection or scalar, but "
                         + (
-                            hasBody
+                            hasDeclaredRequestBody
                                 ? "the request body carries the binary payload"
                                 : "this request has no JSON body to carry it (as on GET or DELETE)"
                         )
                         + ", so the input must lower to route and query params, and it has no properties to "
                         + "lower. Model the input as a record with one property per route or query parameter"
                         + (
-                            hasBody
+                            hasDeclaredRequestBody
                                 ? "."
                                 : ", or send the values as a JSON body with Define.Post/Put/Patch."
                         )

@@ -78,19 +78,25 @@ internal sealed record ResponseSet(
     ResponseContract? Default
 );
 
-/// <summary>Where the host reads a contract's <c>TInput</c> from.</summary>
+/// <summary>
+/// Where the host reads a contract's <c>TInput</c> from, as <see cref="RequestInputLowering"/>
+/// decides it.
+/// </summary>
 internal enum InputBinding
 {
     /// <summary>A JSON body, read by System.Text.Json with the host's options.</summary>
     Json,
 
-    /// <summary>A form or multipart body (<c>.FormEncoded()</c>, <c>.AcceptsFile()</c>).</summary>
+    /// <summary>
+    /// A form or multipart body: <c>.FormEncoded()</c>, <c>.AcceptsFile()</c>, form or multipart
+    /// <c>.RequestContent</c>, or an input that carries an <c>IFormFile</c>.
+    /// </summary>
     Form,
 
     /// <summary>
-    /// The route and query, wherever there's no JSON body: a method other than POST, PUT or
-    /// PATCH, or one with a declared <c>.Parameter&lt;T&gt;()</c>, unless a body is declared;
-    /// or a raw binary body (<c>.AcceptsBinary()</c>).
+    /// The route and query, wherever there's no body: a method other than POST, PUT or PATCH,
+    /// or one with a declared <c>.Parameter&lt;T&gt;()</c>, unless a body is declared; or a raw
+    /// binary body (<c>.AcceptsBinary()</c>, or only <c>.RequestBinaryContent()</c>).
     /// </summary>
     RouteAndQuery,
 }

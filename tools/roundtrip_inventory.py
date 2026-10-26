@@ -240,7 +240,9 @@ def json_pointer(pointer):
 
 
 def all_of_targets(document):
-    """Every local $ref a component schema's own allOf names: the components it extends."""
+    """The components a component schema extends as a derived record could: the one local
+    $ref of an allOf that names exactly one, on a schema composing no oneOf/anyOf. Several
+    $refs, or a union beside the allOf, are shapes the importer never roots a hierarchy on."""
     targets = set()
     for namespace in (
         (document.get("components") or {}).get("schemas"),
@@ -249,10 +251,16 @@ def all_of_targets(document):
         if not isinstance(namespace, dict):
             continue
         for schema in namespace.values():
-            parts = schema.get("allOf") if isinstance(schema, dict) else None
-            for part in parts if isinstance(parts, list) else []:
-                if isinstance(part, dict) and isinstance(part.get("$ref"), str):
-                    targets.add(part["$ref"])
+            if not isinstance(schema, dict) or "oneOf" in schema or "anyOf" in schema:
+                continue
+            parts = schema.get("allOf")
+            refs = {
+                part["$ref"]
+                for part in (parts if isinstance(parts, list) else [])
+                if isinstance(part, dict) and isinstance(part.get("$ref"), str)
+            }
+            if len(refs) == 1:
+                targets |= refs
     return targets
 
 
@@ -530,9 +538,12 @@ class CarrierWalker:
         if isinstance(value.get("discriminator"), dict):
             nested = not is_component_schema_root(pointer)
             # A discriminator beside oneOf/anyOf dispatches over the union. One on a
-            # component that another component's allOf extends roots an allOf hierarchy,
-            # imported as polymorphic records. Anywhere else the importer drops it (RIV3005),
-            # so no runtime carrier proves it.
+            # component with no allOf of its own, that another component's allOf extends,
+            # is cited as a candidate hierarchy root, imported as polymorphic records. The
+            # importer can still refuse the hierarchy for reasons this walk doesn't mirror
+            # (a mapping or tag conflict, a required member redeclared); the corpus gate's
+            # test confirms each cited one imported without a RIV3005 drop. Anywhere else
+            # the importer drops it (RIV3005), so no runtime carrier proves it.
             union = isinstance(value.get("oneOf"), list) or isinstance(value.get("anyOf"), list)
             if union:
                 self.add(
@@ -541,7 +552,11 @@ class CarrierWalker:
                     "union",
                     DISCRIMINATOR_PROOF,
                 )
-            elif not nested and json_pointer(pointer) in self.all_of_targets:
+            elif (
+                not nested
+                and "allOf" not in value
+                and json_pointer(pointer) in self.all_of_targets
+            ):
                 self.add(
                     pointer,
                     "explicit-discriminator",
