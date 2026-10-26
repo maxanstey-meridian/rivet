@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
-using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
 

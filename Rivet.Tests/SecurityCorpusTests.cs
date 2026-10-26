@@ -1,7 +1,4 @@
 using System.Text.Json.Nodes;
-using Rivet.Tool;
-using Rivet.Tool.Analysis;
-using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 
 namespace Rivet.Tests;

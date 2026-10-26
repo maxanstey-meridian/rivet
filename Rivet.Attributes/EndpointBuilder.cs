@@ -1,8 +1,6 @@
 namespace Rivet;
 
 using System.Collections.Immutable;
-using System.Reflection;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Net.Http.Headers;
 
 /// <summary>An OpenAPI response key: an exact status, an nXX range (<see cref="RangeClass"/>), or default.</summary>
