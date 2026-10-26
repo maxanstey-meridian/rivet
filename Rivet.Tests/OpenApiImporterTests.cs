@@ -4345,8 +4345,10 @@ public sealed class OpenApiImporterTests
         // The long can't receive 18446744073709551615, so the import says so.
         var warning = Assert.Single(result.Warnings);
         Assert.StartsWith("RIV3031:", warning);
-        Assert.Contains("component 'ImpossibleVals' lists 18446744073709551615", warning);
-        Assert.Contains("'long'", warning);
+        Assert.Contains(
+            "component 'ImpossibleVals' lists a value its C# type 'long' can't hold (18446744073709551615)",
+            warning
+        );
         Assert.Equal(["-1", "18446744073709551615"], EmittedComponentEnum(spec, "ImpossibleVals"));
     }
 

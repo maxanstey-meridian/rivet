@@ -290,7 +290,7 @@ public static class Diagnostics
         [ImportUnsatisfiableSecurity] =
             "A security alternative names a scheme components.securitySchemes never defines, so no caller can satisfy it — the alternative is dropped, and an operation left with none is dropped too rather than imported as open.",
         [ImportIntegerEnumValueUnheld] =
-            "Integer enum lists a value its C# integer type can't hold — the values stay in the spec, but a client can't receive that one.",
+            "Integer enum lists values its C# integer type can't hold — the values stay in the spec, but C# code using that type can't read or write them.",
         [CoverageMissingImplementation] = "Contract endpoint has no matching implementation.",
         [CoverageHttpMethodMismatch] = "Implementation HTTP method differs from the contract's.",
         [CoverageRouteMismatch] = "Implementation route differs from the contract's.",

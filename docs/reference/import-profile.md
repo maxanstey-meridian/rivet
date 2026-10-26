@@ -245,7 +245,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3028` | `path-item-outside-paths-dropped` | `webhooks` or `components.pathItems` entry; only path items under `paths` become endpoints. |
 | `RIV3029` | `equivalent-path-template-merged` | A path repeats an earlier path's template under other parameter names, which OpenAPI forbids; its operations merge into the earlier path and adopt its parameter names. |
 | `RIV3030` | `unsatisfiable-security-dropped` | A security alternative names a scheme the document never defines; the alternative is dropped, and an operation left with none is dropped too. |
-| `RIV3031` | `integer-enum-value-unheld` | An integer enum lists a whole value its C# integer type can't hold; the values survive as metadata, but a client can't receive that one. |
+| `RIV3031` | `integer-enum-value-unheld` | An integer enum lists a whole value its C# integer type can't hold; the values survive as metadata, but C# code using that type can't read or write those values. |
 
 - **Paths**: two paths that differ only in their parameter names
   (`/deployments/{idOrUrl}` and `/deployments/{id}`) are one template, which

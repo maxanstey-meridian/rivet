@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Numerics;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
 using Rivet.Tool.Model;
@@ -740,7 +741,7 @@ internal sealed class SchemaMapper
         {
             WarnUnheldIntegerEnumValues(
                 schema,
-                SchemaClassifier.ResolveIntegerType(schema),
+                IntegerCarrier(schema),
                 $"component '{componentId}'"
             );
         }
@@ -763,11 +764,25 @@ internal sealed class SchemaMapper
             System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False => type
                 == JsonSchemaType.Boolean,
             System.Text.Json.JsonValueKind.Number => type == JsonSchemaType.Number
-                || type == JsonSchemaType.Integer
-                    && scalar.TryGetValue<decimal>(out var number)
-                    && number == decimal.Truncate(number),
+                || type == JsonSchemaType.Integer && IsWholeNumber(scalar, out _),
             _ => false,
         };
+
+    /// <summary>
+    /// Whether a JSON number is whole at any magnitude (<c>1e400</c> counts, as JSON Schema
+    /// says), read exactly from its literal text.
+    /// </summary>
+    private static bool IsWholeNumber(JsonValue value, out BigInteger number)
+    {
+        number = default;
+        return value.GetValueKind() == System.Text.Json.JsonValueKind.Number
+            && BigInteger.TryParse(
+                value.ToJsonString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out number
+            );
+    }
 
     private bool TryMapNamedArray(
         string name,
@@ -1038,14 +1053,13 @@ internal sealed class SchemaMapper
         {
             return;
         }
+        if (IntegerCarrierRange(carrier) is not var (min, max))
+        {
+            return;
+        }
         var unheld = schema
             .Enum.OfType<JsonValue>()
-            .Where(value =>
-                value.GetValueKind() == System.Text.Json.JsonValueKind.Number
-                && value.TryGetValue<decimal>(out var number)
-                && number == decimal.Truncate(number)
-                && !IntegerCarrierHolds(carrier, number)
-            )
+            .Where(value => IsWholeNumber(value, out var number) && (number < min || number > max))
             .Select(value => value.ToJsonString())
             .ToList();
         if (unheld.Count == 0)
@@ -1055,23 +1069,39 @@ internal sealed class SchemaMapper
         _ctx.Warnings.Add(
             Diagnostics.Prefix(
                 Diagnostics.ImportIntegerEnumValueUnheld,
-                $"Integer enum at {site} lists {string.Join(", ", unheld)}, which its C# type '{carrier}' can't hold; the values stay in the spec, but a client can't receive "
+                $"Integer enum at {site} lists {(unheld.Count == 1 ? "a value" : "values")} its C# type '{carrier}' can't hold ({string.Join(", ", unheld)}); the values stay in the spec, but C# code using that type can't read or write "
                     + (unheld.Count == 1 ? "it." : "them.")
             )
         );
     }
 
-    private static bool IntegerCarrierHolds(string carrier, decimal value) =>
+    private static string InlineSite(string? context) =>
+        context is null ? "an inline schema" : $"'{context}'";
+
+    /// <summary>
+    /// The C# type an integer schema maps to: <c>x-rivet-csharp-type</c> when present, as
+    /// <see cref="ResolveSingleType"/> resolves it, otherwise the one its format picks.
+    /// </summary>
+    private static string IntegerCarrier(IOpenApiSchema schema) =>
+        SchemaClassifier.GetExtensionString(schema.Extensions, "x-rivet-csharp-type")
+        ?? SchemaClassifier.ResolveIntegerType(schema);
+
+    /// <summary>
+    /// The range of a CLR integer keyword, or null for any other type (<c>Int128</c>,
+    /// <c>decimal</c>), whose range the import doesn't check.
+    /// </summary>
+    private static (BigInteger Min, BigInteger Max)? IntegerCarrierRange(string carrier) =>
         carrier switch
         {
-            "sbyte" => value is >= sbyte.MinValue and <= sbyte.MaxValue,
-            "byte" => value is >= byte.MinValue and <= byte.MaxValue,
-            "short" => value is >= short.MinValue and <= short.MaxValue,
-            "ushort" => value is >= ushort.MinValue and <= ushort.MaxValue,
-            "int" => value is >= int.MinValue and <= int.MaxValue,
-            "uint" => value is >= uint.MinValue and <= uint.MaxValue,
-            "ulong" => value is >= ulong.MinValue and <= ulong.MaxValue,
-            _ => value is >= long.MinValue and <= long.MaxValue,
+            "sbyte" => (sbyte.MinValue, sbyte.MaxValue),
+            "byte" => (byte.MinValue, byte.MaxValue),
+            "short" => (short.MinValue, short.MaxValue),
+            "ushort" => (ushort.MinValue, ushort.MaxValue),
+            "int" => (int.MinValue, int.MaxValue),
+            "uint" => (uint.MinValue, uint.MaxValue),
+            "long" => (long.MinValue, long.MaxValue),
+            "ulong" => (ulong.MinValue, ulong.MaxValue),
+            _ => null,
         };
 
     private void WarnUnsupportedNamedScalar(string componentId, string reason)
@@ -1975,6 +2005,10 @@ internal sealed class SchemaMapper
         );
         if (csharpType is not null)
         {
+            if (type.HasFlag(JsonSchemaType.Integer))
+            {
+                WarnUnheldIntegerEnumValues(schema, csharpType, InlineSite(context));
+            }
             return QualifyFrameworkScalarIfShadowed(
                 SchemaClassifier.ResolveJsonNodeFqn(csharpType)
             );
@@ -1998,11 +2032,7 @@ internal sealed class SchemaMapper
             }
 
             var carrier = SchemaClassifier.ResolveIntegerType(schema);
-            WarnUnheldIntegerEnumValues(
-                schema,
-                carrier,
-                context is null ? "an inline schema" : $"'{context}'"
-            );
+            WarnUnheldIntegerEnumValues(schema, carrier, InlineSite(context));
             return carrier;
         }
 

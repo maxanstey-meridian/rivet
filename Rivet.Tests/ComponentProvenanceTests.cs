@@ -697,7 +697,9 @@ public sealed class ComponentProvenanceTests
     }
 
     // No CLR integer holds both -1 and 2^64-1, and an int32 can't hold 2^31: the values
-    // still ride as metadata, and the import names what a client can't receive.
+    // still ride as metadata, and the import names what C# can't hold. 1e30 and 1e400 are
+    // whole at any size (an untyped [1, 1e30] is an integer too), and x-rivet-csharp-type
+    // picks the type the values are checked against.
     [Theory]
     [InlineData(
         "{ \"type\": \"integer\", \"enum\": [-1, 18446744073709551615] }",
@@ -708,6 +710,14 @@ public sealed class ComponentProvenanceTests
         "{ \"type\": \"integer\", \"format\": \"int32\", \"enum\": [1, 2147483648, 1.5] }",
         "int",
         "2147483648"
+    )]
+    [InlineData("{ \"type\": \"integer\", \"enum\": [1, 1e30] }", "long", "1e30")]
+    [InlineData("{ \"type\": \"integer\", \"enum\": [1, 1e400] }", "long", "1e400")]
+    [InlineData("{ \"enum\": [1, 1e30] }", "long", "1e30")]
+    [InlineData(
+        "{ \"type\": \"integer\", \"x-rivet-csharp-type\": \"int\", \"enum\": [1, 1099511627776] }",
+        "int",
+        "1099511627776"
     )]
     public void Integer_enum_value_its_type_cannot_hold_is_named_on_import(
         string schema,
@@ -733,7 +743,30 @@ public sealed class ComponentProvenanceTests
         );
         var warning = Assert.Single(imported.Warnings);
         Assert.StartsWith("RIV3031:", warning);
-        Assert.Contains($"lists {unheld}, which its C# type '{csharpType}' can't hold", warning);
+        Assert.Contains($"lists a value its C# type '{csharpType}' can't hold ({unheld})", warning);
+    }
+
+    [Fact]
+    public void Integer_enum_component_whose_csharp_type_holds_every_value_is_not_warned()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Wide": {
+                "type": "integer",
+                "x-rivet-csharp-type": "Int128",
+                "enum": [-1, 18446744073709551615]
+            },
+            "Envelope": {
+                "type": "object",
+                "properties": { "value": { "$ref": "#/components/schemas/Wide" } },
+                "required": ["value"]
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec, "LiteralEnum");
+
+        Assert.DoesNotContain(imported.Warnings, w => w.StartsWith("RIV3031:"));
     }
 
     [Theory]
