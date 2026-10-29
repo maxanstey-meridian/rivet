@@ -56,6 +56,15 @@ internal enum InputSource
 
     /// <summary>A service, a CancellationToken, a ClaimsPrincipal: nothing from the request.</summary>
     NotRequest,
+
+    /// <summary>
+    /// A complex parameter or member whose binder can't create its type
+    /// (<see cref="FormBinding.CantCreate"/>): <c>[AsParameters]</c> refuses the endpoint at
+    /// startup, MVC fails the request, and the form mapper binds none of its fields.
+    /// <see cref="BoundInput.CantCreate"/> says why. The members the binder would bind if it
+    /// could create the type follow it, so the rest of the comparison still reads them.
+    /// </summary>
+    Uncreatable,
 }
 
 /// <summary>How the host turns the text it binds into an enum.</summary>
@@ -87,6 +96,8 @@ internal enum EnumParser
 /// member by member. <see cref="Path"/> names it for messages (<c>kind</c>, <c>request.Kind</c>);
 /// <see cref="WireName"/> is the key the host looks up. A member of a complex member is
 /// <see cref="Nested"/>: its key carries the outer member's prefix (<c>Filter.Kind</c>).
+/// <see cref="CantCreate"/> is set on an <see cref="InputSource.Uncreatable"/> input alone: why
+/// the host can't create it, and what it does instead.
 /// </summary>
 internal sealed record BoundInput(
     string Path,
@@ -95,7 +106,8 @@ internal sealed record BoundInput(
     ITypeSymbol Type,
     IParameterSymbol Parameter,
     EnumParser Parser,
-    bool Nested = false
+    bool Nested = false,
+    string? CantCreate = null
 );
 
 /// <summary>
@@ -215,20 +227,31 @@ internal static class ParameterBindingSources
             // Each member binds as if it were a parameter of its own. ASP.NET refuses a nested
             // [AsParameters], so members don't expand further.
             return type is INamedTypeSymbol container
-                ? FormBinding
-                    .BoundMembers(wkt.Compilation, wkt, container, FormBinding.Binder.AsParameters)
-                    .SelectMany(member =>
-                        MinimalApi(
-                            wkt,
-                            parameter,
-                            $"{path}.{member.Name}",
-                            member.Name,
-                            member.Type,
-                            member.Attributes,
-                            infersBody,
-                            routeParameters,
-                            topLevel: false
-                        )
+                ? Uncreatable(
+                        wkt,
+                        parameter,
+                        path,
+                        name,
+                        container,
+                        FormBinding.Binder.AsParameters,
+                        nested: false
+                    )
+                    .Concat(
+                        FormBinding
+                            .BoundMembers(wkt, container, FormBinding.Binder.AsParameters)
+                            .SelectMany(member =>
+                                MinimalApi(
+                                    wkt,
+                                    parameter,
+                                    $"{path}.{member.Name}",
+                                    member.Name,
+                                    member.Type,
+                                    member.Attributes,
+                                    infersBody,
+                                    routeParameters,
+                                    topLevel: false
+                                )
+                            )
                     )
                 : [];
         }
@@ -345,7 +368,7 @@ internal static class ParameterBindingSources
             type is INamedTypeSymbol withSources
             && IsComplex(wkt, type, ParameterBindingHost.Mvc)
             && FormBinding
-                .BoundMembers(wkt.Compilation, wkt, withSources, FormBinding.Binder.Mvc)
+                .BoundMembers(wkt, withSources, FormBinding.Binder.Mvc)
                 .Any(member => MvcOwnSource(wkt, member.MvcAttributes, member.Type) is not null)
             ? Members(withSources, InputSource.ValueProviders)
             : [Leaf(InputSource.BodyOrService)];
@@ -433,8 +456,10 @@ internal static class ParameterBindingSources
     /// member ignoring case. A type already being expanded on the path stops the recursion.
     /// <paramref name="prefix"/> is the model name the members' keys start with (an MVC model
     /// name on the parameter, or the outer member's key); <paramref name="nested"/> marks
-    /// members of a complex member. Real-host pins: <c>MvcBindingHostTests</c> and
-    /// <c>MinimalApiBindingHostTests</c>.
+    /// members of a complex member. A type the binder can't create comes first as an
+    /// <see cref="InputSource.Uncreatable"/> input, and its members still follow. Real-host
+    /// pins: <c>MvcBindingHostTests</c>, <c>MinimalApiBindingHostTests</c>, and
+    /// <c>FormPartNameTests</c>.
     /// </summary>
     private static IEnumerable<BoundInput> ComplexMembers(
         WellKnownTypes wkt,
@@ -454,14 +479,15 @@ internal static class ParameterBindingSources
         }
 
         var mvc = host == ParameterBindingHost.Mvc;
+        var binder = mvc ? FormBinding.Binder.Mvc : FormBinding.Binder.FormMapper;
         foreach (
-            var member in FormBinding.BoundMembers(
-                wkt.Compilation,
-                wkt,
-                type,
-                mvc ? FormBinding.Binder.Mvc : FormBinding.Binder.FormMapper
-            )
+            var input in Uncreatable(wkt, parameter, path, prefix ?? path, type, binder, nested)
         )
+        {
+            yield return input;
+        }
+
+        foreach (var member in FormBinding.BoundMembers(wkt, type, binder))
         {
             var (name, memberType) = (member.Name, member.Type);
             var attributes = mvc ? member.MvcAttributes : member.FormMapperAttributes;
@@ -515,6 +541,43 @@ internal static class ParameterBindingSources
         }
 
         expanding.Remove(type);
+    }
+
+    /// <summary>
+    /// An <see cref="InputSource.Uncreatable"/> input for <paramref name="type"/> when
+    /// <paramref name="binder"/> can't create it, carrying why and what the host does instead;
+    /// nothing when it can.
+    /// </summary>
+    private static IEnumerable<BoundInput> Uncreatable(
+        WellKnownTypes wkt,
+        IParameterSymbol parameter,
+        string path,
+        string wireName,
+        INamedTypeSymbol type,
+        FormBinding.Binder binder,
+        bool nested
+    )
+    {
+        if (
+            FormBinding.CantCreate(
+                type,
+                FormBinding.FormBoundProperties(wkt.Compilation, type),
+                binder
+            ) is
+            { } why
+        )
+        {
+            yield return new BoundInput(
+                path,
+                wireName,
+                InputSource.Uncreatable,
+                type,
+                parameter,
+                EnumParser.None,
+                nested,
+                $"{why}, {FormBinding.WhenItCantCreate(binder)}"
+            );
+        }
     }
 
     /// <summary>
@@ -702,22 +765,8 @@ internal static class ParameterBindingSources
         attribute.Is(wkt.FromServices) || attribute.Is(wkt.FromKeyedServices);
 
     /// <summary>[ModelBinder] or a subclass such as the generic [ModelBinder&lt;TBinder&gt;].</summary>
-    private static bool IsModelBinder(WellKnownTypes wkt, AttributeData attribute)
-    {
-        for (
-            var type = attribute.AttributeClass;
-            type is not null && wkt.ModelBinder is not null;
-            type = type.BaseType
-        )
-        {
-            if (SymbolEqualityComparer.Default.Equals(type, wkt.ModelBinder))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    private static bool IsModelBinder(WellKnownTypes wkt, AttributeData attribute) =>
+        attribute.AttributeClass.DerivesFrom(wkt.ModelBinder);
 
     private enum Special
     {
@@ -832,9 +881,7 @@ internal static class ParameterBindingSources
             || type.TypeKind == TypeKind.Enum
             || Is(type, wkt.Uri)
             || HasPublicStaticMethod(type, "TryParse")
-            || type.AllInterfaces.Any(candidate =>
-                Is(candidate.OriginalDefinition, wkt.IParsableOfT)
-            )
+            || type.Implements(wkt.IParsableOfT)
             || host == ParameterBindingHost.Mvc
                 && type.GetAttributes()
                     .Any(attribute => Is(attribute.AttributeClass, wkt.TypeConverter));

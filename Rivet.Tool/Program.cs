@@ -69,7 +69,6 @@ static async Task<int> Run(string[] args)
         discovered.ClientTypes
     );
     var contracts = ContractWalker.Walk(compilation, wkt, walker, discovered.ContractTypes);
-    var contractEndpoints = contracts.Select(contract => contract.Endpoint).ToList();
     // --security replaces the source's security wholesale, for --check and emission alike.
     var security =
         SecurityParser.ParseMany(options.SecuritySchemes ?? [])
@@ -119,7 +118,7 @@ static async Task<int> Run(string[] args)
             );
         }
 
-        var totalFields = contractEndpoints.Count;
+        var totalFields = contracts.Count;
         var missingCount = coverageWarnings.Count(w =>
             w.Kind == CoverageWarningKind.MissingImplementation
         );
@@ -148,7 +147,7 @@ static async Task<int> Run(string[] args)
         }
     }
 
-    var merged = EndpointMerger.Merge(contractEndpoints, endpoints);
+    var merged = EndpointMerger.Merge(contracts, endpoints);
 
     if (options.Routes)
     {

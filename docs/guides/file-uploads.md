@@ -45,8 +45,15 @@ Which members a binder sets depends on how it creates the type, and the two don'
 - **The form mapper** calls a type's one public constructor, whatever it is. Give it two,
   or make it abstract, and it binds nothing at all.
 - MVC also fills a get-only collection in place: `public List<IFormFile> Files { get; } = [];`
-  gets every file, because MVC adds them to the list the getter hands back. The form mapper
-  can't set it, so on a contract that's `RIV1100` until it has a setter or an `init`.
+  (or `= new()`) gets every file, because MVC adds them to the list the getter hands back.
+  It only works when that list is live and writable, though. Leave the property null,
+  compute it on each read (`=> ...`), or start it as a read-only collection, and MVC
+  builds a list of its own that the missing setter throws away, so Rivet treats it as a
+  file nothing can set: `RIV1100`. Rivet trusts only what it can see: the property's own
+  initializer, in source. A list assigned in a constructor, handed back from a field, or
+  declared on a package's type may well be live, but it needs a setter before Rivet will
+  promise it. The form mapper can't set any get-only collection, so on a contract even
+  the live one is `RIV1100` until it has a setter or an `init`.
 - MVC skips a `[BindNever]` member; the form mapper skips an `[IgnoreDataMember]` one.
   Each ignores the other's attribute.
 

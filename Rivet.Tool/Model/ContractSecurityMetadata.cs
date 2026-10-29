@@ -93,3 +93,37 @@ public enum OAuth2FlowType
     ClientCredentials,
     AuthorizationCode,
 }
+
+internal static class OAuth2FlowTypes
+{
+    /// <summary>
+    /// A flow's OpenAPI name: its key under <c>flows</c>, and the name <c>[RivetOAuthFlow]</c>
+    /// takes. The emitter and the importer's C# writer both write it.
+    /// </summary>
+    internal static string Name(OAuth2FlowType type) =>
+        type switch
+        {
+            OAuth2FlowType.Implicit => "implicit",
+            OAuth2FlowType.Password => "password",
+            OAuth2FlowType.ClientCredentials => "clientCredentials",
+            OAuth2FlowType.AuthorizationCode => "authorizationCode",
+            _ => throw new ArgumentOutOfRangeException(nameof(type)),
+        };
+
+    /// <summary>
+    /// The flow an OpenAPI name spells, exactly as <see cref="Name"/> writes it (OpenAPI's
+    /// keys are case-sensitive), else null. <c>[RivetOAuthFlow]</c> reads it and words its own
+    /// error (RIV1121).
+    /// </summary>
+    internal static OAuth2FlowType? Parse(string value)
+    {
+        foreach (var type in Enum.GetValues<OAuth2FlowType>())
+        {
+            if (string.Equals(Name(type), value, StringComparison.Ordinal))
+            {
+                return type;
+            }
+        }
+        return null;
+    }
+}

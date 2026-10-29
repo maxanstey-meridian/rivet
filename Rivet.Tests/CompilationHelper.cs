@@ -216,11 +216,26 @@ public static class CompilationHelper
     {
         var compilation = CreateCompilation(source);
         var (discovered, walker) = DiscoverAndWalk(compilation);
-        var contractEndpoints = WalkContracts(compilation, discovered, walker);
-        var annotationEndpoints = WalkEndpoints(compilation, discovered, walker);
-        var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
-        return (merged, walker);
+        return (WalkMerged(compilation, discovered, walker), walker);
     }
+
+    /// <summary>
+    /// Runs both walkers over an already-walked compilation and merges them as Program.cs does.
+    /// </summary>
+    public static IReadOnlyList<TsEndpointDefinition> WalkMerged(
+        Compilation compilation,
+        DiscoveredSymbols discovered,
+        TypeWalker walker
+    ) =>
+        EndpointMerger.Merge(
+            ContractWalker.Walk(
+                compilation,
+                new WellKnownTypes(compilation),
+                walker,
+                discovered.ContractTypes
+            ),
+            WalkEndpoints(compilation, discovered, walker)
+        );
 
     /// <summary>
     /// Compiles source, walks both walkers (merged like Program.cs), and emits OpenAPI

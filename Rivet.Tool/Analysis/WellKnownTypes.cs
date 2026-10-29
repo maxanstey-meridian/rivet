@@ -12,6 +12,8 @@ public sealed class WellKnownTypes(Compilation c)
     private const string Mvc = "Microsoft.AspNetCore.Mvc.";
     private const string HttpResults = "Microsoft.AspNetCore.Http.HttpResults.";
     private const string Authorization = "Microsoft.AspNetCore.Authorization.";
+    private const string DependencyInjection = "Microsoft.Extensions.DependencyInjection.";
+    private const string Options = "Microsoft.Extensions.Options.";
 
     /// <summary>The compilation these symbols were resolved from.</summary>
     public Compilation Compilation { get; } = c;
@@ -58,8 +60,18 @@ public sealed class WellKnownTypes(Compilation c)
     // Binding and response attributes
     public INamedTypeSymbol? Route { get; } = c.GetTypeByMetadataName(Mvc + "RouteAttribute");
 
-    // [Area]: the value MVC substitutes for an [area] route token.
+    // The attributes an MVC action's route values come from (MvcRouteValues): [Area] and
+    // any RouteValueAttribute subclass supply a token's value through IRouteValueProvider,
+    // and [ActionName] renames [action]. AttributeUsage says which a base symbol passes on.
     public INamedTypeSymbol? Area { get; } = c.GetTypeByMetadataName(Mvc + "AreaAttribute");
+    public INamedTypeSymbol? RouteValueAttribute { get; } =
+        c.GetTypeByMetadataName(Mvc + "Routing.RouteValueAttribute");
+    public INamedTypeSymbol? RouteValueProvider { get; } =
+        c.GetTypeByMetadataName(Mvc + "Routing.IRouteValueProvider");
+    public INamedTypeSymbol? ActionName { get; } =
+        c.GetTypeByMetadataName(Mvc + "ActionNameAttribute");
+    public INamedTypeSymbol? AttributeUsage { get; } =
+        c.GetTypeByMetadataName("System.AttributeUsageAttribute");
     public INamedTypeSymbol? FromBody { get; } = c.GetTypeByMetadataName(Mvc + "FromBodyAttribute");
     public INamedTypeSymbol? FromForm { get; } = c.GetTypeByMetadataName(Mvc + "FromFormAttribute");
     public INamedTypeSymbol? FromQuery { get; } =
@@ -123,6 +135,15 @@ public sealed class WellKnownTypes(Compilation c)
     public INamedTypeSymbol? IParsableOfT { get; } = c.GetTypeByMetadataName("System.IParsable`1");
     public INamedTypeSymbol? TypeConverter { get; } =
         c.GetTypeByMetadataName("System.ComponentModel.TypeConverterAttribute");
+
+    // The collections MVC can't add to in place (FormBinding.Sets): a [CollectionBuilder] type
+    // is made by its builder, as the immutable ones are, and these two families are read-only.
+    public INamedTypeSymbol? CollectionBuilderAttribute { get; } =
+        c.GetTypeByMetadataName("System.Runtime.CompilerServices.CollectionBuilderAttribute");
+    public INamedTypeSymbol? ReadOnlyCollection { get; } =
+        c.GetTypeByMetadataName("System.Collections.ObjectModel.ReadOnlyCollection`1");
+    public INamedTypeSymbol? ReadOnlyDictionary { get; } =
+        c.GetTypeByMetadataName("System.Collections.ObjectModel.ReadOnlyDictionary`2");
 
     // Implemented by [ApiController]: marks an API controller, whose unattributed complex
     // parameters MVC infers as [FromBody].
@@ -308,6 +329,37 @@ public sealed class WellKnownTypes(Compilation c)
     // methods run by the host.
     public INamedTypeSymbol? WebHostBuilderExtensions { get; } =
         c.GetTypeByMetadataName("Microsoft.AspNetCore.Hosting.WebHostBuilderExtensions");
+
+    // Where UseStartup's assembly-name overload lives.
+    public INamedTypeSymbol? HostingAbstractionsWebHostBuilderExtensions { get; } =
+        c.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Hosting.HostingAbstractionsWebHostBuilderExtensions"
+        );
+
+    // Where ASP.NET registers a type with its service container and options system.
+    public INamedTypeSymbol? IServiceCollection { get; } =
+        c.GetTypeByMetadataName(DependencyInjection + "IServiceCollection");
+    public INamedTypeSymbol? ServiceCollectionServiceExtensions { get; } =
+        c.GetTypeByMetadataName(DependencyInjection + "ServiceCollectionServiceExtensions");
+    public INamedTypeSymbol? ServiceCollectionDescriptorExtensions { get; } =
+        c.GetTypeByMetadataName(
+            DependencyInjection + "Extensions.ServiceCollectionDescriptorExtensions"
+        );
+    public INamedTypeSymbol? OptionsServiceCollectionExtensions { get; } =
+        c.GetTypeByMetadataName(DependencyInjection + "OptionsServiceCollectionExtensions");
+    public INamedTypeSymbol? ServiceDescriptor { get; } =
+        c.GetTypeByMetadataName(DependencyInjection + "ServiceDescriptor");
+
+    // The options setup interfaces ConfigureOptions registers a type under, and the named
+    // form OptionsFactory calls instead of IConfigureOptions<T>.Configure(T) when a setup has it.
+    public INamedTypeSymbol? IConfigureOptions { get; } =
+        c.GetTypeByMetadataName(Options + "IConfigureOptions`1");
+    public INamedTypeSymbol? IConfigureNamedOptions { get; } =
+        c.GetTypeByMetadataName(Options + "IConfigureNamedOptions`1");
+    public INamedTypeSymbol? IPostConfigureOptions { get; } =
+        c.GetTypeByMetadataName(Options + "IPostConfigureOptions`1");
+    public INamedTypeSymbol? IValidateOptions { get; } =
+        c.GetTypeByMetadataName(Options + "IValidateOptions`1");
 
     /// <summary>HTTP method attribute symbol → verb ("GET", "POST", …).</summary>
     public ImmutableDictionary<INamedTypeSymbol, string> HttpMethodAttributes { get; } =

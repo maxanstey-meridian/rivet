@@ -15,18 +15,22 @@ namespace Rivet.Tool.Analysis;
 /// </summary>
 public static class EndpointMerger
 {
+    /// <summary>
+    /// Merges <paramref name="contracts"/> (seeded first) with
+    /// <paramref name="annotationEndpoints"/>. Each endpoint keeps the spelling its security was
+    /// declared in, so a security-only RIV2012 advises in that spelling: a static contract
+    /// field's builder calls, or the attributes on an abstract contract method or an action.
+    /// </summary>
     public static IReadOnlyList<TsEndpointDefinition> Merge(
-        IReadOnlyList<TsEndpointDefinition> contractEndpoints,
+        IReadOnlyList<ContractEndpoint> contracts,
         IReadOnlyList<TsEndpointDefinition> annotationEndpoints
     )
     {
-        var merged = new List<TsEndpointDefinition>(
-            contractEndpoints.Count + annotationEndpoints.Count
-        );
+        var merged = new List<TsEndpointDefinition>(contracts.Count + annotationEndpoints.Count);
         var byTransportIdentity =
             new Dictionary<
                 (string Method, string Route),
-                (TsEndpointDefinition Endpoint, bool FromContract)
+                (TsEndpointDefinition Endpoint, SecurityDeclaration.Spelling Spelling)
             >();
 
         // Contract-first ordering is the deterministic representative choice for
@@ -34,9 +38,13 @@ public static class EndpointMerger
         // Name) merge): contract endpoints are seeded first, annotation endpoints
         // only fill transport identities no contract endpoint declared.
         foreach (
-            var (endpoint, fromContract) in contractEndpoints
-                .Select(endpoint => (endpoint, true))
-                .Concat(annotationEndpoints.Select(endpoint => (endpoint, false)))
+            var (endpoint, spelling) in contracts
+                .Select(contract => (contract.Endpoint, contract.Spelling))
+                .Concat(
+                    annotationEndpoints.Select(endpoint =>
+                        (endpoint, SecurityDeclaration.Attributes)
+                    )
+                )
         )
         {
             var key = TransportIdentity.Key(endpoint.HttpMethod, endpoint.RouteTemplate);
@@ -54,11 +62,11 @@ public static class EndpointMerger
                     key.Route,
                     existing.Endpoint,
                     endpoint,
-                    SecurityRemedy(existing.FromContract, fromContract)
+                    SecurityRemedy(existing, (endpoint, spelling))
                 );
             }
 
-            byTransportIdentity[key] = (endpoint, fromContract);
+            byTransportIdentity[key] = (endpoint, spelling);
             merged.Add(endpoint);
         }
 
@@ -95,21 +103,20 @@ public static class EndpointMerger
             );
 
     /// <summary>
-    /// How a merged pair aligns its security, by what each side declares it with: a contract
-    /// definition with builder calls, an annotated action (or abstract contract method) with
-    /// attributes (<see cref="SecurityDeclaration"/>'s two spellings).
+    /// How a merged pair aligns its security, in the spelling each side declared it with
+    /// (<see cref="SecurityDeclaration"/>'s two): one step list when both share a spelling,
+    /// and each side named with its own when they don't.
     /// </summary>
-    private static string SecurityRemedy(bool existingFromContract, bool endpointFromContract) =>
-        (existingFromContract, endpointFromContract) switch
-        {
-            (true, true) =>
-                $"give both definitions the same {Steps(SecurityDeclaration.BuilderCalls)} calls",
-            (false, false) =>
-                $"give both actions the same {Steps(SecurityDeclaration.Attributes)} attributes",
-            _ =>
-                $"repeat the contract's {Steps(SecurityDeclaration.BuilderCalls)} calls on the action as "
-                    + Steps(SecurityDeclaration.Attributes),
-        };
+    private static string SecurityRemedy(
+        (TsEndpointDefinition Endpoint, SecurityDeclaration.Spelling Spelling) existing,
+        (TsEndpointDefinition Endpoint, SecurityDeclaration.Spelling Spelling) endpoint
+    ) =>
+        existing.Spelling == endpoint.Spelling
+            ? $"give both the same {Steps(existing.Spelling)} {existing.Spelling.Noun}"
+            : $"'{existing.Endpoint.ControllerName}.{existing.Endpoint.Name}' declares it with "
+                + $"{Steps(existing.Spelling)} {existing.Spelling.Noun}, and "
+                + $"'{endpoint.Endpoint.ControllerName}.{endpoint.Endpoint.Name}' with "
+                + $"{Steps(endpoint.Spelling)} {endpoint.Spelling.Noun}";
 
     private static string Steps(SecurityDeclaration.Spelling spelling) =>
         $"{spelling.Secure}, {spelling.AndSecure}, {spelling.OrAnonymous}, or {spelling.Anonymous}";

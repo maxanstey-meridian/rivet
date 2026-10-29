@@ -19,12 +19,14 @@ internal sealed record InputBindingMismatch(
 /// headers, cookies and form fields (a form-encoded body's fields included) are matched by
 /// name, ignoring case as ASP.NET does, and a JSON or binary body by presence. What the
 /// handler binds is <see cref="ParameterBindingSources"/>' reading of its parameters, the same
-/// one RIV4005 uses. Three things are reported:
+/// one RIV4005 uses. Four things are reported:
 /// <list type="bullet">
 /// <item>an input the handler binds that the contract doesn't declare, which no generated
 /// client sends;</item>
 /// <item>an input the contract declares that the handler never binds, which it ignores;</item>
-/// <item>an input both have under one name but from different places, which never arrives.</item>
+/// <item>an input both have under one name but from different places, which never arrives;</item>
+/// <item>a complex input the host can't create (<see cref="InputSource.Uncreatable"/>), at any
+/// depth, whose members are still compared as the host would bind them if it could.</item>
 /// </list>
 /// A handler that can read the request itself (an HttpContext or HttpRequest parameter, a
 /// BindAsync type, a custom model binder, or a body that reads the request or its route
@@ -63,12 +65,25 @@ internal static class ContractInputBinding
         var declared = DeclaredInputs(endpoint, body);
         var apiKeys = ApiKeySchemes(endpoint, security);
         var routeParameters = RouteParser.ParseRouteParamNames(route ?? endpoint.RouteTemplate);
-        var inputs = handler
+        var bound = handler
             .Parameters.SelectMany(parameter =>
                 ParameterBindingSources.Inputs(wkt, parameter, host, infersBody, routeParameters)
             )
-            .Where(input => !input.Nested)
             .ToList();
+
+        // A complex input at any depth the host can't create, whatever else matches.
+        foreach (var input in bound.Where(input => input.Source == InputSource.Uncreatable))
+        {
+            yield return new InputBindingMismatch(
+                "a type the host can create",
+                input.Type.ToDisplayString(),
+                $"handler parameter '{input.Path}' ({input.Type.ToDisplayString()}) can't be "
+                    + $"bound: {input.CantCreate}. {FormBinding.CreatableRemedy}",
+                input.Parameter.Locations.FirstOrDefault()
+            );
+        }
+
+        var inputs = bound.Where(input => !input.Nested).ToList();
         var readsRequest =
             inputs.Any(input => input.Source == InputSource.WholeRequest)
             || requestReads.InBody(wkt, handler);
@@ -506,7 +521,7 @@ internal static class ContractInputBinding
             var definition = method.OriginalDefinition;
             if (!_bodies.TryGetValue(definition, out var body))
             {
-                body = CoverageChecker.SourceBody(definition);
+                body = definition.SourceBody();
                 _bodies[definition] = body;
             }
 

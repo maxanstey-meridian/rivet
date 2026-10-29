@@ -435,7 +435,7 @@ public sealed class OpenApiEmitter
                 result["type"] = "oauth2";
                 result["flows"] = ObjectOf(
                     oauth2.Flows.Select(flow =>
-                        (OAuthFlowName(flow.Type), (JsonNode?)BuildOAuthFlow(flow))
+                        (OAuth2FlowTypes.Name(flow.Type), (JsonNode?)BuildOAuthFlow(flow))
                     )
                 );
                 break;
@@ -475,16 +475,6 @@ public sealed class OpenApiEmitter
         }
         return result;
     }
-
-    private static string OAuthFlowName(OAuth2FlowType type) =>
-        type switch
-        {
-            OAuth2FlowType.Implicit => "implicit",
-            OAuth2FlowType.Password => "password",
-            OAuth2FlowType.ClientCredentials => "clientCredentials",
-            OAuth2FlowType.AuthorizationCode => "authorizationCode",
-            _ => throw new ArgumentOutOfRangeException(nameof(type)),
-        };
 
     private static JsonArray BuildSecurityRequirements(SecurityRequirements requirements) =>
         ArrayOf(

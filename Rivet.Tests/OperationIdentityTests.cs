@@ -705,7 +705,9 @@ public sealed class OperationIdentityTests
 
         // Duplicate-vs-distinct keys are a contradiction: the left duplicate
         // cannot consume the same right entry twice.
-        Assert.Throws<RivetUserException>(() => EndpointMerger.Merge([left], [right]));
+        Assert.Throws<RivetUserException>(() =>
+            EndpointMerger.Merge([new ContractEndpoint(left, null)], [right])
+        );
 
         // Distinct-vs-distinct with identical keys still collapses.
         var distinctLeft = Endpoint(
@@ -719,7 +721,10 @@ public sealed class OperationIdentityTests
             ("a", new TsType.Primitive("string"))
         );
 
-        var merged = EndpointMerger.Merge([distinctLeft], [distinctRight]);
+        var merged = EndpointMerger.Merge(
+            [new ContractEndpoint(distinctLeft, null)],
+            [distinctRight]
+        );
         var endpoint = Assert.Single(merged);
         Assert.Equal("getA", endpoint.Name);
     }

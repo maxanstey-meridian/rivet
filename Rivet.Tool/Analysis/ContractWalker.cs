@@ -7,7 +7,15 @@ using Rivet.Tool.Model;
 namespace Rivet.Tool.Analysis;
 
 /// <summary>A contract endpoint and the field it was read from (null for an abstract method).</summary>
-public sealed record ContractEndpoint(TsEndpointDefinition Endpoint, IFieldSymbol? Field);
+public sealed record ContractEndpoint(TsEndpointDefinition Endpoint, IFieldSymbol? Field)
+{
+    /// <summary>
+    /// What the endpoint declares its security with: a static contract's field takes builder
+    /// calls, and an abstract contract's method (no field) takes attributes, as an action does.
+    /// </summary>
+    internal SecurityDeclaration.Spelling Spelling =>
+        Field is null ? SecurityDeclaration.Attributes : SecurityDeclaration.BuilderCalls;
+}
 
 /// <summary>
 /// Discovers [RivetContract]-attributed static classes and extracts endpoint definitions
@@ -39,7 +47,7 @@ public static class ContractWalker
             var controllerName = DeriveControllerName(type);
 
             // Abstract class contract: read HTTP attributes from abstract methods
-            if (type.IsAbstract && !type.IsStatic)
+            if (IsMethodContract(type))
             {
                 foreach (var method in AbstractOperations(type))
                 {
@@ -1118,7 +1126,6 @@ public static class ContractWalker
             IReadOnlyList<FormBinding.FormPart>? FormParts() =>
                 formBody
                     ? FormBinding.Parts(
-                        compilation,
                         wkt,
                         typeWalker,
                         tInput!,
@@ -1583,26 +1590,8 @@ public static class ContractWalker
     private static JsonElement? CloneProperty(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) ? value.Clone() : null;
 
-    private static JsonElement? ParseJsonArgument(string? json, string what)
-    {
-        if (json is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(json);
-            return document.RootElement.Clone();
-        }
-        catch (JsonException exception)
-        {
-            throw Diagnostics.Error(
-                Diagnostics.InvalidBuilderArgument,
-                $"{what} must be a JSON literal, got '{json}' ({exception.Message})"
-            );
-        }
-    }
+    private static JsonElement? ParseJsonArgument(string? json, string what) =>
+        json is null ? null : AuthoredJson.Parse(json, what);
 
     /// <summary>[RivetRequestBody(typeof(T), required)] on a contract field.</summary>
     private sealed record DeclaredRequestBody(ITypeSymbol? BodyType, bool Required);
@@ -1760,14 +1749,21 @@ public static class ContractWalker
             };
 
     /// <summary>
-    /// The operations an abstract <c>[RivetContract]</c> class declares: its ordinary abstract
-    /// methods. An abstract property's or event's accessors are abstract methods too, but never
-    /// operations. A static or concrete contract declares its operations as fields instead, so
-    /// it has none here. <see cref="Walk"/> emits them and <c>--check</c> compares their
-    /// overrides' security.
+    /// A <c>[RivetContract]</c> class that declares its operations as abstract methods: an
+    /// abstract, non-static class. A static or concrete contract declares them as fields, and
+    /// a method contract with no operations still has no fields to read.
+    /// </summary>
+    internal static bool IsMethodContract(INamedTypeSymbol type) =>
+        type is { IsAbstract: true, IsStatic: false };
+
+    /// <summary>
+    /// The operations a method contract (<see cref="IsMethodContract"/>) declares: its ordinary
+    /// abstract methods. An abstract property's or event's accessors are abstract methods too,
+    /// but never operations. Any other contract has none here. <see cref="Walk"/> emits them and
+    /// <c>--check</c> compares their overrides' security.
     /// </summary>
     internal static IEnumerable<IMethodSymbol> AbstractOperations(INamedTypeSymbol type) =>
-        type is { IsAbstract: true, IsStatic: false }
+        IsMethodContract(type)
             ? type.GetMembers()
                 .OfType<IMethodSymbol>()
                 .Where(method => method is { MethodKind: MethodKind.Ordinary, IsAbstract: true })

@@ -84,6 +84,7 @@ public sealed class SecurityCoverageTests
             using Microsoft.AspNetCore.Mvc.Filters;
             using Microsoft.AspNetCore.Routing;
             using Microsoft.Extensions.DependencyInjection;
+            using Microsoft.Extensions.DependencyInjection.Extensions;
             using Microsoft.Extensions.Options;
             using Rivet;
 
@@ -679,21 +680,51 @@ public sealed class SecurityCoverageTests
         "public sealed class RequireSignIn : IPostConfigureOptions<MvcOptions> { "
         + "public void PostConfigure(string? name, MvcOptions options) => options.Filters.Add(new AuthorizeFilter()); }";
 
+    private const string PostConfigureMvcExplicitly =
+        "public sealed class RequireSignIn : IPostConfigureOptions<MvcOptions> { "
+        + "void IPostConfigureOptions<MvcOptions>.PostConfigure(string? name, MvcOptions options) => options.Filters.Add(new AuthorizeFilter()); }";
+
+    private const string ConfigureMvcNamed =
+        "public sealed class RequireSignIn : IConfigureNamedOptions<MvcOptions> { "
+        + "public void Configure(MvcOptions options) => options.Filters.Add(new AuthorizeFilter()); "
+        + "public void Configure(string? name, MvcOptions options) { } }";
+
     private const string Modules =
         "public interface IAppModule { void AddServices(IServiceCollection services); }\n"
         + "public sealed class AuthModule : IAppModule { public void AddServices(IServiceCollection services) => "
-        + "services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()); }";
+        + "services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()); }\n"
+        + "public sealed class OpenModule : IAppModule { public void AddServices(IServiceCollection services) { } }";
+
+    private const string Setups =
+        "public class AppSetup { public virtual void Apply(IServiceCollection services) => "
+        + "services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()); }\n"
+        + "public sealed class OpenSetup : AppSetup { public override void Apply(IServiceCollection services) { } }\n"
+        + "public sealed class SameSetup : AppSetup { }";
 
     /// <summary>
-    /// A method run through an interface or a virtual runs where it's called through them. One
-    /// the framework calls runs where the app hands the framework its type, and one whose
-    /// type the app never names may be found some way --check can't see.
+    /// A method run through an interface or a virtual runs where it's called through them, on
+    /// a receiver --check can see is an instance that has it as the implementation: a
+    /// dispatched call runs only the one its receiver's runtime type has. One the framework
+    /// calls runs where the app registers its type under the framework's interface, and one
+    /// never registered that way may be found some way --check can't see.
     /// </summary>
     [Theory]
     [InlineData(PostConfigureMvc, "services.ConfigureOptions<RequireSignIn>();", null)]
+    [InlineData(PostConfigureMvc, "services.ConfigureOptions(typeof(RequireSignIn));", null)]
+    [InlineData(PostConfigureMvc, "services.ConfigureOptions(new RequireSignIn());", null)]
     [InlineData(
         PostConfigureMvc,
         "services.AddSingleton<IPostConfigureOptions<MvcOptions>, RequireSignIn>();",
+        null
+    )]
+    [InlineData(
+        PostConfigureMvc,
+        "services.TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<MvcOptions>, RequireSignIn>());",
+        null
+    )]
+    [InlineData(
+        PostConfigureMvc,
+        "services.AddSingleton(typeof(IPostConfigureOptions<MvcOptions>), typeof(RequireSignIn));",
         null
     )]
     [InlineData(
@@ -702,6 +733,24 @@ public sealed class SecurityCoverageTests
         "RIV4009"
     )]
     [InlineData(PostConfigureMvc, "", "RIV4009")]
+    // Registered as itself, or under another interface, the options system never asks for it.
+    [InlineData(PostConfigureMvc, "services.AddSingleton<RequireSignIn>();", "RIV4009")]
+    [InlineData(
+        PostConfigureMvc,
+        "services.AddSingleton(typeof(IConfigureOptions<MvcOptions>), typeof(RequireSignIn));",
+        "RIV4009"
+    )]
+    // A mention that isn't a registration hands the framework nothing.
+    [InlineData(PostConfigureMvc, "_ = nameof(RequireSignIn);", "RIV4009")]
+    [InlineData(
+        PostConfigureMvc + " private static readonly RequireSignIn? Unused = null;",
+        "",
+        "RIV4009"
+    )]
+    [InlineData(PostConfigureMvcExplicitly, "", "RIV4009")]
+    // OptionsFactory calls a named setup's Configure(name, options) alone.
+    [InlineData(ConfigureMvcNamed, "services.ConfigureOptions<RequireSignIn>();", Case1)]
+    [InlineData(PostConfigureMvcExplicitly, "services.ConfigureOptions<RequireSignIn>();", null)]
     [InlineData(
         Modules,
         "IAppModule module = new AuthModule(); module.AddServices(services);",
@@ -709,10 +758,28 @@ public sealed class SecurityCoverageTests
     )]
     [InlineData(
         Modules,
+        "IAppModule module = new OpenModule(); module.AddServices(services);",
+        Case1
+    )]
+    [InlineData(
+        Modules,
+        "IAppModule module = flag ? new AuthModule() : new OpenModule(); module.AddServices(services);",
+        "RIV4009"
+    )]
+    [InlineData(
+        Modules,
         "IAppModule[] modules = [new AuthModule()]; foreach (var module in modules) module.AddServices(services);",
         "RIV4009"
     )]
     [InlineData(Modules, "", Case1)]
+    [InlineData(Setups, "new AppSetup().Apply(services);", null)]
+    [InlineData(Setups, "AppSetup setup = new SameSetup(); setup.Apply(services);", null)]
+    [InlineData(Setups, "AppSetup setup = new OpenSetup(); setup.Apply(services);", Case1)]
+    [InlineData(
+        Setups,
+        "AppSetup setup = flag ? new SameSetup() : new OpenSetup(); setup.Apply(services);",
+        "RIV4009"
+    )]
     public void App_wide_setup_run_through_an_interface_runs_where_that_is_called(
         string members,
         string body,
@@ -724,7 +791,38 @@ public sealed class SecurityCoverageTests
         AssertVerdict(warnings, expected);
     }
 
-    private static string StartupProgram(string startupMembers, string hosting) =>
+    /// <summary>
+    /// A constructor, an accessor, or an initializer runs where its type is made or its
+    /// property read, which --check doesn't follow, so setup there is unknown rather than
+    /// taken to run.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "public sealed class Wiring { public Wiring(IServiceCollection services) => "
+            + "services.AddControllers(o => o.Filters.Add(new AuthorizeFilter())); }"
+    )]
+    [InlineData(
+        "private static IServiceCollection Wired => "
+            + "new ServiceCollection().AddControllers(o => o.Filters.Add(new AuthorizeFilter())).Services;"
+    )]
+    [InlineData(
+        "private static readonly IServiceCollection Wired = "
+            + "new ServiceCollection().AddControllers(o => o.Filters.Add(new AuthorizeFilter())).Services;"
+    )]
+    public void App_wide_setup_in_a_constructor_an_accessor_or_an_initializer_is_unknown(
+        string members
+    )
+    {
+        var warnings = Check(Contract(assembly: SecuredDefault), App("", members), Controller());
+
+        AssertVerdict(warnings, "RIV4009");
+    }
+
+    private static string StartupProgram(
+        string startupMembers,
+        string hosting,
+        string startupBase = ""
+    ) =>
         $$"""
             using Microsoft.AspNetCore.Authorization;
             using Microsoft.AspNetCore.Hosting;
@@ -734,7 +832,12 @@ public sealed class SecurityCoverageTests
 
             namespace Test;
 
-            public sealed class Startup
+            public class AppStartupBase
+            {
+                {{startupBase}}
+            }
+
+            public sealed class Startup : AppStartupBase
             {
                 {{startupMembers}}
             }
@@ -749,18 +852,28 @@ public sealed class SecurityCoverageTests
             }
             """;
 
-    private const string StartupServices =
-        "public void ConfigureServices(IServiceCollection services) => "
+    private const string StartupServicesBody =
+        "void ConfigureServices(IServiceCollection services) => "
         + "services.AddControllers(o => o.Filters.Add(new AuthorizeFilter()));";
+
+    private const string StartupServices = "public " + StartupServicesBody;
 
     /// <summary>
     /// ASP.NET's StartupLoader runs a Startup type's Configure{Env}Services, Configure{Env} and
     /// Configure{Env}Container where UseStartup hands it the type, and only those: an
     /// environment's own method only in that environment, and the plain one only outside it.
+    /// A type UseStartup is handed some way --check can't read may have any of them run.
     /// </summary>
     [Theory]
     [InlineData(StartupServices, "web.UseStartup<Startup>()", null)]
     [InlineData(StartupServices, "web.UseStartup(typeof(Startup))", null)]
+    [InlineData(StartupServices, "web.UseStartup(context => new Startup())", null)]
+    [InlineData(
+        StartupServices,
+        "web.UseStartup(System.Type.GetType(\"Test.Startup\")!)",
+        "RIV4009"
+    )]
+    [InlineData(StartupServices, "web.UseStartup(\"FrameworkApp\")", "RIV4009")]
     [InlineData(StartupServices, "{ }", Case1)]
     [InlineData(StartupServices, "{ if (args.Length > 0) web.UseStartup<Startup>(); }", "RIV4009")]
     [InlineData(
@@ -784,6 +897,39 @@ public sealed class SecurityCoverageTests
         var warnings = CheckWith(
             OutputKind.ConsoleApplication,
             StartupProgram(startupMembers, hosting),
+            Contract(assembly: SecuredDefault),
+            Controller()
+        );
+
+        AssertVerdict(warnings, expected);
+    }
+
+    /// <summary>
+    /// StartupLoader finds the most-derived public method by reflection: a base class's
+    /// Startup method runs when the Startup type inherits it, never when it overrides or hides
+    /// it.
+    /// </summary>
+    [Theory]
+    [InlineData("", "public virtual " + StartupServicesBody, null)]
+    [InlineData(
+        "public override void ConfigureServices(IServiceCollection services) { }",
+        "public virtual " + StartupServicesBody,
+        Case1
+    )]
+    [InlineData(
+        "public new void ConfigureServices(IServiceCollection services) { }",
+        "public " + StartupServicesBody,
+        Case1
+    )]
+    public void A_base_class_startup_method_runs_only_when_the_startup_type_inherits_it(
+        string startupMembers,
+        string startupBase,
+        string? expected
+    )
+    {
+        var warnings = CheckWith(
+            OutputKind.ConsoleApplication,
+            StartupProgram(startupMembers, "web.UseStartup<Startup>()", startupBase),
             Contract(assembly: SecuredDefault),
             Controller()
         );
@@ -964,6 +1110,43 @@ public sealed class SecurityCoverageTests
     [InlineData($"app.MapGroup(\"/api\").Secured().MapGet(\"/items\", {Handler});", null)]
     [InlineData(
         $"var api = app.MapGroup(\"/api\"); if (flag) api.Secured(); api.MapGet(\"/items\", {Handler});",
+        "RIV4009"
+    )]
+    // A local function that captures the group runs where it's called.
+    [InlineData(
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});"
+            + " if (flag) { void Secure() => api.RequireAuthorization(); Secure(); }",
+        "RIV4009"
+    )]
+    [InlineData(
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});"
+            + " if (flag) Secure(); void Secure() => api.RequireAuthorization();",
+        "RIV4009"
+    )]
+    [InlineData(
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});"
+            + " void Wire() => Secure(); if (flag) Wire(); void Secure() => api.RequireAuthorization();",
+        "RIV4009"
+    )]
+    [InlineData(
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});"
+            + " void Wire() => Secure(api); if (flag) Wire();"
+            + " static void Secure(RouteGroupBuilder group) => group.RequireAuthorization();",
+        "RIV4009"
+    )]
+    [InlineData(
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});"
+            + " Secure(); void Secure() => api.RequireAuthorization();",
+        null
+    )]
+    [InlineData(
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});"
+            + " void Secure() => api.RequireAuthorization();",
+        Case1
+    )]
+    [InlineData(
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});"
+            + " Action later = Secure; void Secure() => api.RequireAuthorization();",
         "RIV4009"
     )]
     public void Minimal_api_route_group_authorization(string body, string? expected)
@@ -1195,37 +1378,41 @@ public sealed class SecurityCoverageTests
 
     [Theory]
     [InlineData(
-        $"var endpoint = app.MapGet(\"/api/items\", {Handler}); if (!flag) return; endpoint.RequireAuthorization();",
-        true
+        $"var endpoint = app.MapGet(\"/api/items\", {Handler}); if (!flag) return; endpoint.RequireAuthorization();"
     )]
     // A helper declared above the call: its own early return still counts.
     [InlineData(
         "void Secure(RouteHandlerBuilder builder) { if (!flag) return; builder.RequireAuthorization(); }"
-            + $" Secure(app.MapGet(\"/api/items\", {Handler}));",
-        true
+            + $" Secure(app.MapGet(\"/api/items\", {Handler}));"
     )]
-    // A local function declared after the method's return runs where it's called, not after it.
+    // A local function capturing the endpoint, called after a return.
     [InlineData(
-        $"var api = app.MapGroup(\"/api\"); Secure(api); api.MapGet(\"/items\", {Handler}); return;"
-            + " static void Secure(RouteGroupBuilder group) => group.RequireAuthorization();",
-        false
+        $"var endpoint = app.MapGet(\"/api/items\", {Handler}); if (!flag) return; Secure();"
+            + " void Secure() => endpoint.RequireAuthorization();"
     )]
-    public void Early_return_before_a_requirement_makes_it_conditional(
-        string body,
-        bool conditional
-    )
+    public void Early_return_before_a_requirement_makes_it_conditional(string body)
     {
         var warnings = Check(Contract(assembly: SecuredDefault), App(body));
-
-        if (!conditional)
-        {
-            AssertVerdict(warnings, null);
-            return;
-        }
 
         var warning = Assert.Single(Security(warnings));
         Assert.Equal(CoverageWarningKind.AuthorizationUnreadable, warning.Kind);
         Assert.Contains("after the return at", warning.Message);
+    }
+
+    [Fact]
+    public void A_return_above_a_local_function_doesnt_make_its_requirement_conditional()
+    {
+        // The local function is declared after the method's return, and runs where it's
+        // called, not after it.
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                $"var api = app.MapGroup(\"/api\"); Secure(api); api.MapGet(\"/items\", {Handler}); return;"
+                    + " static void Secure(RouteGroupBuilder group) => group.RequireAuthorization();"
+            )
+        );
+
+        AssertVerdict(warnings, null);
     }
 
     // ---------------------------------------------------------------

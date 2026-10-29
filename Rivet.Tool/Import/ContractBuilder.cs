@@ -709,19 +709,7 @@ internal static class ContractBuilder
                     : mapper.ResolveCSharpType(schema, $"response header {name}");
                 var format = schema is null ? null : mapper.ResolveFormat(schema);
                 var isFormatSpecified =
-                    format is not null
-                    || typeName.TrimEnd('?')
-                        is "sbyte"
-                            or "byte"
-                            or "short"
-                            or "ushort"
-                            or "int"
-                            or "uint"
-                            or "long"
-                            or "ulong"
-                            or "float"
-                            or "double"
-                            or "decimal";
+                    format is not null || BuiltInScalars.HasImplicitFormat(typeName.TrimEnd('?'));
 
                 headers.Add(
                     new GeneratedResponseHeader(

@@ -107,9 +107,7 @@ public sealed class OpenApiConformanceTests : IDisposable
     {
         var compilation = CompilationHelper.CreateCompilationFromMultiple(sources);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-        var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
+        var merged = CompilationHelper.WalkMerged(compilation, discovered, walker);
         // As the CLI does: --security replaces the source's security attributes wholesale.
         var securityConfig = security is null
             ? SecurityMetadataWalker.Walk(compilation)

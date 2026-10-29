@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Reflection.Metadata;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -109,26 +111,22 @@ internal static class FormBinding
     /// The members <paramref name="binder"/> binds on <paramref name="type"/>: each parameter
     /// of the constructor it calls (<see cref="BoundConstructor"/>) with the property it sets,
     /// then every other property it can see and set (<see cref="Sets"/>), less those an
-    /// attribute takes out for it (<see cref="Skips"/>); none when it can't create the type
-    /// (<see cref="CantCreate"/>). <c>[AsParameters]</c> stops at the constructor: given one
-    /// with parameters, RequestDelegateFactory binds its arguments and sets no property. The
-    /// properties are <see cref="FormBoundProperties"/>, so a derived member hides its base's
-    /// however accessible it is, and a package base counts.
+    /// attribute takes out for it (<see cref="Skips"/>). <c>[AsParameters]</c> stops at the
+    /// constructor: given one with parameters, RequestDelegateFactory binds its arguments and
+    /// sets no property. The properties are <see cref="FormBoundProperties"/>, so a derived
+    /// member hides its base's however accessible it is, and a package base counts. These are
+    /// the members it would bind whether or not it can create the type, since MVC's
+    /// <c>[ApiController]</c> inference reads them either way; a caller that binds them asks
+    /// <see cref="CantCreate"/> first.
     /// </summary>
     internal static IReadOnlyList<BoundMember> BoundMembers(
-        Compilation compilation,
         WellKnownTypes wkt,
         INamedTypeSymbol type,
         Binder binder
     )
     {
-        var properties = FormBoundProperties(compilation, type);
+        var properties = FormBoundProperties(wkt.Compilation, type);
         var members = new List<BoundMember>();
-        if (CantCreate(type, properties, binder) is not null)
-        {
-            return members;
-        }
-
         var bound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var constructor = BoundConstructor(type, properties, binder);
         foreach (var parameter in constructor?.Parameters ?? [])
@@ -155,7 +153,7 @@ internal static class FormBinding
         members.AddRange(
             properties
                 .Where(property =>
-                    Sets(binder, property)
+                    Sets(wkt, binder, property)
                     && !bound.Contains(property.Name)
                     && Skips(wkt, binder, property) is null
                 )
@@ -169,27 +167,84 @@ internal static class FormBinding
     /// constructor: through a public setter or init accessor, or, for MVC, in place. MVC binds
     /// a get-only property of a reference type that isn't an array or a string
     /// (ComplexObjectModelBinder.CanUpdateReadOnlyProperty), and a collection binder then adds
-    /// to the collection the getter returns (ModelBindingHelper.GetCompatibleCollection), so a
-    /// get-only <c>ICollection&lt;T&gt;</c> such as <c>List&lt;IFormFile&gt; Files { get; } = [];</c>
-    /// is bound. Any other member a binder replaces, and with no setter the new value is thrown
-    /// away, so a get-only <c>IFormFile</c> stays unbound. Pinned on real hosts by
-    /// <c>FormPartNameTests.The_hosts_skip_these_members_differently</c>.
+    /// to the collection the getter returns, but only when that's a live
+    /// <c>ICollection&lt;T&gt;</c> that isn't read-only (ModelBindingHelper.GetCompatibleCollection).
+    /// Otherwise it builds a collection of its own, which a get-only property throws away, or,
+    /// for a type it can't create (an immutable one), fails the request. So a get-only
+    /// collection counts only when it's an auto-property whose initializer creates a writable
+    /// collection (<see cref="CreatesWritableCollection"/>), as
+    /// <c>List&lt;IFormFile&gt; Files { get; } = [];</c> does; one left null, computed on each
+    /// read, or holding a read-only or immutable collection stays unbound. Any other member a
+    /// binder replaces, and with no setter the new value is thrown away, so a get-only
+    /// <c>IFormFile</c> stays unbound. Pinned on real hosts by
+    /// <c>FormPartNameTests.The_hosts_skip_these_members_differently</c> and
+    /// <c>The_hosts_construct_these_types_differently</c>.
     /// </summary>
-    private static bool Sets(Binder binder, IPropertySymbol property) =>
+    private static bool Sets(WellKnownTypes wkt, Binder binder, IPropertySymbol property) =>
         property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
         || binder == Binder.Mvc
-            && property.Type
-                is INamedTypeSymbol
+            && IsCollection(property.Type)
+            && CreatesWritableCollection(wkt, property);
+
+    /// <summary>
+    /// A type MVC binds through the getter of a get-only property and then fills in place
+    /// when the collection it returns is writable: an <c>ICollection&lt;T&gt;</c> of a
+    /// reference type, a string aside.
+    /// </summary>
+    private static bool IsCollection(ITypeSymbol type) =>
+        type
+            is INamedTypeSymbol
+            {
+                IsReferenceType: true,
+                SpecialType: not SpecialType.System_String
+            } collection
+        && collection
+            .AllInterfaces.Append(collection)
+            .Any(candidate =>
+                candidate.OriginalDefinition.SpecialType
+                == SpecialType.System_Collections_Generic_ICollection_T
+            );
+
+    /// <summary>
+    /// Whether <paramref name="property"/> is an auto-property (a <c>get;</c> with no body)
+    /// whose initializer creates a collection MVC can add to: a collection expression or a
+    /// <c>new</c> whose type isn't read-only. A collection expression for an interface makes
+    /// a <c>List&lt;T&gt;</c>; one for a type with a <c>[CollectionBuilder]</c> goes through
+    /// its builder, which is how the immutable collections are made. The read-only ones are
+    /// those in System.Collections.Immutable or System.Collections.Frozen and the
+    /// <c>ReadOnlyCollection&lt;T&gt;</c> and <c>ReadOnlyDictionary&lt;TKey, TValue&gt;</c> families.
+    /// Anything else (no initializer, a method call, a type with no source to read) can't be
+    /// shown to be live, so it doesn't count.
+    /// </summary>
+    private static bool CreatesWritableCollection(WellKnownTypes wkt, IPropertySymbol property)
+    {
+        if (
+            property.DeclaringSyntaxReferences is not [var reference]
+            || reference.GetSyntax()
+                is not PropertyDeclarationSyntax
                 {
-                    IsReferenceType: true,
-                    SpecialType: not SpecialType.System_String
-                } collection
-            && collection
-                .AllInterfaces.Append(collection)
-                .Any(candidate =>
-                    candidate.OriginalDefinition.SpecialType
-                    == SpecialType.System_Collections_Generic_ICollection_T
-                );
+                    Initializer.Value: var value,
+                    AccessorList.Accessors: [{ Body: null, ExpressionBody: null }],
+                }
+            || value is not (CollectionExpressionSyntax or BaseObjectCreationExpressionSyntax)
+        )
+        {
+            return false;
+        }
+
+        // A collection expression's type is the one it converts to; a new's, the one it creates.
+        var info = wkt.Compilation.GetSemanticModel(value.SyntaxTree).GetTypeInfo(value);
+        return (value is CollectionExpressionSyntax ? info.ConvertedType : info.Type) switch
+        {
+            INamedTypeSymbol { TypeKind: TypeKind.Interface } => true,
+            INamedTypeSymbol created => created.ContainingNamespace?.ToDisplayString()
+                is not ("System.Collections.Immutable" or "System.Collections.Frozen")
+                && !created.HasAttribute(wkt.CollectionBuilderAttribute)
+                && !created.DerivesFrom(wkt.ReadOnlyCollection)
+                && !created.DerivesFrom(wkt.ReadOnlyDictionary),
+            _ => false,
+        };
+    }
 
     /// <summary>
     /// The constructor <paramref name="binder"/> creates <paramref name="type"/> with, when its
@@ -295,6 +350,25 @@ internal static class FormBinding
         };
     }
 
+    /// <summary>
+    /// What the host does with a handler's input when <paramref name="binder"/> can't create
+    /// its type (<see cref="CantCreate"/>), as the clause that follows the reason. Pinned on
+    /// real hosts by <c>FormPartNameTests.The_hosts_construct_these_types_differently</c> and
+    /// <c>MinimalApiBindingHostTests.AsParameters_refuses_a_type_it_cant_create</c>.
+    /// </summary>
+    internal static string WhenItCantCreate(Binder binder) =>
+        binder switch
+        {
+            Binder.Mvc => "so MVC fails the request (a 500) when it binds it",
+            Binder.FormMapper => "so the handler never sees what the form sends for it",
+            _ => "so the endpoint never serves a request",
+        };
+
+    /// <summary>The shape every binder can create, as the remedy for <see cref="CantCreate"/>.</summary>
+    internal const string CreatableRemedy =
+        "Make it a class with one public constructor: a parameterless one with settable "
+        + "properties, or a positional record's.";
+
     // What reflection's GetConstructors() lists: a struct's implicit parameterless
     // constructor isn't one.
     private static IReadOnlyList<IMethodSymbol> PublicConstructors(INamedTypeSymbol type) =>
@@ -335,7 +409,6 @@ internal static class FormBinding
     /// Each part is named by <see cref="PartName"/>.
     /// </summary>
     internal static IReadOnlyList<FormPart> Parts(
-        Compilation compilation,
         WellKnownTypes wkt,
         TypeWalker typeWalker,
         ITypeSymbol type,
@@ -345,7 +418,7 @@ internal static class FormBinding
     )
     {
         var named = type as INamedTypeSymbol;
-        var properties = FormBoundProperties(compilation, type);
+        var properties = FormBoundProperties(wkt.Compilation, type);
         var binders = hosts switch
         {
             FormHosts.Mvc => new[] { Binder.Mvc },
@@ -358,16 +431,14 @@ internal static class FormBinding
             {
                 throw Diagnostics.Error(
                     Diagnostics.UnresolvedBindingSource,
-                    $"form input '{named.Name}' on {where} binds no part: {why}. Make it a class "
-                        + "with one public constructor: a parameterless one with settable properties, or "
-                        + "a positional record's."
+                    $"form input '{named.Name}' on {where} binds no part: {why}. {CreatableRemedy}"
                 );
             }
         }
 
         var boundBy = binders.ToDictionary(
             binder => binder,
-            binder => named is null ? [] : BoundMembers(compilation, wkt, named, binder)
+            binder => named is null ? [] : BoundMembers(wkt, named, binder)
         );
         var parts = new List<FormPart>();
         foreach (var property in properties)
@@ -398,40 +469,49 @@ internal static class FormBinding
                         Diagnostics.UnresolvedBindingSource,
                         $"form input member '{property.Name}' on {where} carries files, but nothing "
                             + "can set it: it has no public setter or init accessor and no constructor "
-                            + "parameter, so the binders drop the part, and the body would be multipart "
-                            + "for a file nobody reads. Give it a public setter or init accessor, or "
-                            + "take it out of the form input."
+                            + "parameter"
+                            + (
+                                binders.Contains(Binder.Mvc) && IsCollection(property.Type)
+                                    ? ", and MVC fills a get-only collection in place only when its "
+                                        + "initializer creates a writable one (= [] or new List<IFormFile>())"
+                                    : ""
+                            )
+                            + ", so the binders drop the part, and the body would be multipart for a "
+                            + "file nobody reads. Give it a public setter or init accessor, or take it "
+                            + "out of the form input."
                     );
                 }
 
                 continue;
             }
 
-            // All null was handled above, so this is one host binding what the other skips,
-            // or what only MVC can fill in place.
+            // All null was handled above, so this is one host binding what the other drops.
             if (binders.Where(binder => members[binder] is null).ToList() is [var dropped])
             {
+                var kept = binders.Single(binder => binder != dropped);
                 var (droppedBy, keptBy) =
                     dropped == Binder.Mvc
                         ? ("MVC's model binder", "the minimal-API form mapper")
                         : ("the minimal-API form mapper", "MVC's model binder");
-                var skippedBy = Skips(wkt, dropped, property);
+                var (why, remedy) =
+                    !Sets(wkt, dropped, property) && Sets(wkt, kept, property)
+                        ? (
+                            $"bound by {keptBy}, which fills the collection its getter returns, but "
+                                + $"left unset by {droppedBy}, which needs a public setter or init accessor",
+                            "Give it a public setter or init accessor."
+                        )
+                    : Skips(wkt, dropped, property) is { } skippedBy
+                        ? (
+                            $"skipped by {droppedBy} ({skippedBy}) but bound by {keptBy}",
+                            "Skip it for both ([BindNever] and [IgnoreDataMember]) or neither."
+                        )
+                    : throw new UnreachableException(
+                        $"'{property.Name}' is dropped by {droppedBy} for a reason Parts can't explain"
+                    );
                 throw Diagnostics.Error(
                     Diagnostics.UnresolvedBindingSource,
-                    $"form input member '{property.Name}' on {where} is "
-                        + (
-                            skippedBy is null
-                                ? $"bound by {keptBy}, which fills the collection its getter returns, but "
-                                    + $"left unset by {droppedBy}, which needs a public setter or init accessor"
-                                : $"skipped by {droppedBy} ({skippedBy}) but bound by {keptBy}"
-                        )
-                        + ", so no one form body describes what every host that can serve the contract "
-                        + "reads. "
-                        + (
-                            skippedBy is null
-                                ? "Give it a public setter or init accessor."
-                                : "Skip it for both ([BindNever] and [IgnoreDataMember]) or neither."
-                        )
+                    $"form input member '{property.Name}' on {where} is {why}, so no one form body "
+                        + $"describes what every host that can serve the contract reads. {remedy}"
                 );
             }
 
@@ -541,11 +621,7 @@ internal static class FormBinding
     ) =>
         attributes
             .Concat(type.GetAttributes())
-            .Where(attribute =>
-                attribute.AttributeClass is { } attributeClass
-                && wkt.IModelNameProvider is { } provider
-                && attributeClass.AllInterfaces.Contains(provider, SymbolEqualityComparer.Default)
-            )
+            .Where(attribute => attribute.AttributeClass.Implements(wkt.IModelNameProvider))
             .Select(attribute =>
                 attribute.NamedArgument(attribute.Is(wkt.Bind) ? "Prefix" : "Name")
             )

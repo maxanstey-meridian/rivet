@@ -23,7 +23,7 @@ validating hosts at runtime.
 | `[RivetDefault("json")]` | property | `default` (JSON literal) |
 | `[RivetOptional]` | property | Removes the property from `required`. Nullability alone never does; on a query, header or form parameter a nullable type is already optional. |
 | `[RivetReadOnly]` / `[RivetWriteOnly]` | property | `readOnly: true` / `writeOnly: true` |
-| `[RivetFormat("fmt")]` | property, class, struct, enum | `format` — for custom formats (`uri-template`, `currency`, ...) with no dedicated C# type; takes precedence over formats inferred from DataAnnotations |
+| `[RivetFormat("fmt")]` | property, enum, `[RivetScalar]` brand (class or struct) | `format` — for custom formats (`uri-template`, `currency`, ...) with no dedicated C# type; takes precedence over formats inferred from DataAnnotations |
 | `[RivetConstraints(...)]` | property | `multipleOf`, `uniqueItems` — the two constraints DataAnnotations cannot express. Also a `ValidationAttribute`: enforced at runtime under validating hosts (`[ApiController]` model validation, `Validator.TryValidateObject`); null values pass — pair with `[Required]`. See [Runtime validation](../guides/runtime-validation.md#enforcing-constraints-at-runtime) |
 | `[RivetHeader("Wire-Name")]` | property | Marks a contract input-record property as a **request header parameter** (`in: header`, original casing preserved; without a name the property name is the header name). The property never enters the JSON schema. **Spec-only** — header binding stays the host's job. `Accept`/`Content-Type`/`Authorization` are rejected by the emitter (RIV2009). |
 | `[RivetScalar]` | class, struct, record | Declares an explicit **scalar value object**: the type must have one public readable non-indexer property named `Value` and a public constructor accepting its type, whose type becomes the wire primitive with `x-rivet-brand`. Opt-in replacement for the retired shape-only single-`Value`-property convention; a `Value` wrapper without it is an ordinary object schema (invalid shapes fail with RIV1103). |
@@ -48,9 +48,9 @@ instead.
 | Attribute | Effect |
 |---|---|
 | `[assembly: RivetSecurityScheme(name, type, ...)]` | Declares a scheme under `components/securitySchemes`. `type` is `"http"` (with `scheme:` such as `"bearer"`, and optionally `bearerFormat:`), `"apiKey"` (with `parameterName:` and `location:` `"header"`, `"query"` or `"cookie"`), `"oauth2"`, `"openIdConnect"` (with `openIdConnectUrl:`) or `"mutualTLS"`; `description:` goes on any of them. |
-| `[assembly: RivetOAuthFlow(scheme, flow, authorizationUrl, tokenUrl, refreshUrl, scopeNames, scopeDescriptions)]` | One flow of an `oauth2` scheme: `"implicit"`, `"password"`, `"clientCredentials"` or `"authorizationCode"`, with its scopes as two parallel arrays. |
+| `[assembly: RivetOAuthFlow(scheme, flow, authorizationUrl, tokenUrl, refreshUrl, scopeNames, scopeDescriptions)]` | One flow of a scheme declared with type `"oauth2"`: `"implicit"`, `"password"`, `"clientCredentials"`, or `"authorizationCode"`, each at most once per scheme, with its scopes as two parallel arrays. |
 | `[assembly: RivetGlobalSecurity(order)]` | Starts alternative number `order` of the document's default `security`. An alternative nothing adds a scheme to is `{}`: credentials optional. |
-| `[assembly: RivetGlobalSecurityScheme(order, scheme, scopes)]` | Adds a scheme, with the scopes it must grant, to alternative `order`. |
+| `[assembly: RivetGlobalSecurityScheme(order, scheme, scopes)]` | Adds a scheme, with the scopes it must grant, to alternative `order`, which a `[RivetGlobalSecurity(order)]` must start. |
 | `[assembly: RivetEmptyGlobalSecurity]` | The document's default is `security: []`: nothing is needed unless an operation says so. |
 
 So a bearer API reads:

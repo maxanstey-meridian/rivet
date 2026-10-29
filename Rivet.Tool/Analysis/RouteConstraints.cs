@@ -39,7 +39,8 @@ internal static class RouteConstraints
     /// <paramref name="template"/>'s route tokens (<see cref="RouteParser.ParseRouteTokens"/>).
     /// A template routing refuses at startup (an unclosed parameter, an optional one with a
     /// default, two parameters in a row, and a repeated name unless
-    /// <paramref name="readRepeats"/> lets a contract's through) stops generation here rather
+    /// <paramref name="readRepeats"/> lets one through, which only a static contract's field,
+    /// the shape import writes, does) stops generation here rather
     /// than reaching the spec. So does a literal brace (<c>{{</c> or <c>}}</c>), which routing
     /// serves but an OpenAPI path can't hold (<see cref="RouteParser.HasLiteralBrace"/>).
     /// </summary>

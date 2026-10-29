@@ -280,21 +280,42 @@ where the helper is called: under that call's condition, unconditionally if any 
 not at all if nothing calls it. A helper handed to a call as a method group, as in
 `services.AddControllers(ConfigureMvc)`, runs where that call does; one stored in a delegate
 can't be followed, so it's unknown. A call through an interface the helper implements, or a
-method it overrides, counts as a call to it, so a module's `AddServices` runs where
-`module.AddServices(services)` does.
+method it overrides, runs whichever implementation the receiver turns out to be, so it counts
+only when `--check` can see that: `IAppModule module = new AuthModule();` runs
+`AuthModule.AddServices` where `module.AddServices(services)` is called, and
+`flag ? new AuthModule() : new OpenModule()`, or a module that arrives as a parameter, is
+unknown.
 
 Past your own calls, `--check` holds the host to the rules ASP.NET actually follows, and
-nothing friendlier. The entry point runs. A Startup class runs where `UseStartup<Startup>()`
-or `UseStartup(typeof(Startup))` hands it over, and only the methods `StartupLoader` looks
-for: `ConfigureServices`, `Configure`, and `ConfigureContainer`, or an environment's own
-`ConfigureDevelopmentServices` and friends. An environment's own method runs only in that
-environment, and the plain one only outside it, so either is unknown. A class the framework
-calls through its own interface, such as an `IConfigureOptions<MvcOptions>` or
-`IPostConfigureOptions<MvcOptions>` that adds the filter, runs where you hand the framework
-its type (`services.ConfigureOptions<RequireSignIn>()`), and is unknown when your project
-never names it, since assembly scanning may still find it. A public
-`ConfigureAuthorization(this IServiceCollection services)` that nothing calls runs nowhere:
-the `Configure` prefix means something to ASP.NET only on a Startup class.
+nothing friendlier. Top-level statements and the entry point run. Setup in a constructor, a
+property, or a field initializer runs wherever that type gets made, which `--check` doesn't
+follow, so it's unknown. A Startup class runs where `UseStartup<Startup>()`,
+`UseStartup(typeof(Startup))`, or `UseStartup(context => new Startup(...))` hands it over,
+and only the methods `StartupLoader` looks for: `ConfigureServices`, `Configure`, and
+`ConfigureContainer`, or an environment's own `ConfigureDevelopmentServices` and friends.
+Those are found by reflection, so a base class's `ConfigureServices` counts when `Startup`
+inherits it, and not when `Startup` overrides or hides it. An environment's own method runs
+only in that environment, and the plain one only outside it, so either is unknown. A
+`UseStartup` whose type `--check` can't read (a `Type` from elsewhere, or the overload that
+takes an assembly name and finds the class by name at run time) may run any public
+`Configure…` method, so each of those is unknown.
+
+A class the framework calls through its own interface, such as an
+`IConfigureOptions<MvcOptions>` or `IPostConfigureOptions<MvcOptions>` that adds the filter,
+runs where you register it with the framework under that interface:
+`services.ConfigureOptions<RequireSignIn>()` (or with `typeof(RequireSignIn)` or a
+`new RequireSignIn()`), or a service registration whose service type is the interface, such
+as `AddSingleton<IPostConfigureOptions<MvcOptions>, RequireSignIn>()` or
+`TryAddEnumerable(ServiceDescriptor.Singleton<IPostConfigureOptions<MvcOptions>, RequireSignIn>())`.
+Nothing else counts. `AddSingleton<RequireSignIn>()` registers the class as itself, so the
+options system never asks for it, and a `nameof(RequireSignIn)` or a field of that type
+registers nothing at all. With no registration it can read, the class is unknown, since
+assembly scanning may still find it. One more wrinkle comes from the options system itself:
+on a class that implements `IConfigureNamedOptions<MvcOptions>`, only the named
+`Configure(name, options)` ever runs, so a filter added in the plain `Configure(options)`
+doesn't count. A public `ConfigureAuthorization(this IServiceCollection services)` that
+nothing calls runs nowhere: the `Configure` prefix means something to ASP.NET only on a
+Startup class.
 
 ### What it can't see
 
@@ -324,7 +345,9 @@ branch, a `switch`, a loop, a `catch`, the right of `&&`, `||`, or `??`, a `?.`,
 `return` that may leave before the call all count. A condition around both the endpoint and
 its requirement doesn't: the requirement holds whenever the endpoint exists. Nor does a
 `return` above a local function's declaration, the usual spot for one, since the function
-runs where it's called, not where it's written.
+runs where it's called, not where it's written. That cuts both ways: a local function that
+applies a requirement to a group it captures counts under the condition of each place it's
+called, and applies nothing if nothing calls it.
 
 It's never a guess, though, and it isn't blanket: `--check` works the verdict out for every
 way the unknowns could fall, and reports only when they disagree. An `[AllowAnonymous]`

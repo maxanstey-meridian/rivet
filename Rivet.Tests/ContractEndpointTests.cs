@@ -2114,11 +2114,7 @@ public sealed class ContractEndpointTests
     {
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
-        var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
-
-        // Merge via the production EndpointMerger (contract wins on collision) — same code as Program.cs
-        return EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
+        return CompilationHelper.WalkMerged(compilation, discovered, walker);
     }
 
     [Fact]

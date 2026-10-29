@@ -47,15 +47,16 @@ internal static class SecurityMetadataWalker
                         var authorizationUrl,
                         var tokenUrl,
                         var refreshUrl,
-                        var scopeNames,
-                        var scopeDescriptions,
+                        { IsNull: false } scopeNames,
+                        { IsNull: false } scopeDescriptions,
                     ]
                 && schemeArgument.Value is string schemeName
                 && flowArgument.Value is string flowName
             )
             {
-                var names = ReadStrings(scopeNames);
-                var descriptions = ReadStrings(scopeDescriptions);
+                var type = ParseFlowType(flowName, schemeName);
+                var names = ReadStrings(scopeNames, schemeName, "scope name");
+                var descriptions = ReadStrings(scopeDescriptions, schemeName, "scope description");
                 if (names.Count != descriptions.Count)
                 {
                     throw Diagnostics.Error(
@@ -64,20 +65,39 @@ internal static class SecurityMetadataWalker
                     );
                 }
 
+                var scopes = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (var (scope, description) in names.Zip(descriptions))
+                {
+                    if (!scopes.TryAdd(scope, description))
+                    {
+                        throw Diagnostics.Error(
+                            Diagnostics.InvalidSecuritySchemeMetadata,
+                            $"OAuth2 security scheme '{schemeName}' declares scope '{scope}' twice "
+                                + $"in its {flowName} flow."
+                        );
+                    }
+                }
+
                 if (!flows.TryGetValue(schemeName, out var schemeFlows))
                 {
                     schemeFlows = [];
                     flows.Add(schemeName, schemeFlows);
                 }
+                if (schemeFlows.Any(flow => flow.Type == type))
+                {
+                    // OpenAPI keys a scheme's flows by type, so a second one has nowhere to go.
+                    throw Diagnostics.Error(
+                        Diagnostics.InvalidSecuritySchemeMetadata,
+                        $"OAuth2 security scheme '{schemeName}' declares its {flowName} flow twice."
+                    );
+                }
                 schemeFlows.Add(
                     new OAuth2Flow(
-                        ParseFlowType(flowName, schemeName),
+                        type,
                         authorizationUrl.Value as string,
                         tokenUrl.Value as string,
                         refreshUrl.Value as string,
-                        names
-                            .Zip(descriptions)
-                            .ToDictionary(pair => pair.First, pair => pair.Second)
+                        scopes
                     )
                 );
             }
@@ -92,12 +112,20 @@ internal static class SecurityMetadataWalker
             else if (
                 attribute.Is(globalSchemeType)
                 && attribute.ConstructorArguments
-                    is [var schemeOrderArgument, var requirementSchemeArgument, var scopesArgument]
+                    is [
+                        var schemeOrderArgument,
+                        var requirementSchemeArgument,
+                        { IsNull: false } scopesArgument,
+                    ]
                 && schemeOrderArgument.Value is int schemeOrder
                 && requirementSchemeArgument.Value is string requirementScheme
             )
             {
-                requirements.AddScheme(schemeOrder, requirementScheme, ReadStrings(scopesArgument));
+                requirements.AddScheme(
+                    schemeOrder,
+                    requirementScheme,
+                    ReadStrings(scopesArgument, requirementScheme, "required scope")
+                );
             }
             else if (attribute.Is(emptyGlobalType))
             {
@@ -116,9 +144,9 @@ internal static class SecurityMetadataWalker
                     Diagnostics.InvalidSecuritySchemeMetadata,
                     $"[{attribute.AttributeClass!.Name.Replace("Attribute", "", StringComparison.Ordinal)}] "
                         + $"at {attribute.ApplicationSyntaxReference?.GetSyntax().SourcePosition() ?? "assembly level"} "
-                        + "has arguments Rivet can't read: a null scheme name or flow, or arguments "
-                        + "from a Rivet.Attributes version other than the rivet tool's. Give it every "
-                        + "argument its constructor names, and use the same version of both."
+                        + "has arguments Rivet can't read: a null name, flow, or scope list, or "
+                        + "arguments from a Rivet.Attributes version other than the rivet tool's. Give "
+                        + "it every argument its constructor names, and use the same version of both."
                 );
             }
         }
@@ -127,6 +155,34 @@ internal static class SecurityMetadataWalker
         foreach (var (name, attribute) in schemeAttributes)
         {
             schemes.Add(name, ReadScheme(name, attribute, flows.GetValueOrDefault(name) ?? []));
+        }
+
+        // Only an oauth2 scheme reads its flows, and only a started alternative its schemes:
+        // anything else would leave the spec without a word.
+        foreach (var flowScheme in flows.Keys)
+        {
+            if (schemes.GetValueOrDefault(flowScheme) is not OAuth2SecurityScheme)
+            {
+                throw Diagnostics.Error(
+                    Diagnostics.InvalidSecuritySchemeMetadata,
+                    $"[RivetOAuthFlow] names scheme '{flowScheme}', "
+                        + (
+                            schemeAttributes.TryGetValue(flowScheme, out var declared)
+                                ? $"whose type is '{StringArgument(declared.ConstructorArguments, 1)}'"
+                                : "which no [RivetSecurityScheme] declares"
+                        )
+                        + ". A flow belongs to a scheme declared with type 'oauth2'."
+                );
+            }
+        }
+        if (requirements.UnstartedSchemes.ToList() is [var (unstarted, scheme), ..])
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InvalidSecuritySchemeMetadata,
+                $"[RivetGlobalSecurityScheme({unstarted}, \"{scheme}\", ...)] adds to alternative "
+                    + $"{unstarted}, which no [RivetGlobalSecurity({unstarted})] starts. Add one, or "
+                    + "drop the scheme."
+            );
         }
 
         var globalRequirements =
@@ -186,8 +242,20 @@ internal static class SecurityMetadataWalker
             $"Rivet security scheme '{schemeName}' is missing its {field}."
         );
 
-    private static IReadOnlyList<string> ReadStrings(TypedConstant argument) =>
-        argument.Values.Select(value => value.Value as string ?? "").ToList();
+    private static IReadOnlyList<string> ReadStrings(
+        TypedConstant argument,
+        string schemeName,
+        string what
+    ) =>
+        argument
+            .Values.Select(value =>
+                value.Value as string
+                ?? throw Diagnostics.Error(
+                    Diagnostics.InvalidSecuritySchemeMetadata,
+                    $"Rivet security scheme '{schemeName}' has a null {what}."
+                )
+            )
+            .ToList();
 
     private static SecurityApiKeyLocation ParseLocation(string value, string schemeName) =>
         SecurityApiKeyLocations.Parse(value)
@@ -197,15 +265,9 @@ internal static class SecurityMetadataWalker
         );
 
     private static OAuth2FlowType ParseFlowType(string value, string schemeName) =>
-        value switch
-        {
-            "implicit" => OAuth2FlowType.Implicit,
-            "password" => OAuth2FlowType.Password,
-            "clientCredentials" => OAuth2FlowType.ClientCredentials,
-            "authorizationCode" => OAuth2FlowType.AuthorizationCode,
-            _ => throw Diagnostics.Error(
-                Diagnostics.InvalidSecuritySchemeMetadata,
-                $"Rivet OAuth2 security scheme '{schemeName}' has unsupported flow '{value}'."
-            ),
-        };
+        OAuth2FlowTypes.Parse(value)
+        ?? throw Diagnostics.Error(
+            Diagnostics.InvalidSecuritySchemeMetadata,
+            $"Rivet OAuth2 security scheme '{schemeName}' has unsupported flow '{value}'."
+        );
 }

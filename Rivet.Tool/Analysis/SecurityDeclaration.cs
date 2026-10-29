@@ -6,7 +6,8 @@ namespace Rivet.Tool.Analysis;
 /// <summary>
 /// The security one operation declares, step by step: the contract builder's
 /// <c>.Secure()</c>/<c>.AndSecure()</c>/<c>.OrAnonymous()</c>/<c>.Anonymous()</c> calls in chain
-/// order, or their attribute twins on a controller or action in source order. Both read
+/// order, or their attribute twins on a controller, an action, or an abstract contract method in
+/// source order. Both read
 /// through this one model, so a sequence means the same thing either way and the same
 /// sequences contradict (RIV1114): an anonymous declaration beside any alternative, and an
 /// AND with no secured alternative before it to join.
@@ -16,26 +17,32 @@ internal sealed class SecurityDeclaration(
     Func<string, RivetUserException> invalid
 )
 {
-    /// <summary>How the declaration's steps are written, for its diagnostics.</summary>
+    /// <summary>
+    /// How the declaration's steps are written, for its diagnostics, and what the steps are
+    /// (<see cref="Noun"/>: calls or attributes).
+    /// </summary>
     internal sealed record Spelling(
         string Anonymous,
         string Secure,
         string AndSecure,
-        string OrAnonymous
+        string OrAnonymous,
+        string Noun
     );
 
     internal static readonly Spelling BuilderCalls = new(
         ".Anonymous()",
         ".Secure()",
         ".AndSecure()",
-        ".OrAnonymous()"
+        ".OrAnonymous()",
+        "calls"
     );
 
     internal static readonly Spelling Attributes = new(
         "[RivetAnonymous]",
         "[RivetSecure]",
         "[RivetAndSecure]",
-        "[RivetOrAnonymous]"
+        "[RivetOrAnonymous]",
+        "attributes"
     );
 
     private readonly SecurityRequirementsBuilder _requirements = new();
@@ -192,11 +199,7 @@ internal sealed class SecurityDeclaration(
 
     private static IEnumerable<ISymbol> DeclarationLevels(IMethodSymbol method)
     {
-        for (
-            IMethodSymbol? current = method;
-            current is not null;
-            current = current.OverriddenMethod
-        )
+        foreach (var current in method.OverriddenChain().Prepend(method))
         {
             yield return current;
         }

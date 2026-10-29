@@ -252,12 +252,41 @@ public sealed class RouteConstraintTests
         Assert.Contains("ThingsController.Get", exception.Message);
     }
 
-    [Fact]
-    public void A_Repeated_Token_On_An_Endpoint_Method_Is_RIV1125()
+    [Theory]
+    // Unlike a static contract's field, the shape import writes and can write with a
+    // repeat, an MVC action and an abstract contract's method are hand-written, and routing
+    // refuses their template at startup.
+    [InlineData(
+        """
+            public sealed class ThingsController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet("/repeated/{id}/maps/{ID}")]
+                public ThingDto Get(string id) => new(id);
+            }
+            """,
+        "ThingsController.Get"
+    )]
+    [InlineData(
+        """
+            [RivetContract]
+            [Route("api/things")]
+            public abstract class ThingsContract : ControllerBase
+            {
+                [HttpGet("{id}/x/{id}")]
+                [ProducesResponseType(typeof(ThingDto), 200)]
+                public abstract Task<IActionResult> Get(string id);
+            }
+            """,
+        "ThingsContract.Get"
+    )]
+    public void A_Repeated_Token_On_A_Hand_Written_Method_Is_RIV1125(
+        string declaration,
+        string endpoint
+    )
     {
-        // Unlike a contract, which import can write with a repeat, an MVC action is
-        // hand-written, and routing refuses its template at startup.
-        var source = """
+        var source = $$"""
+            using System.Threading.Tasks;
             using Microsoft.AspNetCore.Mvc;
             using Rivet;
 
@@ -266,12 +295,7 @@ public sealed class RouteConstraintTests
             [RivetType]
             public sealed record ThingDto(string Name);
 
-            public sealed class ThingsController : ControllerBase
-            {
-                [RivetEndpoint]
-                [HttpGet("/repeated/{id}/maps/{ID}")]
-                public ThingDto Get(string id) => new(id);
-            }
+            {{declaration}}
             """;
 
         var exception = Assert.Throws<RivetUserException>(() =>
@@ -281,6 +305,7 @@ public sealed class RouteConstraintTests
         Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
         Assert.Contains("routing refuses it at startup", exception.Message);
         Assert.Contains("appears more than one time", exception.Message);
+        Assert.Contains(endpoint, exception.Message);
     }
 
     [Fact]
@@ -611,6 +636,157 @@ public sealed class RouteConstraintTests
 
         Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
         Assert.Contains("MVC refuses it at startup", exception.Message);
+        Assert.Contains("ThingsController.Get", exception.Message);
+    }
+
+    // Route value attributes a test controller can carry. Version and Edition supply a value
+    // through their constructors (one a primary constructor), AdminArea through AreaAttribute,
+    // ActionKey keys "action" (which [action] ignores), and Tenant's value is only known at
+    // run time.
+    private const string RouteValueAttributes = """
+        public sealed class VersionAttribute : RouteValueAttribute
+        {
+            public VersionAttribute(string version) : base("version", version) { }
+            public VersionAttribute() : this("v1") { }
+        }
+        public sealed class EditionAttribute(string edition) : RouteValueAttribute("edition", edition);
+        public sealed class AdminAreaAttribute : AreaAttribute
+        {
+            public AdminAreaAttribute() : base("Admin") { }
+        }
+        public sealed class ActionKeyAttribute() : RouteValueAttribute("action", "renamed");
+        public sealed class AreaKeyAttribute() : RouteValueAttribute("AREA", "custom");
+        public sealed class TenantAttribute() : RouteValueAttribute("tenant", Defaults.Tenant);
+        public static class Defaults { public static string Tenant = "acme"; }
+        """;
+
+    private static string RouteValues(string controllers) =>
+        $$"""
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.AspNetCore.Mvc.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            {{RouteValueAttributes}}
+
+            {{controllers}}
+            """;
+
+    // Each row's expected path is what a real MVC host (net9.0, its action descriptors) put
+    // in the template for the same declarations.
+    [Theory]
+    // A RouteValueAttribute subclass supplies its token, followed through this(...) and base(...).
+    [InlineData(
+        """[Version("v2"), Route("api/[version]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/v2/things"
+    )]
+    [InlineData(
+        """[Version, Route("api/[version]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/v1/things"
+    )]
+    [InlineData(
+        """[Edition("pro"), Route("api/[edition]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/pro/things"
+    )]
+    [InlineData(
+        """[AdminArea, Route("api/[area]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/Admin/things"
+    )]
+    // [Area] on a base controller is inherited; the derived one's of the same class hides it.
+    [InlineData(
+        """[Area("Base")] public abstract class BaseController : ControllerBase { } [Route("api/[area]/things")] public sealed class ThingsController : BaseController { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/Base/things"
+    )]
+    [InlineData(
+        """[Area("Base")] public abstract class BaseController : ControllerBase { } [Area("Derived"), Route("api/[area]/things")] public sealed class ThingsController : BaseController { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/Derived/things"
+    )]
+    // The action's [Area] beats its controller's, and a method it overrides passes one on.
+    [InlineData(
+        """[Area("Controller"), Route("api/[area]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet, Area("Action")] public ThingDto Get() => new("x"); }""",
+        "/api/Action/things"
+    )]
+    [InlineData(
+        """public abstract class BaseController : ControllerBase { [Area("FromBase")] public virtual ThingDto Get() => new("x"); } [Area("Controller"), Route("api/[area]/things")] public sealed class ThingsController : BaseController { [RivetEndpoint, HttpGet] public override ThingDto Get() => new("y"); }""",
+        "/api/FromBase/things"
+    )]
+    // [action] is the action's name: [ActionName]'s verbatim, else less an "Async" suffix,
+    // and a route value keyed "action" doesn't change it.
+    [InlineData(
+        """[Route("api/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet("[action]"), ActionName("PongAsync")] public ThingDto Get() => new("x"); }""",
+        "/api/things/PongAsync"
+    )]
+    [InlineData(
+        """[Route("api/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet("[action]")] public ThingDto FetchAsync() => new("x"); }""",
+        "/api/things/Fetch"
+    )]
+    [InlineData(
+        """[Route("api/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet("[action]"), ActionKey] public ThingDto Keyed() => new("x"); }""",
+        "/api/things/Keyed"
+    )]
+    // The "Controller" suffix is matched ignoring case, and a base class's [Route] is used
+    // when the controller declares none (its own wins when it does).
+    [InlineData(
+        """[Controller, Route("api/[controller]")] public sealed class Widgetcontroller : ControllerBase { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/Widget"
+    )]
+    [InlineData(
+        """[Route("api/base/[controller]")] public abstract class RoutedBaseController : ControllerBase { } public sealed class ThingsController : RoutedBaseController { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "/api/base/Things"
+    )]
+    [InlineData(
+        """[Route("api/base")] public abstract class RoutedBaseController : ControllerBase { } [Route("api/child")] public sealed class ThingsController : RoutedBaseController { [RivetEndpoint, HttpGet("x")] public ThingDto Get() => new("x"); }""",
+        "/api/child/x"
+    )]
+    // An attribute Rivet can't read doesn't matter when another supplies the token on the
+    // action, which beats anything on the controller.
+    [InlineData(
+        """[Tenant, Route("api/[area]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet, Area("Action")] public ThingDto Get() => new("x"); }""",
+        "/api/Action/things"
+    )]
+    public void Controller_Route_Values_Come_From_Where_MVC_Reads_Them(
+        string controllers,
+        string expected
+    )
+    {
+        var endpoint = Assert.Single(
+            CompilationHelper.WalkMerged(RouteValues(controllers)).Endpoints
+        );
+
+        Assert.Equal(expected, endpoint.RouteTemplate);
+    }
+
+    [Theory]
+    // Only Tenant could supply [tenant], and its value is a static field's.
+    [InlineData(
+        """[Tenant, Route("api/[tenant]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "Rivet can't read the route value '[tenant]', which only 'TenantAttribute' could supply"
+    )]
+    // Tenant on the action could key "area" and beat the controller's [Area].
+    [InlineData(
+        """[Area("Controller"), Route("api/[area]/things")] public sealed class ThingsController : ControllerBase { [RivetEndpoint, HttpGet, Tenant] public ThingDto Get() => new("x"); }""",
+        "Rivet can't read the route value '[area]', which only 'TenantAttribute' could supply"
+    )]
+    // Two attributes keying "area" on one controller: MVC throws building the controller model.
+    [InlineData(
+        """[AreaKey] public abstract class BaseController : ControllerBase { } [Area("Derived"), Route("api/things")] public sealed class ThingsController : BaseController { [RivetEndpoint, HttpGet] public ThingDto Get() => new("x"); }""",
+        "MVC refuses it at startup (two route values keyed 'area' on the controller 'ThingsController', from AreaAttribute and AreaKeyAttribute)"
+    )]
+    public void Controller_Route_Value_Rivet_Cant_Read_Or_MVC_Refuses_Is_RIV1125(
+        string controllers,
+        string expected
+    )
+    {
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkMerged(RouteValues(controllers))
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains(expected, exception.Message);
         Assert.Contains("ThingsController.Get", exception.Message);
     }
 

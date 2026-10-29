@@ -49,20 +49,33 @@ has no escape for a brace at all, so there's no path to write. A constraint argu
 doubled braces (<span v-pre>`regex(^\d{{4}}$)`</span>) belong to its pattern and are fine.
 
 One refusal gets a pass, for now. Routing won't start with a name used twice
-(`/accounts/{id}/maps/{id}`), and neither will Rivet on a controller action or a
-`[RivetEndpoint]` method. A contract, though, is often what `--from-openapi` wrote, and
+(`/accounts/{id}/maps/{id}`), and neither will Rivet on a controller action, a
+`[RivetEndpoint]` method, or an abstract contract's method: somebody wrote each of those
+by hand. A static contract's field, though, is the shape `--from-openapi` writes, and
 some published specs repeat a parameter (Cloudflare's paths do). Whether import should
 refuse such a path or rename the repeat is still an open decision, so until it's made, a
-contract's template reads each repeat as its own token and the walk goes on.
+static contract's template reads each repeat as its own token and the walk goes on.
 
-On a controller, MVC replaces the route's `[controller]`, `[action]`, and `[area]` tokens
-before routing ever sees it, and Rivet calls MVC's own `ReplaceTokens` to do the same:
-the controller's name less its `Controller` suffix, the method's name, and the name an
-`[Area]` gives. A token MVC has no value for (`[area]` with no `[Area]`, or a typo like
-`[controler]`) or an unclosed `[` stops MVC at startup, so it's `RIV1125` here too. That's
-also why an attribute route spells a regex class with doubled brackets,
-<span v-pre>`regex(^[[a-z]]{{2}}$)`</span>: a single `[` starts a token, and the replacement unescapes them
-before the constraint is read.
+On a controller, MVC replaces the route's `[tokens]` before routing ever sees it, and
+Rivet calls MVC's own `ReplaceTokens` with the values MVC would hand it. `[controller]` is
+the controller's name less its `Controller` suffix, and `[action]` is the action's name:
+an `[ActionName]`'s, or else the method's with any `Async` suffix dropped, as MVC does
+by default. Every other token comes
+from a route value attribute: `[Area("Admin")]` for `[area]`, or your own
+`RouteValueAttribute` subclass (`[Version("v2")]` for `[version]`). Rivet reads them the
+way MVC does, from the action and any method it overrides, then the controller and its
+base classes, with the action's value winning, and it follows a subclass's constructor
+down to the key and value it hands `RouteValueAttribute`. The `[Route]` itself comes from
+the controller, or else the nearest base class that has one.
+
+A token nothing supplies (`[area]` with no `[Area]`, or a typo like `[controler]`), an
+unclosed `[`, and two attributes keying the same value on one action or controller all
+stop MVC at startup, so each is `RIV1125` here too. So is a token only an attribute Rivet
+can't follow could supply, one whose key or value is worked out at run time rather than
+passed as a constant: MVC may serve that route fine, but Rivet can't say what its path is,
+and the message says so. That's also why an attribute route spells a regex class with
+doubled brackets, <span v-pre>`regex(^[[a-z]]{{2}}$)`</span>: a single `[` starts a token, and the
+replacement unescapes them before the constraint is read.
 
 | Constraint | Path parameter schema |
 |---|---|

@@ -110,24 +110,9 @@ internal static class SchemaEnricher
         }
     }
 
-    /// <summary>
-    /// Parses an authored JSON literal (<c>[RivetDefault]</c>, <c>[RivetExample]</c>, scalar
-    /// metadata); anything else is a user error rather than a guess.
-    /// </summary>
-    public static JsonNode? ParseJsonLiteral(string json, string what)
-    {
-        try
-        {
-            return JsonNode.Parse(json);
-        }
-        catch (JsonException exception)
-        {
-            throw Diagnostics.Error(
-                Diagnostics.InvalidBuilderArgument,
-                $"{what} must be a JSON literal, got '{json}' ({exception.Message})"
-            );
-        }
-    }
+    /// <summary><see cref="AuthoredJson.Parse"/> as a node to write into a schema.</summary>
+    public static JsonNode? ParseJsonLiteral(string json, string what) =>
+        JsonSerializer.SerializeToNode(AuthoredJson.Parse(json, what));
 
     /// <summary>
     /// <see cref="ParseJsonLiteral"/> for a keyword JSON Schema defines as an array

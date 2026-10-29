@@ -3512,6 +3512,23 @@ public sealed class CoverageCheckerTests
             [System.ComponentModel.TypeConverter(typeof(object))]
             public sealed class NoteCursor;
 
+            // IParsable<T> implemented explicitly, so no public static TryParse names it.
+            public sealed class NoteToken : IParsable<NoteToken>
+            {
+                static NoteToken IParsable<NoteToken>.Parse(string s, IFormatProvider? provider) =>
+                    new();
+
+                static bool IParsable<NoteToken>.TryParse(
+                    string? s,
+                    IFormatProvider? provider,
+                    out NoteToken result
+                )
+                {
+                    result = new();
+                    return true;
+                }
+            }
+
             public static class NoteContextExtensions
             {
                 public static string? GetTenantId(this HttpContext context) =>
@@ -3684,6 +3701,25 @@ public sealed class CoverageCheckerTests
         }
     }
 
+    [Theory]
+    [InlineData("minimal")]
+    [InlineData("mvc")]
+    public void An_IParsable_type_is_a_simple_parameter_on_both_hosts(string host)
+    {
+        // Both hosts bind a type that implements IParsable<T> from one string, even when its
+        // TryParse is an explicit interface member, so it's a query parameter here.
+        var parameters = SearchBinding + ", NoteToken cursor";
+        var handler =
+            host == "mvc"
+                ? MvcNotes("Get", "", parameters, _searchTerminal)
+                : MinimalNotes("Get", "/api/notes", parameters, _searchTerminal);
+
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(InputContract, BindingTypes, handler), "Search")
+        );
+        Assert.Equal("query parameter 'cursor'", mismatch.Actual);
+    }
+
     [Fact]
     public void Mvc_Name_on_a_complex_parameter_prefixes_its_members()
     {
@@ -3806,6 +3842,119 @@ public sealed class CoverageCheckerTests
             mismatches,
             warning => warning is { Expected: "(not declared)", Actual: "query parameter 'Tenant'" }
         );
+    }
+
+    /// <summary>
+    /// Complex inputs whose binder can't create them (FormBinding.CantCreate, pinned on real
+    /// hosts by FormPartNameTests and MinimalApiBindingHostTests). Each binds the contract's
+    /// inputs member by member, so the only report is that the host can't create it.
+    /// </summary>
+    private const string UncreatableTypes = """
+        using System.Runtime.Serialization;
+        using Microsoft.AspNetCore.Mvc;
+
+        namespace Test
+        {
+            public abstract class NoteSearchAbstract
+            {
+                public string? Search { get; set; }
+
+                [FromQuery(Name = "q")]
+                public string? Text { get; set; }
+
+                [FromHeader(Name = "X-Tenant")]
+                public string? Tenant { get; set; }
+            }
+
+            public struct NoteSearchStruct
+            {
+                public string? Search { get; set; }
+
+                [FromQuery(Name = "q")]
+                public string? Text { get; set; }
+
+                [FromHeader(Name = "X-Tenant")]
+                public string? Tenant { get; set; }
+            }
+
+            public struct NoteFormStruct
+            {
+                public string Title { get; set; }
+
+                [FromForm(Name = "note_body")]
+                public string? Body { get; set; }
+            }
+
+            public abstract class NoteFormAbstract
+            {
+                public string Title { get; set; } = "";
+
+                [DataMember(Name = "note_body")]
+                public string? Body { get; set; }
+            }
+        }
+        """;
+
+    [Theory]
+    // [AsParameters] refuses an abstract type when ASP.NET builds the endpoint.
+    [InlineData(
+        "minimal",
+        "Search",
+        "[AsParameters] NoteSearchAbstract input",
+        "[AsParameters] refuses an abstract type at startup, so the endpoint never serves a request"
+    )]
+    // An [ApiController] action's unattributed struct with members carrying their own sources
+    // is bound member by member (MVC's inference reads the members, not the constructor), and
+    // MVC can't create it.
+    [InlineData(
+        "mvc",
+        "Search",
+        "NoteSearchStruct input",
+        "MVC's model binder can't create it: it needs a public parameterless constructor"
+    )]
+    [InlineData(
+        "mvc",
+        "Submit",
+        "[FromForm] NoteFormStruct form",
+        "public parameterless constructor, or a record class's one public constructor whose every "
+            + "parameter matches a property by its exact name and type, so MVC fails the request"
+    )]
+    [InlineData(
+        "minimal",
+        "Submit",
+        "[FromForm] NoteFormAbstract form",
+        "the minimal-API form mapper binds nothing on an abstract type, so the handler never sees "
+            + "what the form sends for it"
+    )]
+    public void A_complex_input_the_host_cant_create_is_reported(
+        string host,
+        string field,
+        string parameters,
+        string why
+    )
+    {
+        var terminal =
+            field == "Search"
+                ? "NotesContract.Search.Bind(new NoteSearch(null, null, null)).Success(new NoteDto(\"1\"))"
+                : SubmitTerminal;
+        var (verb, route) = field == "Search" ? ("Get", "") : ("Post", "form");
+        var handler =
+            host == "mvc"
+                ? MvcNotes(verb, route, parameters, terminal)
+                : MinimalNotes(verb, $"/api/notes/{route}".TrimEnd('/'), parameters, terminal);
+
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(InputContract, UncreatableTypes, handler), field)
+        );
+
+        Assert.Equal("a type the host can create", mismatch.Expected);
+        Assert.Contains(
+            $"handler parameter '{parameters.Split(' ')[^1]}' (Test.",
+            mismatch.Message
+        );
+        Assert.Contains("can't be bound: ", mismatch.Message);
+        Assert.Contains(why, mismatch.Message);
+        Assert.Contains("Make it a class with one public constructor", mismatch.Message);
     }
 
     [Theory]
@@ -4260,6 +4409,57 @@ public sealed class CoverageCheckerTests
         {
             Assert.Contains(mismatches, warning => warning.Actual == "JSON request body");
             Assert.Contains(mismatches, warning => warning.Expected == "form field 'file'");
+        }
+        else
+        {
+            Assert.Empty(mismatches);
+        }
+    }
+
+    [Theory]
+    // MVC adds the files to the list a get-only property hands back only when that list is
+    // live and writable (FormPartNameTests pins it on a real host).
+    [InlineData("public List<IFormFile> File { get; } = [];", false)]
+    [InlineData("public List<IFormFile> File { get; } = new();", false)]
+    [InlineData("public List<IFormFile>? File { get; }", true)]
+    [InlineData("public List<IFormFile> File => [];", true)]
+    [InlineData(
+        "public ICollection<IFormFile> File { get; } = new ReadOnlyCollection<IFormFile>([]);",
+        true
+    )]
+    public void An_MVC_get_only_file_collection_binds_only_when_its_initializer_is_live(
+        string member,
+        bool reported
+    )
+    {
+        var types = $$"""
+            using System.Collections.Generic;
+            using System.Collections.ObjectModel;
+            using Microsoft.AspNetCore.Http;
+
+            namespace Test
+            {
+                public sealed class UploadBox
+                {
+                    {{member}}
+                }
+            }
+            """;
+        var handler = MvcNotes(
+            "Post",
+            "upload",
+            "[FromForm] UploadBox box",
+            "NotesContract.Upload.Success(new NoteDto(\"1\"))"
+        );
+
+        var mismatches = InputMismatches(RunCheck(InputContract, types, handler), "Upload");
+
+        if (reported)
+        {
+            Assert.Contains(
+                mismatches,
+                warning => warning is { Expected: "form field 'file'", Actual: "(not bound)" }
+            );
         }
         else
         {

@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using System.Collections.ObjectModel;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Runtime.Serialization;
@@ -298,6 +300,11 @@ public sealed class FormPartNameTests
     // form mapper binds nothing on it.
     [InlineData(true, "abstract", HttpStatusCode.InternalServerError, "")]
     [InlineData(false, "abstract", HttpStatusCode.OK, "null")]
+    // A get-only immutable file collection: MVC can't add to it and can't create a
+    // collection of its type, so it fails the request, file sent or not; the form mapper
+    // leaves the member alone.
+    [InlineData(true, "immutable-files", HttpStatusCode.InternalServerError, "")]
+    [InlineData(false, "immutable-files", HttpStatusCode.OK, "{\"Plain\":\"Plain\"}")]
     public async Task The_hosts_construct_these_types_differently(
         bool mvc,
         string shape,
@@ -377,7 +384,10 @@ public sealed class FormPartNameTests
     [Theory]
     // MVC skips [BindNever] and binds [IgnoreDataMember]; the form mapper the reverse.
     // Neither binds a file nothing can set.
-    [InlineData(true, "{\"Skipped\":\"Skipped\",\"Plain\":\"Plain\",\"Files\":\"file:Files\"}")]
+    [InlineData(
+        true,
+        "{\"Skipped\":\"Skipped\",\"Plain\":\"Plain\",\"Files\":\"file:Files\",\"NewFiles\":\"file:NewFiles\"}"
+    )]
     [InlineData(false, "{\"Never\":\"Never\",\"Plain\":\"Plain\"}")]
     public async Task The_hosts_skip_these_members_differently(bool mvc, string bound)
     {
@@ -392,6 +402,10 @@ public sealed class FormPartNameTests
                 ("ReadOnlyFile", true),
                 ("PrivateSet", true),
                 ("Files", true),
+                ("NewFiles", true),
+                ("Unset", true),
+                ("Computed", true),
+                ("ReadOnlyFiles", true),
             ])
         );
 
@@ -427,50 +441,71 @@ public sealed class FormPartNameTests
     }
 
     [Theory]
-    [InlineData("ReadOnlyFile")]
-    [InlineData("PrivateSet")]
-    public void Generation_refuses_a_file_nothing_can_set(string member)
+    [InlineData(typeof(FormSkips), "ReadOnlyFile", false)]
+    [InlineData(typeof(FormSkips), "PrivateSet", false)]
+    // Get-only collections MVC can't fill in place (the host rows above).
+    [InlineData(typeof(FormSkips), "Unset", true)]
+    [InlineData(typeof(FormSkips), "Computed", true)]
+    [InlineData(typeof(FormSkips), "ReadOnlyFiles", true)]
+    public void Generation_refuses_a_file_nothing_can_set(Type type, string member, bool collection)
     {
         foreach (var hosts in Enum.GetValues<FormBinding.FormHosts>())
         {
             var error = Assert.Throws<RivetUserException>(() =>
-                GenerationParts(typeof(FormSkips), hosts, member)
+                GenerationParts(type, hosts, member)
             );
 
             Assert.Contains("RIV1100", error.Message);
             Assert.Contains($"'{member}' on", error.Message);
             Assert.Contains("nothing can set it", error.Message);
+            Assert.Equal(
+                collection && hosts != FormBinding.FormHosts.MinimalApi,
+                error.Message.Contains("initializer creates a writable one")
+            );
         }
 
         // A member both hosts skip is no part, and refused by neither.
         Assert.Empty(GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, "Both"));
     }
 
-    [Fact]
-    public void A_get_only_file_collection_is_a_part_only_MVC_fills()
+    [Theory]
+    [InlineData("Files", "files")]
+    [InlineData("NewFiles", "newFiles")]
+    public void A_get_only_file_collection_is_a_part_only_MVC_fills(string member, string name)
     {
-        // MVC adds the files to the list the getter returns; the form mapper can't set it.
+        // MVC adds the files to the collection the getter returns, when its initializer
+        // creates a writable one; the form mapper can't set it.
         var part = Assert.Single(
-            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Mvc, "Files")
+            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Mvc, member)
         );
-        Assert.Equal(("files", true), (part.Name, part.IsFile));
+        Assert.Equal((name, true), (part.Name, part.IsFile));
 
         Assert.Contains(
             "nothing can set it",
             Assert
                 .Throws<RivetUserException>(() =>
-                    GenerationParts(typeof(FormSkips), FormBinding.FormHosts.MinimalApi, "Files")
+                    GenerationParts(typeof(FormSkips), FormBinding.FormHosts.MinimalApi, member)
                 )
                 .Message
         );
         var error = Assert.Throws<RivetUserException>(() =>
-            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, "Files")
+            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, member)
         );
         Assert.Contains("RIV1100", error.Message);
         Assert.Contains(
             "bound by MVC's model binder, which fills the collection its getter returns, but left "
                 + "unset by the minimal-API form mapper",
             error.Message
+        );
+    }
+
+    [Fact]
+    public void An_immutable_collection_is_no_part_MVC_fills()
+    {
+        Assert.Equal(
+            ["plain"],
+            GenerationParts(typeof(FormImmutableFiles), FormBinding.FormHosts.Mvc)
+                .Select(part => part.Name)
         );
     }
 
@@ -833,7 +868,6 @@ public sealed class FormPartNameTests
         var (compilation, wkt) = BindingHost.Probe;
         var symbol = compilation.GetTypeByMetadataName(type.FullName!)!;
         return FormBinding.Parts(
-            compilation,
             wkt,
             TypeWalker.Create(compilation, wkt, []),
             symbol,
@@ -867,6 +901,7 @@ public sealed class FormPartNameTests
                 Map<FormRecordStruct>(app, "record-struct");
                 Map<FormAbstract>(app, "abstract");
                 Map<FormSkips>(app, "skips");
+                Map<FormImmutableFiles>(app, "immutable-files");
             }
         );
 
@@ -1065,6 +1100,26 @@ public sealed class FormSkips
     public IFormFile? PrivateSet { get; private set; }
 
     public List<IFormFile> Files { get; } = [];
+
+    // MVC adds to the collection a getter returns only when it's a live, writable one:
+    // a new List<T> is; null, a fresh copy on each read, and a read-only collection aren't,
+    // and the new list MVC builds instead has nowhere to go.
+    public List<IFormFile> NewFiles { get; } = new();
+
+    public List<IFormFile>? Unset { get; }
+
+    public List<IFormFile> Computed => [];
+
+    public ICollection<IFormFile> ReadOnlyFiles { get; } = new ReadOnlyCollection<IFormFile>([]);
+}
+
+// MVC can't fill an immutable collection in place, and building one of its own fails every
+// request: ImmutableList<T> has no parameterless constructor.
+public sealed class FormImmutableFiles
+{
+    public string? Plain { get; set; }
+
+    public ImmutableList<IFormFile> Files { get; } = [];
 }
 
 /// <summary>The MVC handlers for <see cref="FormPartNameTests"/>.</summary>
@@ -1112,4 +1167,7 @@ public sealed class FormPartController : ControllerBase
 
     [HttpPost("/form-parts/mvc/skips")]
     public string Skips([FromForm] FormSkips form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/immutable-files")]
+    public string ImmutableFiles([FromForm] FormImmutableFiles form) => FormEcho.Of(form);
 }

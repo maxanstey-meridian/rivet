@@ -598,8 +598,8 @@ public sealed class ContractSchemaTests
     }
 
     /// <summary>
-    /// The verdicts on one response, from the schema (over the whole contract, by Json.Schema's
-    /// ECMA dialect) and from the reader. The rest of the contract is valid for both, so the
+    /// The verdicts on one response, from the schema (over the whole contract, by Json.Schema,
+    /// whose <c>$</c>, unlike ECMA's, matches before a final newline) and from the reader. The rest of the contract is valid for both, so the
     /// response decides each verdict.
     /// </summary>
     private static (bool Schema, bool Reader) Verdicts(JsonObject response)

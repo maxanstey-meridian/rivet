@@ -96,9 +96,7 @@ internal static class EnumParameterBinding
     }
 
     private static bool IsApiBehavior(WellKnownTypes wkt, AttributeData attribute) =>
-        wkt.ApiBehaviorMetadata is { } apiBehavior
-        && attribute.AttributeClass is { } attributeClass
-        && attributeClass.AllInterfaces.Contains(apiBehavior, SymbolEqualityComparer.Default);
+        attribute.AttributeClass.Implements(wkt.ApiBehaviorMetadata);
 
     /// <summary>
     /// Every advertised enum wire value the host would refuse for a handler parameter, with

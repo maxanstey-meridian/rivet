@@ -297,6 +297,47 @@ public sealed class DiagnosticsTests
         """[assembly: RivetSecurityScheme("bearer", "http", scheme: "bearer")] [assembly: RivetGlobalSecurity(0)] [assembly: RivetGlobalSecurityScheme(0, null!, new string[0])]""",
         "[RivetGlobalSecurityScheme] at "
     )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("oauth", "oauth2")] [assembly: RivetOAuthFlow("oauth", "password", null, "https://t", null, null!, null!)]""",
+        "[RivetOAuthFlow] at "
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("bearer", "http", scheme: "bearer")] [assembly: RivetGlobalSecurity(0)] [assembly: RivetGlobalSecurityScheme(0, "bearer", null!)]""",
+        "[RivetGlobalSecurityScheme] at "
+    )]
+    // A null type used to read as the unsupported type ''.
+    [InlineData("""[assembly: RivetSecurityScheme("x", null!)]""", "'x' is missing its type")]
+    // A null scope used to read as an empty one, and a repeated scope or flow crashed with no ID.
+    [InlineData(
+        """[assembly: RivetSecurityScheme("oauth", "oauth2")] [assembly: RivetOAuthFlow("oauth", "password", null, "https://t", null, new string[] { null! }, new[] { "Read" })]""",
+        "'oauth' has a null scope name"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("bearer", "http", scheme: "bearer")] [assembly: RivetGlobalSecurity(0)] [assembly: RivetGlobalSecurityScheme(0, "bearer", new string[] { null! })]""",
+        "'bearer' has a null required scope"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("oauth", "oauth2")] [assembly: RivetOAuthFlow("oauth", "password", null, "https://t", null, new[] { "read", "read" }, new[] { "Read", "Read again" })]""",
+        "declares scope 'read' twice in its password flow"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("oauth", "oauth2")] [assembly: RivetOAuthFlow("oauth", "password", null, "https://t", null, new string[0], new string[0])] [assembly: RivetOAuthFlow("oauth", "password", null, "https://u", null, new string[0], new string[0])]""",
+        "declares its password flow twice"
+    )]
+    // A flow no oauth2 scheme reads, or a scheme added to an alternative nothing starts,
+    // used to leave the spec without a word.
+    [InlineData(
+        """[assembly: RivetOAuthFlow("oauth", "password", null, "https://t", null, new string[0], new string[0])]""",
+        "names scheme 'oauth', which no [RivetSecurityScheme] declares"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("oauth", "http", scheme: "bearer")] [assembly: RivetOAuthFlow("oauth", "password", null, "https://t", null, new string[0], new string[0])]""",
+        "names scheme 'oauth', whose type is 'http'"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("bearer", "http", scheme: "bearer")] [assembly: RivetGlobalSecurity(0)] [assembly: RivetGlobalSecurityScheme(1, "bearer", new string[0])]""",
+        "which no [RivetGlobalSecurity(1)] starts"
+    )]
     public void Invalid_Security_Scheme_Metadata_Fails_With_RIV1121(
         string attributes,
         string expected

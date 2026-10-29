@@ -343,7 +343,7 @@ public static class Diagnostics
         ),
         [InvalidSecuritySchemeMetadata] = new(
             Severity.Error,
-            "An [assembly: RivetSecurityScheme] or [assembly: RivetOAuthFlow] says something no security scheme can be: a scheme name declared twice, an unsupported type, apiKey location or OAuth2 flow, a scheme missing the field its type needs (HTTP scheme, OpenID Connect URL...), or scope names and descriptions that don't pair up — generation fails instead of guessing the scheme."
+            "An [assembly: RivetSecurityScheme], [RivetOAuthFlow], [RivetGlobalSecurity], or [RivetGlobalSecurityScheme] says something no security scheme or requirement can be: a scheme name declared twice; an unsupported type, apiKey location, or OAuth2 flow; a scheme missing its type or the field its type needs (HTTP scheme, OpenID Connect URL...); scope names and descriptions that don't pair up; a flow or scope declared twice, or a null scope; a flow on a scheme that isn't a declared oauth2 one; a requirement scheme on an alternative nothing starts; or arguments Rivet can't read. Generation fails instead of guessing the scheme."
         ),
         [MalformedGeneratedMetadata] = new(
             Severity.Error,

@@ -141,20 +141,10 @@ internal static class CSharpWriter
         foreach (var flow in oauth2.Flows)
         {
             sb.AppendLine(
-                $"[assembly: RivetOAuthFlow({StringLiteral(name)}, {StringLiteral(OAuthFlowName(flow.Type))}, {NullableStringLiteral(flow.AuthorizationUrl)}, {NullableStringLiteral(flow.TokenUrl)}, {NullableStringLiteral(flow.RefreshUrl)}, {StringArrayLiteral(flow.Scopes.Keys.ToList())}, {StringArrayLiteral(flow.Scopes.Values.ToList())})]"
+                $"[assembly: RivetOAuthFlow({StringLiteral(name)}, {StringLiteral(OAuth2FlowTypes.Name(flow.Type))}, {NullableStringLiteral(flow.AuthorizationUrl)}, {NullableStringLiteral(flow.TokenUrl)}, {NullableStringLiteral(flow.RefreshUrl)}, {StringArrayLiteral(flow.Scopes.Keys.ToList())}, {StringArrayLiteral(flow.Scopes.Values.ToList())})]"
             );
         }
     }
-
-    private static string OAuthFlowName(OAuth2FlowType type) =>
-        type switch
-        {
-            OAuth2FlowType.Implicit => "implicit",
-            OAuth2FlowType.Password => "password",
-            OAuth2FlowType.ClientCredentials => "clientCredentials",
-            OAuth2FlowType.AuthorizationCode => "authorizationCode",
-            _ => throw new ArgumentOutOfRangeException(nameof(type)),
-        };
 
     public static string WriteDocumentProvenance(
         OpenApiDocumentProvenance document,

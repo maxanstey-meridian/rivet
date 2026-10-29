@@ -1126,20 +1126,7 @@ public sealed class TypeWalker
             return null;
         }
 
-        JsonElement value;
-        try
-        {
-            using var document = JsonDocument.Parse(example);
-            value = document.RootElement.Clone();
-        }
-        catch (JsonException exception)
-        {
-            throw Diagnostics.Error(
-                Diagnostics.InvalidBuilderArgument,
-                $"{what} must be a JSON literal, got '{example}' ({exception.Message})"
-            );
-        }
-
+        var value = AuthoredJson.Parse(example, what);
         using var array = JsonDocument.Parse($"[{value.GetRawText()}]");
         return array.RootElement.Clone();
     }

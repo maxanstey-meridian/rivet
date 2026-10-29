@@ -3084,8 +3084,9 @@ public sealed class OpenApiEmitterTests
 
     /// <summary>
     /// RIV2012 for a pair that differs only in security says how to align it in what each
-    /// side declares security with: builder calls on a contract definition, attributes on an
-    /// annotated action.
+    /// side declares security with: builder calls on a static contract's field, attributes on
+    /// an abstract contract's method or an annotated action. Which list an endpoint arrived in
+    /// doesn't decide it: an abstract contract method is a contract that takes attributes.
     /// </summary>
     [Theory]
     [InlineData(
@@ -3096,9 +3097,11 @@ public sealed class OpenApiEmitterTests
                 Define.Get<TaskDto>("/api/tasks");
             """,
         "",
-        "give both definitions the same .Secure(), .AndSecure(), .OrAnonymous(), or .Anonymous() calls."
+        "",
+        "give both the same .Secure(), .AndSecure(), .OrAnonymous(), or .Anonymous() calls."
     )]
     [InlineData(
+        "",
         "",
         """
             [RivetEndpoint, RivetSecure("admin"), HttpGet("")]
@@ -3106,7 +3109,43 @@ public sealed class OpenApiEmitterTests
             [RivetEndpoint, HttpGet("")]
             public TaskDto Open() => new("1");
             """,
-        "give both actions the same [RivetSecure], [RivetAndSecure], [RivetOrAnonymous], or [RivetAnonymous] attributes."
+        AttributeRemedy
+    )]
+    [InlineData(
+        """
+            public static readonly RouteDefinition<TaskDto> Secured =
+                Define.Get<TaskDto>("/api/tasks").Secure("admin");
+            """,
+        "",
+        """
+            [RivetEndpoint, HttpGet("")]
+            public TaskDto Open() => new("1");
+            """,
+        "'tasks.secured' declares it with .Secure(), .AndSecure(), .OrAnonymous(), or .Anonymous() calls, "
+            + "and 'tasks.open' with [RivetSecure], [RivetAndSecure], [RivetOrAnonymous], or [RivetAnonymous] attributes."
+    )]
+    [InlineData(
+        "",
+        """
+            [RivetSecure("admin"), HttpGet("")]
+            public abstract TaskDto Secured();
+            """,
+        """
+            [RivetEndpoint, HttpGet("")]
+            public TaskDto Open() => new("1");
+            """,
+        AttributeRemedy
+    )]
+    [InlineData(
+        "",
+        """
+            [RivetSecure("admin"), HttpGet("")]
+            public abstract TaskDto Secured();
+            [HttpGet("")]
+            public abstract TaskDto Open();
+            """,
+        "",
+        AttributeRemedy
     )]
     [InlineData(
         """
@@ -3114,14 +3153,16 @@ public sealed class OpenApiEmitterTests
                 Define.Get<TaskDto>("/api/tasks").Secure("admin");
             """,
         """
-            [RivetEndpoint, HttpGet("")]
-            public TaskDto Open() => new("1");
+            [HttpGet("")]
+            public abstract TaskDto Open();
             """,
-        "repeat the contract's .Secure(), .AndSecure(), .OrAnonymous(), or .Anonymous() calls on the action as "
-            + "[RivetSecure], [RivetAndSecure], [RivetOrAnonymous], or [RivetAnonymous]."
+        "",
+        "'tasks.secured' declares it with .Secure(), .AndSecure(), .OrAnonymous(), or .Anonymous() calls, "
+            + "and 'notes.open' with [RivetSecure], [RivetAndSecure], [RivetOrAnonymous], or [RivetAnonymous] attributes."
     )]
     public void A_Security_Only_Conflict_Names_The_Remedy_Its_Sources_Use(
         string contractFields,
+        string abstractMethods,
         string actions,
         string remedy
     )
@@ -3141,6 +3182,13 @@ public sealed class OpenApiEmitterTests
                 {{contractFields}}
             }
 
+            [RivetContract]
+            [Route("api/tasks")]
+            public abstract class NotesContract
+            {
+                {{abstractMethods}}
+            }
+
             [Route("api/tasks")]
             public sealed class TasksController : ControllerBase
             {
@@ -3155,6 +3203,9 @@ public sealed class OpenApiEmitterTests
         Assert.StartsWith($"error {Diagnostics.ConflictingOperations}:", error.Message);
         Assert.EndsWith($"Declare the same security on both: {remedy}", error.Message);
     }
+
+    private const string AttributeRemedy =
+        "give both the same [RivetSecure], [RivetAndSecure], [RivetOrAnonymous], or [RivetAnonymous] attributes.";
 
     [Fact]
     public void Security_PerEndpoint_Undefined_Scheme_Fails_Generation()

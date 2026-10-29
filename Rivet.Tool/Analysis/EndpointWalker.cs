@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Rivet.Tool.Model;
@@ -34,7 +33,7 @@ public static class EndpointWalker
                 endpoints.Add(
                     BuildControllerEndpoint(
                         method,
-                        Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
+                        Naming.ToCamelCase(MvcRouteValues.ControllerName(method.ContainingType)),
                         isContract: false,
                         wkt,
                         typeWalker
@@ -50,7 +49,7 @@ public static class EndpointWalker
                 endpoints.Add(
                     BuildControllerEndpoint(
                         method,
-                        Naming.ToCamelCase(ControllerBaseName(method.ContainingType)),
+                        Naming.ToCamelCase(MvcRouteValues.ControllerName(method.ContainingType)),
                         isContract: false,
                         wkt,
                         typeWalker
@@ -237,9 +236,10 @@ public static class EndpointWalker
 
     /// <summary>
     /// The HTTP method and full transport route of an MVC action: the [Http*] verb and
-    /// template combined with the class [Route], [controller]/[action] tokens
-    /// substituted, constraints stripped. HttpMethod is null when the method is not an
-    /// action; Route is null when neither the action nor the class declares a template.
+    /// template combined with the class [Route], its tokens replaced by the action's route
+    /// values (<see cref="MvcRouteValues"/>), constraints stripped. HttpMethod is null when
+    /// the method is not an action; Route is null when neither the action nor the class
+    /// declares a template.
     /// </summary>
     internal static (string? HttpMethod, string? Route) ResolveActionRoute(
         WellKnownTypes wkt,
@@ -265,7 +265,17 @@ public static class EndpointWalker
         }
 
         var route = CombineRoutes(ExtractControllerRoute(wkt, method.ContainingType), methodRoute);
-        return (httpMethod, route is null ? null : SubstituteRouteTokens(wkt, route, method));
+        return (
+            httpMethod,
+            route is null
+                ? null
+                : MvcRouteValues.ReplaceTokens(
+                    wkt,
+                    route,
+                    method,
+                    $"{MethodOwner(method)}.{method.Name}"
+                )
+        );
     }
 
     /// <summary>
@@ -313,25 +323,8 @@ public static class EndpointWalker
         }
 
         // Declared-type check: assignable to IResult or IActionResult means the runtime
-        // value selects status/content. IResult itself matches by exact type (it is an
-        // interface); implementations match through their interface list.
-        if (
-            wkt.IResult is not null
-            && (
-                SymbolEqualityComparer.Default.Equals(original, wkt.IResult)
-                || named.AllInterfaces.Any(interfaceType =>
-                    SymbolEqualityComparer.Default.Equals(interfaceType, wkt.IResult)
-                )
-            )
-        )
-        {
-            return true;
-        }
-
-        return wkt.IActionResult is not null
-            && named.AllInterfaces.Any(interfaceType =>
-                SymbolEqualityComparer.Default.Equals(interfaceType, wkt.IActionResult)
-            );
+        // value selects status/content.
+        return named.Implements(wkt.IResult) || named.Implements(wkt.IActionResult);
     }
 
     /// <summary>
@@ -567,15 +560,6 @@ public static class EndpointWalker
             : null;
     }
 
-    /// <summary>
-    /// The controller class name without its "Controller" suffix
-    /// (CaseStatusesController → CaseStatuses).
-    /// </summary>
-    private static string ControllerBaseName(INamedTypeSymbol type) =>
-        type.Name.EndsWith("Controller", StringComparison.Ordinal)
-            ? type.Name[..^"Controller".Length]
-            : type.Name;
-
     private static (string? HttpMethod, string? Route) ExtractHttpMethodAndRoute(
         WellKnownTypes wkt,
         IMethodSymbol method
@@ -606,79 +590,27 @@ public static class EndpointWalker
     }
 
     /// <summary>
-    /// Reads [Route("...")] from the containing controller class.
+    /// Reads [Route("...")] from the controller class, or else from the nearest base class
+    /// that declares one: MVC lets a derived controller's routes override its base's, and
+    /// takes a base's when it declares none.
     /// </summary>
     private static string? ExtractControllerRoute(
         WellKnownTypes wkt,
         INamedTypeSymbol containingType
     )
     {
-        foreach (var attr in containingType.GetAttributes())
+        for (var type = containingType; type is not null; type = type.BaseType)
         {
-            if (attr.Is(wkt.Route) && attr.ConstructorArguments.Length > 0)
+            foreach (var attr in type.GetAttributes())
             {
-                return attr.ConstructorArguments[0].Value as string;
+                if (attr.Is(wkt.Route) && attr.ConstructorArguments.Length > 0)
+                {
+                    return attr.ConstructorArguments[0].Value as string;
+                }
             }
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// The attribute route with its <c>[controller]</c>, <c>[action]</c> and <c>[area]</c>
-    /// tokens replaced and its doubled brackets unescaped, by MVC's own
-    /// <see cref="AttributeRouteModel.ReplaceTokens(string, IDictionary{string, string})"/>, so an
-    /// MVC route spells a regex class <c>[[a-z]]</c> and routing reads <c>[a-z]</c>. The values
-    /// are the action's route values: its controller's name less the "Controller" suffix, its
-    /// method's name, and the area an <c>[Area]</c> on the action, else on its controller or a
-    /// base class, names. A token with no value, or an unclosed bracket, is a route MVC refuses
-    /// at startup, so it stops generation with <c>RIV1125</c> as a template routing refuses does.
-    /// </summary>
-    private static string SubstituteRouteTokens(
-        WellKnownTypes wkt,
-        string route,
-        IMethodSymbol method
-    )
-    {
-        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["controller"] = ControllerBaseName(method.ContainingType),
-            ["action"] = method.Name,
-        };
-        if (AreaOf(wkt, method) is { } area)
-        {
-            values["area"] = area;
-        }
-
-        try
-        {
-            return AttributeRouteModel.ReplaceTokens(route, values);
-        }
-        catch (InvalidOperationException exception)
-        {
-            throw Diagnostics.Error(
-                Diagnostics.RouteConstraintContradictsType,
-                $"route template '{route}' on endpoint '{MethodOwner(method)}.{method.Name}': MVC "
-                    + $"refuses it at startup ({exception.Message.TrimEnd('.')}). Fix the template."
-            );
-        }
-    }
-
-    // The [area] route value: an [Area] on the action wins over one on its controller, which
-    // MVC reads with inheritance.
-    private static string? AreaOf(WellKnownTypes wkt, IMethodSymbol method)
-    {
-        IEnumerable<ISymbol> owners = [method];
-        for (var type = method.ContainingType; type is not null; type = type.BaseType)
-        {
-            owners = owners.Append(type);
-        }
-
-        return owners
-            .Select(owner => owner.GetAttribute(wkt.Area))
-            .OfType<AttributeData>()
-            .Select(attribute => attribute.ConstructorArguments.FirstOrDefault().Value as string)
-            .FirstOrDefault();
     }
 
     /// <summary>
@@ -733,7 +665,8 @@ public static class EndpointWalker
         var where =
             $"{RouteParser.StripRouteConstraints(routeTemplate)} (endpoint '{MethodOwner(method)}.{method.Name}')";
         // Routing's own reading of the template, which refuses a repeated token as the host
-        // does at startup: unlike a contract, nothing here was imported.
+        // does at startup. Nothing here was imported: an action, a [RivetEndpoint] method, and
+        // an abstract contract's method are all hand-written (import writes static contracts).
         var routeTokens = RouteConstraints
             .Tokens(routeTemplate, where, readRepeats: false)
             .ToDictionary(token => token.Name, StringComparer.OrdinalIgnoreCase);
@@ -819,7 +752,6 @@ public static class EndpointWalker
                         wkt,
                         typeWalker,
                         FormBinding.Parts(
-                            wkt.Compilation,
                             wkt,
                             typeWalker,
                             param.Type,

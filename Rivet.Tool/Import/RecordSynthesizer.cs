@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.OpenApi;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
@@ -176,19 +177,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                 // primitives otherwise invent defaults such as int64 and double.
                 var format = mapper.ResolveFormat(propSchema);
                 var isFormatSpecified =
-                    format is not null
-                    || csharpType.TrimEnd('?')
-                        is "sbyte"
-                            or "byte"
-                            or "short"
-                            or "ushort"
-                            or "int"
-                            or "uint"
-                            or "long"
-                            or "ulong"
-                            or "float"
-                            or "double"
-                            or "decimal";
+                    format is not null || BuiltInScalars.HasImplicitFormat(csharpType.TrimEnd('?'));
 
                 // Preserve default value
                 string? defaultValue = null;

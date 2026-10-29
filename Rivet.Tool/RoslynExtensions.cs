@@ -59,14 +59,55 @@ internal static class RoslynExtensions
         return false;
     }
 
-    /// <summary><paramref name="type"/> is the interface <paramref name="target"/> or implements it.</summary>
+    /// <summary>
+    /// <paramref name="type"/> is the interface <paramref name="target"/> or implements it. A
+    /// generic <paramref name="target"/> matches any construction of it, as in
+    /// <see cref="DerivesFrom"/>; a check that needs one construction compares the types itself.
+    /// </summary>
     public static bool Implements(this ITypeSymbol? type, INamedTypeSymbol? target) =>
         target is not null
         && type is not null
         && (
-            SymbolEqualityComparer.Default.Equals(type, target)
-            || type.AllInterfaces.Contains(target, SymbolEqualityComparer.Default)
+            SymbolEqualityComparer.Default.Equals(type.OriginalDefinition, target)
+            || type.AllInterfaces.Any(candidate =>
+                SymbolEqualityComparer.Default.Equals(candidate.OriginalDefinition, target)
+            )
         );
+
+    /// <summary>The methods <paramref name="method"/> overrides, nearest first. Empty unless it's an override.</summary>
+    public static IEnumerable<IMethodSymbol> OverriddenChain(this IMethodSymbol method)
+    {
+        for (
+            var overridden = method.OverriddenMethod;
+            overridden is not null;
+            overridden = overridden.OverriddenMethod
+        )
+        {
+            yield return overridden;
+        }
+    }
+
+    /// <summary>
+    /// The operation body of <paramref name="method"/> when its source is in the compilation:
+    /// an ordinary method's or accessor's, or a local function's own operation. A partial
+    /// method's is its implementation's. Null for a method only metadata knows.
+    /// </summary>
+    public static IOperation? SourceBody(this IMethodSymbol method)
+    {
+        var definition = method.OriginalDefinition;
+        definition = definition.PartialImplementationPart ?? definition;
+        if (
+            definition.ContainingAssembly
+                is not ISourceAssemblySymbol { Compilation: var compilation }
+            || definition.DeclaringSyntaxReferences is not [var reference]
+        )
+        {
+            return null;
+        }
+
+        var syntax = reference.GetSyntax();
+        return compilation.GetSemanticModel(syntax.SyntaxTree).GetOperation(syntax);
+    }
 
     /// <summary>The first constructor argument as a string, or null.</summary>
     public static string? StringArgument(this AttributeData? attribute) =>

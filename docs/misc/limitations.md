@@ -148,10 +148,11 @@ combination:
   verb such as GET, written in capitals the way `MapGet` passes it (a `MapMethods`
   `"get"` still infers a body), and any other unattributed collection is a body. An
   `[AsParameters]` type is bound member by member (with a parameterised constructor,
-  only that constructor's arguments bind, and a type the host can't create binds
-  nothing), and so is a `[FromForm]` complex type, which goes through the form mapper:
-  it binds each member by name and, unlike the rest of the minimal-API binder, ignores
-  case. It names a member by its C# name or its `[DataMember(Name = ...)]`, never by a
+  only that constructor's arguments bind; a type it can't create at all, such as an
+  abstract one, takes the whole endpoint down at startup, which `RIV4006` reports
+  rather than this check), and so is a `[FromForm]` complex type, which goes through
+  the form mapper: it binds each member by name and, unlike the rest of the minimal-API
+  binder, ignores case. It names a member by its C# name or its `[DataMember(Name = ...)]`, never by a
   member's `[FromForm(Name = ...)]`, and reads every member from the form, whatever
   binding attribute it carries. On a positional record it also refuses (400) a request
   that leaves out any constructor parameter, nullable ones included; MVC binds the

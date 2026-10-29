@@ -29,6 +29,17 @@ internal sealed class SecurityRequirementsBuilder
         schemeScopes.AddRange(scopes);
     }
 
+    /// <summary>
+    /// Each scheme added to an order no <see cref="AddRequirement"/> started, by order.
+    /// <see cref="Build"/> reads only started orders, so a caller that can add a scheme on its
+    /// own (the assembly attributes) refuses these rather than lose them.
+    /// </summary>
+    public IEnumerable<(int Order, string Scheme)> UnstartedSchemes =>
+        _schemes
+            .Where(pair => !_orders.Contains(pair.Key))
+            .OrderBy(pair => pair.Key)
+            .SelectMany(pair => pair.Value.Keys.Select(scheme => (pair.Key, scheme)));
+
     /// <summary>The declared requirements in order, or null when none was declared.</summary>
     public SecurityRequirements? Build() =>
         _orders.Count == 0

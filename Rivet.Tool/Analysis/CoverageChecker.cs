@@ -618,7 +618,7 @@ public static class CoverageChecker
             if (EndpointWalker.HostOf(handler) == ParameterBindingHost.MinimalApi)
             {
                 mapHandlers ??= IndexMapHandlers(compilation, wkt);
-                verdicts = SourceBody(handler) is { } body
+                verdicts = handler.SourceBody() is { } body
                     ? mapHandlers
                         .GetValueOrDefault((body.Syntax.SyntaxTree, body.Syntax.Span))
                         ?.Select(mapped =>
@@ -677,11 +677,7 @@ public static class CoverageChecker
         {
             foreach (var method in discovered.Overrides)
             {
-                for (
-                    var overridden = method.OverriddenMethod;
-                    overridden is not null;
-                    overridden = overridden.OverriddenMethod
-                )
+                foreach (var overridden in method.OverriddenChain())
                 {
                     if (
                         contractMethods.Contains(overridden.OriginalDefinition)
@@ -1212,7 +1208,7 @@ public static class CoverageChecker
         DelegateTarget(value, []) switch
         {
             IAnonymousFunctionOperation lambda => (lambda, lambda.Symbol),
-            IMethodReferenceOperation { Method: var method } when SourceBody(method) is { } body =>
+            IMethodReferenceOperation { Method: var method } when method.SourceBody() is { } body =>
                 (body, method),
             _ => null,
         };
@@ -1520,7 +1516,7 @@ public static class CoverageChecker
                         .Any(passed =>
                             ResolvesTo(passed.Value, isTarget, [])
                             && followed.Add(passed.Parameter.OriginalDefinition)
-                            && SourceBody(call.TargetMethod) is { } helper
+                            && call.TargetMethod.SourceBody() is { } helper
                             && Adapts(
                                 helper,
                                 value => IsParameter(value, passed.Parameter),
@@ -1679,7 +1675,7 @@ public static class CoverageChecker
         {
             IAnonymousFunctionOperation lambda => lambda,
             IMethodReferenceOperation { Method: { MethodKind: MethodKind.LocalFunction } local }
-                when expanded.Add(local.OriginalDefinition) => SourceBody(local),
+                when expanded.Add(local.OriginalDefinition) => local.SourceBody(),
             _ => null,
         };
 
@@ -1701,28 +1697,6 @@ public static class CoverageChecker
                 DelegateTarget(provenance, visitedLocals),
             _ => null,
         };
-
-    /// <summary>
-    /// The operation body of <paramref name="method"/> when its source is in the compilation:
-    /// an ordinary method's or accessor's, or a local function's own operation. A partial
-    /// method's is its implementation's. Null for a method only metadata knows.
-    /// </summary>
-    internal static IOperation? SourceBody(IMethodSymbol method)
-    {
-        var definition = method.OriginalDefinition;
-        definition = definition.PartialImplementationPart ?? definition;
-        if (
-            definition.ContainingAssembly
-                is not ISourceAssemblySymbol { Compilation: var compilation }
-            || definition.DeclaringSyntaxReferences is not [var reference]
-        )
-        {
-            return null;
-        }
-
-        var syntax = reference.GetSyntax();
-        return compilation.GetSemanticModel(syntax.SyntaxTree).GetOperation(syntax);
-    }
 
     /// <summary>Descendants of a function body, excluding nested functions' bodies.</summary>
     private static IEnumerable<IOperation> OwnDescendants(IOperation operation)

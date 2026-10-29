@@ -175,15 +175,20 @@ public sealed class MinimalApiBindingHostTests
                 FormBinding.Binder.AsParameters
             )
         );
-        Assert.Empty(
-            BindingHost.CheckerInputs(
+        // The checker reads the endpoint as one the host can't create (RIV4006 reports it),
+        // then the members it would bind, so nothing else is reported against the contract.
+        var uncreatable = BindingHost
+            .CheckerInputs(
                 typeof(AsParametersHandlers),
                 handler,
                 ParameterBindingHost.MinimalApi,
                 infersBody: false,
                 route: path
             )
-        );
+            .First();
+        Assert.Equal(("p", InputSource.Uncreatable), (uncreatable.Path, uncreatable.Source));
+        Assert.Contains(why, uncreatable.CantCreate);
+        Assert.EndsWith("so the endpoint never serves a request", uncreatable.CantCreate);
     }
 }
 
@@ -304,12 +309,45 @@ internal sealed class BindingHost : IAsyncDisposable
                 .Append(typeof(BindingHost).Assembly.Location)
                 .Distinct()
                 .Select(path => MetadataReference.CreateFromFile(path));
-            var compilation = CSharpCompilation.Create("BindingHostProbe", [], references);
+            // The files declaring the hosts' shapes, read from source as the tool reads an
+            // app's own types (an initializer is only there to see in source), beside the
+            // project's implicit usings. A source type wins over the test assembly's copy.
+            var sources = new[]
+            {
+                "FormPartNameTests.cs",
+                "MinimalApiBindingHostTests.cs",
+                "MvcBindingHostTests.cs",
+            }
+                .Select(file => CliRunner.RepoPath("Rivet.Tests", file))
+                .Select(path => CSharpSyntaxTree.ParseText(File.ReadAllText(path), path: path))
+                .Prepend(
+                    CSharpSyntaxTree.ParseText(
+                        """
+                        global using System;
+                        global using System.Collections.Generic;
+                        global using System.IO;
+                        global using System.Linq;
+                        global using System.Net.Http;
+                        global using System.Threading;
+                        global using System.Threading.Tasks;
+                        global using Xunit;
+                        """
+                    )
+                );
+            var compilation = CSharpCompilation.Create(
+                "BindingHostProbe",
+                sources,
+                references,
+                new CSharpCompilationOptions(
+                    OutputKind.DynamicallyLinkedLibrary,
+                    nullableContextOptions: NullableContextOptions.Enable
+                )
+            );
             return (compilation, new WellKnownTypes(compilation));
         }
     );
 
-    /// <summary>The test assembly as the tool sees it, for reading the handlers' types.</summary>
+    /// <summary>The handlers' types as the tool sees them, read from source.</summary>
     public static (Compilation Compilation, WellKnownTypes Wkt) Probe => _compilation.Value;
 
     private readonly WebApplication _app;
@@ -359,8 +397,8 @@ internal sealed class BindingHost : IAsyncDisposable
 
     /// <summary>
     /// <see cref="ParameterBindingSources.Inputs"/> for every parameter of
-    /// <paramref name="type"/>'s method <paramref name="method"/>, read from this test
-    /// assembly's metadata.
+    /// <paramref name="type"/>'s method <paramref name="method"/>, read from source
+    /// (<see cref="Probe"/>).
     /// </summary>
     public static IReadOnlyList<BoundInput> CheckerInputs(
         Type type,

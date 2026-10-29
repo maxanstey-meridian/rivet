@@ -47,6 +47,19 @@ internal static class BuiltInScalars
         (SpecialType.System_SByte, "sbyte", new TsType.Primitive("number", "int8", "sbyte")),
     ];
 
+    private static readonly HashSet<string> _implicitFormatKeywords =
+    [
+        .. KeywordTypes.Where(row => row.Primitive.Format is not null).Select(row => row.Keyword),
+    ];
+
+    /// <summary>
+    /// Whether the walker gives <paramref name="keyword"/> a format of its own (<c>int</c> is
+    /// int32, <c>double</c> is double), so a member the importer writes with that keyword has
+    /// to pin a schema's absent format or the round trip invents one.
+    /// </summary>
+    public static bool HasImplicitFormat(string keyword) =>
+        _implicitFormatKeywords.Contains(keyword);
+
     /// <summary>
     /// <c>byte[]</c>, the walker's one array scalar: System.Text.Json writes it as a base64
     /// string, never as an integer array, and the spec must match the wire. It's a string
