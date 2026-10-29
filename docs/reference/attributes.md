@@ -83,6 +83,7 @@ the same way (`RIV1114`).
 
 ```csharp
 [RivetSecure("bearer")]
+[Authorize]                                              // what --check holds the spec to
 [Route("api/reports")]
 public sealed class ReportsController : ControllerBase
 {
@@ -135,8 +136,9 @@ them.
 - Form renames: `[FromForm(Name = "x")]` (MVC's model binder) and
   `[DataMember(Name = "x")]` (the minimal-API form mapper) name a form input's part. A
   contract's part needs both, with the same name, since either host may serve it; one
-  without the other is `RIV1100`. A `[RivetEndpoint]` action's `[FromForm]` record needs only
-  the `[FromForm(Name = ...)]`.
+  without the other is `RIV1100`. A `[RivetEndpoint]` method's `[FromForm]` record needs only
+  its one host's: the `[FromForm(Name = ...)]` on an instance method (an MVC action), the
+  `[DataMember(Name = ...)]` on a static one (a minimal-API handler).
 - ASP.NET: `[Route]`, `[HttpGet]`/`[HttpPost]`/..., `[ProducesResponseType]`,
   `[FromBody]`/`[FromQuery]`/`[FromForm]`/`[FromHeader]`/... drive operation shape
   on controller endpoints. `[FromHeader(Name = "X-Api-Key")]` maps to an

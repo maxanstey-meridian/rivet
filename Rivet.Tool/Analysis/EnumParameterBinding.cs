@@ -172,9 +172,10 @@ internal static class EnumParameterBinding
         if (value.Parser == EnumParser.FunctionsJson)
         {
             return $"Azure Functions parameter '{parameterPath}' gets enum '{enumName}' from the "
-                + "worker's input converters, which read a route or query value as JSON, so the unquoted "
+                + "worker's input converters, which read a route or query value as JSON, so the "
                 + $"'{value.WireValue}' the spec advertises for member {value.MemberName} fails to "
-                + "convert and the function never runs (only an integer converts). Use a plain enum "
+                + "convert, quoted or not, and the function never runs (only an integer converts). "
+                + "Use a plain enum "
                 + "(integers on the wire), or bind a string and parse it in the function.";
         }
 

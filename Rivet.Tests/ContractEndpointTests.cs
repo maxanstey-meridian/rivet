@@ -11,6 +11,41 @@ public sealed class ContractEndpointTests
         CompilationHelper.WalkContract(source).Endpoints;
 
     [Fact]
+    public void A_JSON_body_declared_only_by_its_request_content_lists_its_field_names()
+    {
+        // Decision 32: --check holds a Functions parameter to the declared JSON body's
+        // top-level names. A body .RequestContent<T>() declares lowers no param, but its
+        // names are just as closed; read-only members are never sent.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record NoteBody(string Title, string? Body)
+            {
+                [RivetReadOnly]
+                public string? Slug { get; init; }
+            }
+
+            [RivetType]
+            public sealed record NoteDto(string Id);
+
+            [RivetContract]
+            public static class NotesContract
+            {
+                public static readonly RouteDefinition<NoteDto> Create =
+                    Define.Post<NoteDto>("/api/declared-notes")
+                        .RequestContent<NoteBody>("application/json");
+            }
+            """;
+
+        var endpoint = Assert.Single(Generate(source));
+
+        Assert.Equal(["title", "body"], endpoint.BodyFieldNames);
+    }
+
+    [Fact]
     public void Nested_Contract_Class_Is_Discovered()
     {
         var source = """

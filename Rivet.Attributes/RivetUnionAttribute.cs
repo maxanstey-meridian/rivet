@@ -31,10 +31,7 @@ public sealed class RivetUnionAttribute : JsonConverterAttribute
 /// </summary>
 internal sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
 {
-    private static readonly PropertyInfo[] _variantProperties = typeof(T)
-        .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-        .Where(property => property.CanRead)
-        .ToArray();
+    private static readonly PropertyInfo[] _variantProperties = RivetUnionVariants.Of(typeof(T));
 
     // The importer generates positional records: one constructor whose parameters
     // correspond 1:1 (by name, case-insensitively) with the variant properties.
@@ -81,14 +78,13 @@ internal sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
 
     public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
     {
-        foreach (var property in _variantProperties)
+        if (
+            value is not null
+            && RivetUnionVariants.Written(_variantProperties, value) is { } variant
+        )
         {
-            var variant = property.GetValue(value);
-            if (variant is not null)
-            {
-                JsonSerializer.Serialize(writer, variant, property.PropertyType, options);
-                return;
-            }
+            JsonSerializer.Serialize(writer, variant.Value, variant.DeclaredType, options);
+            return;
         }
 
         writer.WriteNullValue();
@@ -132,4 +128,41 @@ internal sealed class RivetUnionJsonConverter<T> : JsonConverter<T>
                     )
                     .ToArray()
             );
+}
+
+/// <summary>
+/// The variant rule <see cref="RivetUnionJsonConverter{T}"/> writes by, shared with what
+/// reads a wrapper the way it's written (<see cref="RivetExtensionDataKeys"/>), so the two
+/// can't drift.
+/// </summary>
+internal static class RivetUnionVariants
+{
+    /// <summary>A wrapper's variants: every public readable instance property, in order.</summary>
+    public static PropertyInfo[] Of(Type union) =>
+        [
+            .. union
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(property => property.CanRead),
+        ];
+
+    /// <summary>
+    /// The variant <paramref name="wrapper"/> is written as, and the type it's written as: its
+    /// first non-null variant, as its declared property type. Null when no variant is set, and
+    /// the wrapper is written as null.
+    /// </summary>
+    public static (object Value, Type DeclaredType)? Written(
+        IEnumerable<PropertyInfo> variants,
+        object wrapper
+    )
+    {
+        foreach (var property in variants)
+        {
+            if (property.GetValue(wrapper) is { } variant)
+            {
+                return (variant, property.PropertyType);
+            }
+        }
+
+        return null;
+    }
 }

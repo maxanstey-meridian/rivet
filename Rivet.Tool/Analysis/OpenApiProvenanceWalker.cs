@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool.Model;
@@ -20,16 +21,20 @@ internal static class OpenApiProvenanceWalker
 
     /// <summary>
     /// A response header OpenAPI ignores (<c>Content-Type</c>) stays out of the contract and
-    /// comes back verbatim: under the response's headers, or as its whole <c>headers</c> when
-    /// it was the only one.
+    /// comes back verbatim: under an operation response's headers, or as that response's whole
+    /// <c>headers</c> when it was the only one. Only those two owners, where the importer
+    /// writes them; a <c>headers</c> anywhere else (an encoding object, say) is malformed.
     /// </summary>
     private static bool IsIgnoredResponseHeader(OpenApiPreservedFieldProvenance field) =>
-        field.OwnerPointer.Contains("/responses/", StringComparison.Ordinal)
-        && (
-            field.Name == "headers"
-            || field.OwnerPointer.EndsWith("/headers", StringComparison.Ordinal)
-                && OpenApiStructure.IsReservedHeaderName(field.Name, isResponseHeader: true)
-        );
+        field.OwnerPointer.Split('/') switch
+        {
+            // #/paths/{path}/{method}/responses/{status}: a path item's other fields are
+            // strings or arrays, so only an operation puts "responses" at this depth.
+            ["#", "paths", _, _, "responses", _] => field.Name == "headers",
+            ["#", "paths", _, _, "responses", _, "headers"] =>
+                OpenApiStructure.IsReservedHeaderName(field.Name, isResponseHeader: true),
+            _ => false,
+        };
 
     public static OpenApiDocumentProvenance? Walk(Compilation compilation, TypeWalker typeWalker)
     {
@@ -46,11 +51,7 @@ internal static class OpenApiProvenanceWalker
             throw Malformed("Multiple Rivet document info declarations found.");
         }
 
-        var infoArguments = infoAttributes[0].ConstructorArguments;
-        if (infoArguments.Length != 11)
-        {
-            throw Malformed("Invalid Rivet document info metadata.");
-        }
+        var infoArguments = Arguments(infoAttributes[0], 11, "document info");
 
         var contact = RequiredBool(infoArguments[7], "document contact presence")
             ? new OpenApiContactProvenance(
@@ -79,7 +80,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, "Rivet.RivetDocumentTagAttribute")
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
+                var args = Arguments(attribute, 5, "document tag");
                 var docsUrl = StringValue(args[3]);
                 return (
                     Order: RequiredInt(args[0], "document tag order"),
@@ -102,14 +103,15 @@ internal static class OpenApiProvenanceWalker
         {
             throw Malformed("Multiple Rivet document external-docs declarations found.");
         }
+        var externalDocsArguments =
+            externalDocsAttributes.Count == 1
+                ? Arguments(externalDocsAttributes[0], 2, "document external-docs")
+                : default;
         var externalDocs =
             externalDocsAttributes.Count == 1
                 ? new OpenApiExternalDocsProvenance(
-                    RequiredString(
-                        externalDocsAttributes[0].ConstructorArguments[0],
-                        "document external-docs URL"
-                    ),
-                    StringValue(externalDocsAttributes[0].ConstructorArguments[1])
+                    RequiredString(externalDocsArguments[0], "document external-docs URL"),
+                    StringValue(externalDocsArguments[1])
                 )
                 : null;
         var servers = ReadServers(
@@ -131,10 +133,10 @@ internal static class OpenApiProvenanceWalker
                 var name = RequiredString(args[1], "document component-example name");
                 var jsonValue = StringValue(args[4]);
                 var externalValue = StringValue(args[5]);
-                if ((jsonValue is null) == (externalValue is null))
+                if (jsonValue is not null && externalValue is not null)
                 {
                     throw Malformed(
-                        $"Rivet document component example '{name}' requires exactly one of JSON value or externalValue."
+                        $"Rivet document component example '{name}' carries both a JSON value and an externalValue; OpenAPI allows at most one."
                     );
                 }
 
@@ -156,11 +158,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, "Rivet.RivetDocumentRequestBodyContentAttribute")
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
-                if (args.Length != 10)
-                {
-                    throw Malformed("Invalid Rivet document request-body content metadata.");
-                }
+                var args = Arguments(attribute, 10, "document request-body content");
 
                 var schemaType = args[3].Value as ITypeSymbol;
                 TsType? schema = null;
@@ -197,11 +195,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, "Rivet.RivetDocumentRequestBodyExampleAttribute")
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
-                if (args.Length != 10)
-                {
-                    throw Malformed("Invalid Rivet document request-body example metadata.");
-                }
+                var args = Arguments(attribute, 10, "document request-body example");
                 var referencedComponentsJson = StringValue(args[7]);
                 return (
                     RequestBodyOrder: RequiredInt(args[0], "request-body order"),
@@ -214,9 +208,9 @@ internal static class OpenApiProvenanceWalker
                         StringValue(args[6]),
                         referencedComponentsJson is null
                             ? null
-                            : DeserializeMetadata<Dictionary<string, string>>(
+                            : TypeWalker.DeserializeGeneratedMetadata<Dictionary<string, string>>(
                                 referencedComponentsJson,
-                                "request-body example referenced-components"
+                                "RivetDocumentRequestBodyExampleAttribute referenced components"
                             ),
                         StringValue(args[8]),
                         StringValue(args[9])
@@ -228,11 +222,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, "Rivet.RivetDocumentRequestBodyAttribute")
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
-                if (args.Length != 4)
-                {
-                    throw Malformed("Invalid Rivet document request-body metadata.");
-                }
+                var args = Arguments(attribute, 4, "document request-body");
                 var order = RequiredInt(args[0], "request-body order");
                 return (
                     Order: order,
@@ -284,11 +274,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, "Rivet.RivetImportedSourceFileAttribute")
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
-                if (args.Length != 2)
-                {
-                    throw Malformed("Invalid Rivet imported-source fingerprint metadata.");
-                }
+                var args = Arguments(attribute, 2, "imported-source fingerprint");
                 return new OpenApiImportedSourceFileProvenance(
                     RequiredString(args[0], "imported source path"),
                     RequiredString(args[1], "imported source fingerprint")
@@ -300,11 +286,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, "Rivet.RivetPreservedFieldAttribute")
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
-                if (args.Length != 3)
-                {
-                    throw Malformed("Invalid Rivet preserved-field metadata.");
-                }
+                var args = Arguments(attribute, 3, "preserved-field");
 
                 var field = new OpenApiPreservedFieldProvenance(
                     RequiredString(args[0], "preserved-field owner pointer"),
@@ -394,22 +376,6 @@ internal static class OpenApiProvenanceWalker
             $"{message} Re-import the OpenAPI document to regenerate the provenance attributes."
         );
 
-    private static T? DeserializeMetadata<T>(
-        string json,
-        string context,
-        JsonSerializerOptions? options = null
-    )
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<T>(json, options);
-        }
-        catch (JsonException exception)
-        {
-            throw Malformed($"Invalid Rivet {context} JSON: {exception.Message}");
-        }
-    }
-
     private static RivetUserException ImportedSourceConflict(string path, string reason) =>
         Diagnostics.Error(
             Diagnostics.ImportedSchemaProvenanceConflict,
@@ -436,7 +402,7 @@ internal static class OpenApiProvenanceWalker
             );
         }
 
-        var args = provenanceAttributes[0].ConstructorArguments;
+        var args = Arguments(provenanceAttributes[0], 10, "operation provenance");
         var hasServerOverride = RequiredBool(args[5], "operation server override presence");
         var rivetContract = StringValue(args[6]);
         var rivetEndpoint = StringValue(args[7]);
@@ -462,7 +428,7 @@ internal static class OpenApiProvenanceWalker
                 .OfAttribute(compilation, "Rivet.RivetOperationParameterComponentAttribute")
                 .Select(attribute =>
                 {
-                    var values = attribute.ConstructorArguments;
+                    var values = Arguments(attribute, 4, "operation parameter component");
                     return (
                         Order: RequiredInt(values[0], "operation parameter component order"),
                         Reference: new OpenApiParameterComponentReference(
@@ -479,7 +445,7 @@ internal static class OpenApiProvenanceWalker
                 .OfAttribute(compilation, "Rivet.RivetOperationResponseComponentAttribute")
                 .Select(attribute =>
                 {
-                    var values = attribute.ConstructorArguments;
+                    var values = Arguments(attribute, 3, "operation response component");
                     return (
                         Order: RequiredInt(values[0], "operation response component order"),
                         Reference: new OpenApiResponseComponentReference(
@@ -492,17 +458,16 @@ internal static class OpenApiProvenanceWalker
                 .Select(value => value.Reference)
                 .ToList(),
             StringValue(args[9]) is { } schemasJson
-                ? DeserializeMetadata<OpenApiOperationSchemaProvenance>(
+                ? TypeWalker.DeserializeGeneratedMetadata<OpenApiOperationSchemaProvenance>(
                     schemasJson,
-                    "operation schema provenance",
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                    $"RivetOperationProvenanceAttribute schemas of '{field.Name}'"
                 )
                 : null,
             attributes
                 .OfAttribute(compilation, "Rivet.RivetOperationResponseHeaderComponentAttribute")
                 .Select(attribute =>
                 {
-                    var values = attribute.ConstructorArguments;
+                    var values = Arguments(attribute, 4, "operation response header component");
                     return (
                         Order: RequiredInt(values[0], "operation response header component order"),
                         Reference: new OpenApiResponseHeaderComponentReference(
@@ -528,7 +493,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, attributeName)
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
+                var args = Arguments(attribute, 3, $"document component {kind}");
                 var order = RequiredInt(args[0], $"document component {kind} order");
                 var name = RequiredString(args[1], $"document component {kind} name");
                 var json = RequiredString(args[2], $"document component {kind} JSON");
@@ -563,7 +528,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, variableAttributeName)
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
+                var args = Arguments(attribute, 6, "server variable");
                 return (
                     ServerOrder: RequiredInt(args[0], "server order"),
                     VariableOrder: RequiredInt(args[1], "server variable order"),
@@ -581,7 +546,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, serverAttributeName)
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
+                var args = Arguments(attribute, 3, "server");
                 var order = RequiredInt(args[0], "server order");
                 return (
                     Order: order,
@@ -610,6 +575,20 @@ internal static class OpenApiProvenanceWalker
         var type = compilation.GetTypeByMetadataName(metadataName);
         return attributes.Where(attribute => attribute.Is(type));
     }
+
+    /// <summary>
+    /// The attribute's constructor arguments when there are as many as the importer writes.
+    /// A different count is an attribute from another Rivet version (or none Roslyn could
+    /// bind), so it's malformed metadata (RIV1122) rather than an index out of range.
+    /// </summary>
+    private static ImmutableArray<TypedConstant> Arguments(
+        AttributeData attribute,
+        int count,
+        string context
+    ) =>
+        attribute.ConstructorArguments.Length == count
+            ? attribute.ConstructorArguments
+            : throw Malformed($"Invalid Rivet {context} metadata.");
 
     private static string? StringValue(TypedConstant value) => value.Value as string;
 

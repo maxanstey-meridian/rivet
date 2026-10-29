@@ -19,32 +19,14 @@ internal static class SchemaEnricher
 
     public static void EnrichPropertySchema(JsonObject propSchema, TsPropertyDefinition prop)
     {
-        if (prop.Description is not null)
-        {
-            propSchema["description"] = prop.Description;
-        }
-
-        if (prop.IsDeprecated)
-        {
-            propSchema["deprecated"] = true;
-        }
-
-        if (prop.DefaultValue is not null)
-        {
-            propSchema["default"] = ParseJsonLiteral(
-                prop.DefaultValue,
-                $"default of property '{prop.Name}'"
-            );
-        }
-
-        if (prop.Example is not null)
-        {
-            // OpenAPI 3.1 / JSON Schema 2020-12: schema-level `example` is replaced by
-            // the `examples` keyword (an array of example values).
-            propSchema["examples"] = new JsonArray(
-                ParseJsonLiteral(prop.Example, $"example of property '{prop.Name}'")
-            );
-        }
+        Annotate(
+            propSchema,
+            prop.Description,
+            prop.IsDeprecated,
+            prop.DefaultValue,
+            prop.Example,
+            $"property '{prop.Name}'"
+        );
 
         if (prop.IsReadOnly)
         {
@@ -61,6 +43,50 @@ internal static class SchemaEnricher
         if (prop.Format is not null)
         {
             propSchema["format"] = prop.Format;
+        }
+    }
+
+    /// <summary>
+    /// The annotations a property's schema carries beside its type, whether the property is a
+    /// record's or a form field's: a description, deprecated, a default, and an example, each
+    /// an authored JSON literal. JSON Schema 2020-12 has no singular <c>example</c>, so it
+    /// joins the schema's <c>examples</c>.
+    /// </summary>
+    public static void Annotate(
+        JsonObject schema,
+        string? description,
+        bool isDeprecated,
+        string? defaultJson,
+        string? exampleJson,
+        string what
+    )
+    {
+        if (description is not null)
+        {
+            schema["description"] = description;
+        }
+
+        if (isDeprecated)
+        {
+            schema["deprecated"] = true;
+        }
+
+        if (defaultJson is not null)
+        {
+            schema["default"] = ParseJsonLiteral(defaultJson, $"default of {what}");
+        }
+
+        if (exampleJson is not null)
+        {
+            var example = ParseJsonLiteral(exampleJson, $"example of {what}");
+            if (schema["examples"] is JsonArray examples)
+            {
+                examples.Add(example);
+            }
+            else
+            {
+                schema["examples"] = new JsonArray(example);
+            }
         }
     }
 

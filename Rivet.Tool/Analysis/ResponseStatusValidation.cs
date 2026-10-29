@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+using System.Globalization;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -7,53 +7,61 @@ namespace Rivet.Tool.Analysis;
 /// Enforces authored-contract response invariants and normalizes external IR
 /// (controller metadata and <c>--from</c> contract JSON), refusing a repeated status in both.
 /// </summary>
-internal static partial class ResponseStatusValidation
+internal static class ResponseStatusValidation
 {
     /// <summary>
-    /// A response key: <c>default</c> (lowercase, as OpenAPI names the field), a range
-    /// (<c>4XX</c> or <c>4xx</c>; imported keys keep the source's spelling) or a three-digit
-    /// code. rivet-contract-schema.json's statusKey pattern is this text.
+    /// rivet-contract-schema.json's statusKey pattern: <see cref="IsStatusKey"/>'s rule in the
+    /// schema's (ECMA) regex dialect.
     /// </summary>
     internal const string StatusKeyPattern = "^(default|[1-5](?:[0-9]{2}|[Xx]{2}))$";
 
-    internal static bool IsStatusKey(string key) => StatusKeyRegex().IsMatch(key);
-
-    [GeneratedRegex(StatusKeyPattern)]
-    private static partial Regex StatusKeyRegex();
+    /// <summary>
+    /// A response key contract JSON can carry: one the runtime takes
+    /// (<see cref="ResponseStatusKey.Parse"/>: a three-digit code, a range like <c>4XX</c> or
+    /// <c>4xx</c>, or default), with default spelled as OpenAPI's lowercase field, since the
+    /// contract is written as the spec will be.
+    /// </summary>
+    internal static bool IsStatusKey(string key) =>
+        ResponseStatusKey.Parse(key) is { Exact: not null } or { RangeClass: not null }
+        || key == "default";
 
     /// <summary>
     /// A status key authored in C# (<c>.StatusKey(...)</c>, or the statusKey form of
-    /// <c>.Returns(...)</c>, <c>.ResponseContent(...)</c> and the rest), as the spec writes it.
+    /// <c>.Returns(...)</c>, <c>.ResponseContent(...)</c>, and the rest), as the spec writes it.
+    /// It's refused by the rule the runtime refuses it by (<see cref="ResponseStatusKey.Parse"/>),
+    /// so a key OpenAPI can't hold stops generation (RIV1120) rather than reaching the spec.
     /// The runtime matches <c>default</c> ignoring case, by design, but OpenAPI only knows the
-    /// lowercase field, so any casing of it is emitted as <c>default</c>. Anything else
-    /// <see cref="IsStatusKey"/> refuses would reach the spec as written, so it stops
-    /// generation (RIV1120). A range keeps its spelling, as an imported one does.
+    /// lowercase field, so any casing of it is emitted as <c>default</c>. A range keeps its
+    /// spelling, as an imported one does.
     /// </summary>
-    internal static string AuthoredStatusKey(string key, string where)
-    {
-        if (key.Equals("default", StringComparison.OrdinalIgnoreCase))
+    internal static string AuthoredStatusKey(string key, string where) =>
+        ResponseStatusKey.Parse(key) switch
         {
-            return "default";
-        }
-
-        return IsStatusKey(key) ? key : throw InvalidStatusKey($"'{key}'", where, "a status key");
-    }
+            null => throw InvalidStatusKey($"'{key}'", where, "status key"),
+            { Exact: null, RangeClass: null } => "default",
+            _ => key,
+        };
 
     /// <summary>
     /// A status code authored as an int (<c>.Status(...)</c>, <c>.Returns(...)</c>,
-    /// <c>[ProducesResponseType]</c>): it must be one OpenAPI can key a response by, 100 to 599.
+    /// <c>[ProducesResponseType]</c>): it must be one OpenAPI can key a response by, 100 to 599,
+    /// as the runtime requires (<see cref="ResponseStatusKey.FromStatus"/>).
     /// </summary>
     internal static int AuthoredStatusCode(int code, string where) =>
-        IsStatusKey(code.ToString(System.Globalization.CultureInfo.InvariantCulture))
+        ResponseStatusKey.FromStatus(code) is not null
             ? code
-            : throw InvalidStatusKey(code.ToString(), where, "status code");
+            : throw InvalidStatusKey(
+                code.ToString(CultureInfo.InvariantCulture),
+                where,
+                "status code"
+            );
 
     private static RivetUserException InvalidStatusKey(string key, string where, string what) =>
         Diagnostics.Error(
             Diagnostics.InvalidStatusKey,
-            $"{where} declares {what} {key}, which OpenAPI can't key a response by, so the spec "
-                + "would carry a response no client can match. Use a status code from 100 to 599 "
-                + "(\"404\"), a range (\"4XX\") or \"default\""
+            $"{where} declares the {what} {key}, which OpenAPI can't key a response by, so the "
+                + "spec would carry a response no client can match. Use a status code from 100 to "
+                + "599 (\"404\"), a range (\"4XX\"), or \"default\""
         );
 
     internal static void RejectContractDuplicates(

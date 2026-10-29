@@ -2,6 +2,7 @@ using System.Collections;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using Microsoft.AspNetCore.Routing.Patterns;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
@@ -52,13 +53,6 @@ public static class JsonContractReader
         SecurityRequirements? Security
     )
     {
-        public void Deconstruct(
-            out IReadOnlyList<TsTypeDefinition> types,
-            out Dictionary<string, TsType> enums,
-            out IReadOnlyList<TsEndpointDefinition> endpoints,
-            out Dictionary<string, TsType.Brand> brands
-        ) => (types, enums, endpoints, brands) = (Types, Enums, Endpoints, Brands);
-
         /// <summary>
         /// The document security to emit with: the scheme definitions <c>--security</c> gave
         /// (contract JSON defines none), and the contract's own document requirement over the
@@ -146,6 +140,12 @@ public static class JsonContractReader
         };
     }
 
+    /// <summary>
+    /// Reads a contract. JSON that isn't a contract Rivet can take leaves as a
+    /// <see cref="JsonException"/>, every kind of it by that one channel, and the CLI words it
+    /// as RIV2017 with the file it came from. Declarations that contradict each other carry
+    /// their own IDs (RIV2008, RIV2010).
+    /// </summary>
     public static Contract Read(string json)
     {
         RivetContract contract;
@@ -278,7 +278,21 @@ public static class JsonContractReader
     /// </summary>
     private static void RefuseRoutingSyntax(TsEndpointDefinition endpoint)
     {
-        foreach (var token in RouteParser.ParseRouteTokens(endpoint.RouteTemplate))
+        IReadOnlyList<RouteToken> tokens;
+        try
+        {
+            tokens = RouteParser.ParseRouteTokens(endpoint.RouteTemplate);
+        }
+        catch (RoutePatternException exception)
+        {
+            throw new JsonException(
+                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate}) "
+                    + $"has a routeTemplate routing can't read ({exception.Message.TrimEnd('.')}). "
+                    + "Write it as an OpenAPI path key with bare '{name}' tokens."
+            );
+        }
+
+        foreach (var token in tokens)
         {
             var syntax = new List<string>();
             syntax.AddRange(
@@ -301,8 +315,7 @@ public static class JsonContractReader
                 continue;
             }
 
-            throw Diagnostics.Error(
-                Diagnostics.InvalidContractJson,
+            throw new JsonException(
                 $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate}) "
                     + $"writes its route token '{token.Name}' with {string.Join(" and ", syntax)}. "
                     + "A contract's routeTemplate is the OpenAPI path key, written as is, so the token must be bare "
@@ -323,9 +336,10 @@ public static class JsonContractReader
         };
 
     /// <summary>
-    /// A response is keyed by its statusCode or its statusKey (default, a 1XX-5XX range or a
-    /// three-digit code, as <see cref="ResponseStatusValidation.StatusKeyPattern"/> spells
-    /// it); with neither it would be emitted under status "0".
+    /// A response is keyed by its statusCode (100 to 599) or its statusKey (default, a 1XX-5XX
+    /// range, or a three-digit code: <see cref="ResponseStatusValidation.IsStatusKey"/>); any
+    /// other key is one OpenAPI can't hold, and with neither it would be emitted under status
+    /// "0".
     /// </summary>
     private static TsResponseType ResolveStatus(
         TsEndpointDefinition endpoint,
@@ -342,7 +356,12 @@ public static class JsonContractReader
 
         if (response.StatusCode != 0)
         {
-            return response;
+            return ResponseStatusKey.FromStatus(response.StatusCode) is not null
+                ? response
+                : throw new JsonException(
+                    $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' has a response with statusCode {response.StatusCode}; "
+                        + "a statusCode is an HTTP status from 100 to 599"
+                );
         }
 
         if (response.StatusKey is null)
@@ -390,8 +409,7 @@ public static class JsonContractReader
                 && TsType.TaggedUnionVariant.TagSchemaProblem(tagSchema, variant.Tag) is { } problem
             )
             {
-                throw Diagnostics.Error(
-                    Diagnostics.InvalidContractJson,
+                throw new JsonException(
                     $"{site} has the discriminatorSchema '{tagSchema}', "
                         + $"which {problem}, so it can't be the schema of the tag '{variant.Tag}'. Write it as a "
                         + "JSON schema object that admits the tag, or leave it out for the synthesized enum."
@@ -407,8 +425,7 @@ public static class JsonContractReader
                 continue;
             }
 
-            throw Diagnostics.Error(
-                Diagnostics.InvalidContractJson,
+            throw new JsonException(
                 $"{site} carries a description, scalarMetadata "
                     + $"or discriminatorSchema, but it isn't an inline object with a '{union.Discriminator}' "
                     + "property to put them on. Give the variant an inline object type with the tag "

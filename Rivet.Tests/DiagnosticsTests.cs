@@ -1,6 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
@@ -61,7 +64,7 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void Native_Rivet_Does_Not_Allocate_The_Php_Sibling_Runtime_Block()
+    public void Nothing_Reuses_The_Dropped_Php_Runtime_Block()
     {
         var allocations = DeclaredIds()
             .Where(x =>
@@ -72,7 +75,7 @@ public sealed class DiagnosticsTests
 
         Assert.True(
             allocations.Count == 0,
-            $"RIV1024-RIV1099 are reserved for rivet/php: {string.Join(", ", allocations)}"
+            $"RIV1024-RIV1099 once belonged to the dropped rivet/php runtime and are never reused: {string.Join(", ", allocations)}"
         );
     }
 
@@ -126,10 +129,18 @@ public sealed class DiagnosticsTests
         // The registry decides each ID's severity (Warn and Error refuse the other kind), so
         // the page's Severity column must say the same thing for every row.
         var page = File.ReadAllText(CliRunner.RepoPath("docs", "reference", "diagnostics.md"));
-        var mismatches = Regex
+        var rows = Regex
             .Matches(page, @"^\| `(RIV\d{4})` \| (\w+) \|", RegexOptions.Multiline)
             .Select(match => (Id: match.Groups[1].Value, Column: match.Groups[2].Value))
-            .Where(row =>
+            .ToList();
+
+        // A row whose Severity cell this pattern can't read (bold, say) would otherwise be
+        // skipped silently, so every registered ID must have a readable one.
+        Assert.Equal(
+            Diagnostics.Registry.Keys.Order(StringComparer.Ordinal),
+            rows.Select(row => row.Id).Order(StringComparer.Ordinal)
+        );
+        var mismatches = rows.Where(row =>
                 Diagnostics.Registry.TryGetValue(row.Id, out var entry)
                 && row.Column != entry.Severity.ToString()
             )
@@ -182,30 +193,71 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
-    public void Every_User_Error_Is_Built_By_Diagnostics_Error()
+    public void Every_Call_Naming_Its_Id_Uses_The_Registry_Severity()
     {
-        // T.2: a user-facing error carries an ID, so nothing but Diagnostics.Error may build
-        // a RivetUserException. A site that can only fire on a Rivet bug throws
-        // InvalidOperationException instead, stack trace and all.
+        // Warn, Prefix and Error refuse an ID of the other severity, but only when that path
+        // runs, which may first be in a user's run. Every call that names its ID as
+        // Diagnostics.X is held to the registry here instead. (RivetUserException's private
+        // constructor already makes Diagnostics.Error the one way to build a user error.)
+        var ids = DeclaredIds().ToDictionary(x => x.FieldName, x => x.Id, StringComparer.Ordinal);
         var toolRoot = CliRunner.RepoPath("Rivet.Tool");
-        var construction = new Regex(
-            @"new\s+RivetUserException\s*\(|RivetUserException\s+\w+\s*\([^)]*\)\s*=>\s*new\s*\("
-        );
-        var offenders = Directory
-            .EnumerateFiles(toolRoot, "*.cs", SearchOption.AllDirectories)
-            .Where(path =>
-                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
-                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
-                && Path.GetFileName(path) is not ("Diagnostics.cs" or "RivetUserException.cs")
+        var calls = 0;
+        var mismatches = new List<string>();
+        foreach (
+            var path in Directory
+                .EnumerateFiles(toolRoot, "*.cs", SearchOption.AllDirectories)
+                .Where(path =>
+                    !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                    && !path.Contains(
+                        $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"
+                    )
+                )
+        )
+        {
+            var tree = CSharpSyntaxTree.ParseText(File.ReadAllText(path), path: path);
+            foreach (
+                var call in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
             )
-            .Where(path => construction.IsMatch(File.ReadAllText(path)))
-            .Select(path => Path.GetRelativePath(toolRoot, path))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+            {
+                if (
+                    call.Expression
+                        is not MemberAccessExpressionSyntax
+                        {
+                            Expression: IdentifierNameSyntax { Identifier.Text: "Diagnostics" },
+                            Name.Identifier.Text: ("Warn" or "Prefix" or "Error") and var method,
+                        }
+                    || call.ArgumentList.Arguments.FirstOrDefault()?.Expression
+                        is not MemberAccessExpressionSyntax
+                        {
+                            Expression: IdentifierNameSyntax { Identifier.Text: "Diagnostics" },
+                            Name.Identifier.Text: var field,
+                        }
+                )
+                {
+                    continue;
+                }
 
+                calls++;
+                var expected =
+                    method == "Error" ? Diagnostics.Severity.Error : Diagnostics.Severity.Warning;
+                if (
+                    !ids.TryGetValue(field, out var id)
+                    || Diagnostics.Registry[id].Severity != expected
+                )
+                {
+                    var line = call.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+                    mismatches.Add(
+                        $"{Path.GetRelativePath(toolRoot, path)}:{line}: Diagnostics.{method}(Diagnostics.{field})"
+                    );
+                }
+            }
+        }
+
+        // A pattern that stopped matching would pass vacuously.
+        Assert.True(calls > 100, $"Only {calls} Diagnostics.Warn/Prefix/Error calls found.");
         Assert.True(
-            offenders.Count == 0,
-            $"RivetUserException built outside Diagnostics.Error: {string.Join(", ", offenders)}"
+            mismatches.Count == 0,
+            $"Calls whose ID is registered with the other severity:\n  {string.Join("\n  ", mismatches)}"
         );
     }
 
@@ -213,6 +265,14 @@ public sealed class DiagnosticsTests
     [InlineData(
         """[assembly: RivetSecurityScheme("key", "apiKey", parameterName: "X-Key", location: "body")]""",
         "unsupported location 'body'"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("key", "apiKey", parameterName: "X-Key", location: "7")]""",
+        "unsupported location '7'"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("key", "apiKey", parameterName: "X-Key", location: "header,query")]""",
+        "unsupported location 'header,query'"
     )]
     [InlineData("""[assembly: RivetSecurityScheme("sso", "saml")]""", "unsupported type 'saml'")]
     [InlineData(
@@ -236,6 +296,136 @@ public sealed class DiagnosticsTests
 
         Assert.StartsWith("error RIV1121: ", exception.Message);
         Assert.Contains(expected, exception.Message);
+    }
+
+    // Rivet reads provenance attributes by name, so a project built against another
+    // Rivet.Attributes version can carry one whose constructor takes different arguments:
+    // RIV1122 says re-import, where an index used to crash.
+    [Theory]
+    [InlineData(
+        "RivetDocumentTag(int order, string name)",
+        "RivetDocumentTag(0, \"a\")",
+        "Invalid Rivet document tag metadata."
+    )]
+    [InlineData(
+        "RivetDocumentExternalDocs(string url)",
+        "RivetDocumentExternalDocs(\"https://x\")",
+        "Invalid Rivet document external-docs metadata."
+    )]
+    [InlineData(
+        "RivetDocumentServer(int order, string url)",
+        "RivetDocumentServer(0, \"https://x\")",
+        "Invalid Rivet server metadata."
+    )]
+    [InlineData(
+        "RivetDocumentServerVariable(int serverOrder, string name)",
+        "RivetDocumentServerVariable(0, \"v\")",
+        "Invalid Rivet server variable metadata."
+    )]
+    [InlineData(
+        "RivetDocumentSchema(string name, string json)",
+        "RivetDocumentSchema(\"Thing\", \"{}\")",
+        "Invalid Rivet document component schema metadata."
+    )]
+    public void Provenance_Attribute_From_Another_Version_Fails_With_RIV1122(
+        string constructor,
+        string usage,
+        string expected
+    )
+    {
+        var name = constructor[..constructor.IndexOf('(')];
+        var source = $$"""
+            using System;
+
+            [assembly: Rivet.RivetDocumentInfo("T", "1")]
+            [assembly: Rivet.{{usage}}]
+
+            namespace Rivet
+            {
+                public sealed class RivetDocumentInfoAttribute(
+                    string title, string version, string? description = null,
+                    string? termsOfService = null, string? contactName = null,
+                    string? contactUrl = null, string? contactEmail = null,
+                    bool contactPresent = false, string? licenseName = null,
+                    string? licenseUrl = null, string? licenseIdentifier = null) : Attribute;
+
+                [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+                public sealed class {{name}}Attribute : Attribute
+                {
+                    public {{constructor.Replace(name, name + "Attribute")}} { }
+                }
+            }
+            """;
+        // The project's own Rivet.Attributes stands in for the one Rivet ships with.
+        var baseline = CompilationHelper.CreateCompilation("namespace Placeholder;");
+        var shipped = baseline.References.Single(reference =>
+            reference.Display?.Contains("Rivet.Attributes", StringComparison.Ordinal) == true
+        );
+        var compilation = baseline
+            .RemoveReferences(shipped)
+            .RemoveAllSyntaxTrees()
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
+            );
+        Assert.Empty(
+            compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error)
+        );
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            Rivet.Tool.Analysis.OpenApiProvenanceWalker.Walk(compilation, walker)
+        );
+
+        Assert.StartsWith($"error RIV1122: {expected}", exception.Message);
+    }
+
+    // Import preserves a response's Content-Type header under the operation response's own
+    // headers, or as its whole headers; a "headers" field on any other owner is malformed.
+    [Theory]
+    [InlineData("#/paths/~1items/get/responses/200", "headers", true)]
+    [InlineData("#/paths/~1items/get/responses/200/headers", "Content-Type", true)]
+    [InlineData("#/paths/~1items/get/responses/200/headers", "X-Other", false)]
+    [InlineData(
+        "#/paths/~1items/get/responses/200/content/multipart~1form-data/encoding/file",
+        "headers",
+        false
+    )]
+    [InlineData(
+        "#/paths/~1items/get/requestBody/content/multipart~1form-data/encoding/file",
+        "headers",
+        false
+    )]
+    [InlineData("#/components/responses/Thing", "headers", false)]
+    public void Preserved_Headers_Are_Accepted_Only_On_An_Operation_Response(
+        string owner,
+        string name,
+        bool accepted
+    )
+    {
+        var compilation = CompilationHelper.CreateCompilation(
+            $$"""
+            using Rivet;
+
+            [assembly: RivetDocumentInfo("T", "1")]
+            [assembly: RivetPreservedField("{{owner}}", "{{name}}", "{}")]
+            """
+        );
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        var walk = () => Rivet.Tool.Analysis.OpenApiProvenanceWalker.Walk(compilation, walker);
+
+        if (accepted)
+        {
+            Assert.NotNull(walk());
+        }
+        else
+        {
+            var exception = Assert.Throws<RivetUserException>(walk);
+            Assert.StartsWith(
+                $"error RIV1122: Invalid Rivet preserved-field name '{name}'.",
+                exception.Message
+            );
+        }
     }
 
     [Fact]

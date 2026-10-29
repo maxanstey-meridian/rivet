@@ -45,6 +45,13 @@ internal static class RoslynExtensions
     public static object? NamedArgument(this AttributeData attribute, string name) =>
         attribute.NamedArguments.FirstOrDefault(a => a.Key == name).Value.Value;
 
+    /// <summary>Where a node starts, as a compiler prints it: <c>path(line,column)</c>.</summary>
+    public static string SourcePosition(this SyntaxNode node)
+    {
+        var span = node.GetLocation().GetLineSpan();
+        return $"{span.Path}({span.StartLinePosition.Line + 1},{span.StartLinePosition.Character + 1})";
+    }
+
     /// <summary>The string values of an attribute argument, flattening arrays.</summary>
     public static IEnumerable<string> Strings(this TypedConstant constant) =>
         constant.Kind == TypedConstantKind.Array ? constant.Values.SelectMany(Strings)

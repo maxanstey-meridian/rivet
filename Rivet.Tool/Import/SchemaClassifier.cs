@@ -400,6 +400,17 @@ internal static class SchemaClassifier
     internal static bool DeclaresAdditionalProperties(IOpenApiSchema schema) =>
         schema.AdditionalPropertiesAllowed && schema.AdditionalProperties is not null;
 
+    /// <summary>
+    /// Whether a property-less object component imports as an empty record rather than a
+    /// dictionary: it says nothing about extra keys, or it carries Rivet's empty-record marker
+    /// beside the <c>additionalProperties</c> its <c>[JsonExtensionData]</c> bag writes.
+    /// MapSchemas writes the record and every <c>$ref</c> resolves to it by this one rule.
+    /// </summary>
+    internal static bool IsEmptyRecordComponent(IOpenApiSchema schema) =>
+        IsObject(schema)
+        && schema.Properties is not { Count: > 0 }
+        && (schema.AdditionalProperties is null || HasExtension(schema, "x-rivet-empty-record"));
+
     internal static bool HasExtension(IOpenApiSchema schema, string key)
     {
         return schema.Extensions is not null && schema.Extensions.ContainsKey(key);

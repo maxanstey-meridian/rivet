@@ -258,6 +258,55 @@ public sealed class LoweredParamMetadataTests
         );
     }
 
+    [Fact]
+    public void Query_Param_Keeps_Its_Schema_Refs_And_Item_Metadata()
+    {
+        // What import writes on a record reused as a GET input: the param's schema says what
+        // the body property's would, item metadata and generated schema refs included.
+        var source = """
+            using System.Collections.Generic;
+            using Rivet;
+
+            [assembly: RivetGeneratedSchema("Code", "code", "string", null, false, "{}")]
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            [RivetType]
+            public sealed record FilterInput
+            {
+                [RivetGeneratedSchemaMetadata("/items", null, null, null, null, null, -1, -1, null, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, -1, -1, false, null, null, null, false, false, null, false, false, false, false, false, null, enumJson: "[1,2]")]
+                public List<int>? Ids { get; init; }
+
+                [RivetSchemaRef("Code")]
+                public string? Kind { get; init; }
+            }
+
+            [RivetContract]
+            public static class ThingsContract
+            {
+                public static readonly RouteDefinition<FilterInput, ThingDto> List =
+                    Define.Get<FilterInput, ThingDto>("/filtered-things");
+            }
+            """;
+
+        Assert.Equal(
+            [1, 2],
+            Param(source, "query", "ids")
+                .GetProperty("schema")
+                .GetProperty("items")
+                .GetProperty("enum")
+                .EnumerateArray()
+                .Select(value => value.GetInt32())
+        );
+        Assert.EndsWith(
+            "/code",
+            Param(source, "query", "kind").GetProperty("schema").GetProperty("$ref").GetString()
+        );
+    }
+
     /// <summary>
     /// The multipart leg (decision 31): a form field lowered from an input record, or bound
     /// by an action's [FromForm] parameter, carries the member's annotations on the param.

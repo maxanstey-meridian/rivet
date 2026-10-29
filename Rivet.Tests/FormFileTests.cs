@@ -771,6 +771,9 @@ public sealed class FormFileTests
         "files,title"
     )]
     [InlineData("public IFormFileCollection Files { get; init; } = null!;", "", false, "")]
+    // Both hosts list members through their public getters, so a file nobody can read back
+    // is no part, and the input isn't multipart.
+    [InlineData("public IFormFile File { private get; set; } = null!;", "", false, "")]
     [InlineData("public HashSet<IFormFile> Files { get; init; } = [];", "", false, "")]
     // The form binder never reads [JsonIgnore], so the ignored file is still a part.
     [InlineData(
@@ -901,6 +904,64 @@ public sealed class FormFileTests
         Assert.False(schema.TryGetProperty("$ref", out _));
         AssertBinaryFileProperty(schema, "file");
         Assert.True(schema.GetProperty("properties").TryGetProperty("title", out _));
+    }
+
+    /// <summary>
+    /// A route token matches a form input's member from the same list its parts come from,
+    /// so a member on a package base is the path parameter and no part.
+    /// </summary>
+    [Fact]
+    public void A_route_token_binds_a_form_input_member_on_a_package_base()
+    {
+        var (compilation, _) = CompilationHelper.CreateCompilationWithPackageReference(
+            """
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            public class Upload : Packaged.PackageBase
+            {
+                public IFormFile File { get; init; } = null!;
+            }
+
+            [RivetContract]
+            public static class UploadsContract
+            {
+                public static readonly RouteDefinition<Upload, string> Create =
+                    Define.Post<Upload, string>("/api/owners/{ownerId}/uploads");
+            }
+            """,
+            """
+            namespace Packaged;
+
+            public class PackageBase
+            {
+                public System.Guid OwnerId { get; init; }
+
+                public string Note { get; init; } = "";
+            }
+            """
+        );
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoint = Assert.Single(
+            CompilationHelper.WalkContracts(compilation, discovered, walker)
+        );
+
+        Assert.Equal(
+            [
+                ("file", ParamSource.File),
+                ("note", ParamSource.FormField),
+                ("ownerId", ParamSource.Route),
+            ],
+            endpoint
+                .Params.Select(p => (p.Name, p.Source))
+                .OrderBy(p => p.Name, StringComparer.Ordinal)
+        );
+        Assert.Equal(
+            new TsType.Primitive("string", "uuid"),
+            endpoint.Params.Single(p => p.Name == "ownerId").Type
+        );
     }
 
     private static string UploadSource(string baseType, string members, string baseDeclaration) =>

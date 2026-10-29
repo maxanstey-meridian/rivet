@@ -1,5 +1,6 @@
 using System.Reflection.Metadata;
 using Microsoft.CodeAnalysis;
+using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
 
@@ -17,11 +18,6 @@ namespace Rivet.Tool.Analysis;
 /// </summary>
 internal static class FormBinding
 {
-    private static readonly SymbolDisplayFormat _fullName = new(
-        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
-        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters
-    );
-
     /// <summary>
     /// A member a host binds on a complex input: a property, a parameter of the bound
     /// constructor, or both when the constructor parameter sets the property (a positional
@@ -60,8 +56,14 @@ internal static class FormBinding
     /// <summary>Which hosts can serve an endpoint whose form body is being named.</summary>
     internal enum FormHosts
     {
-        /// <summary>A <c>[RivetEndpoint]</c> action: MVC's model binder alone.</summary>
+        /// <summary>An instance <c>[RivetEndpoint]</c> method, an MVC action: MVC's model binder alone.</summary>
         Mvc,
+
+        /// <summary>
+        /// A static <c>[RivetEndpoint]</c> method, a minimal-API handler (MVC never treats one as
+        /// an action): the minimal-API form mapper alone.
+        /// </summary>
+        MinimalApi,
 
         /// <summary>
         /// A contract, which a controller or a minimal-API handler may implement: MVC's model
@@ -71,12 +73,30 @@ internal static class FormBinding
     }
 
     /// <summary>
+    /// The binders that bind a complex type member by member. They agree on which properties
+    /// they can see (<see cref="FormBoundProperties"/>) but not on which constructor they call
+    /// (<see cref="BoundConstructor"/>) or which attributes take a member out.
+    /// </summary>
+    internal enum Binder
+    {
+        /// <summary>MVC's ComplexObjectModelBinder.</summary>
+        Mvc,
+
+        /// <summary>The minimal-API form mapper behind a <c>[FromForm]</c> complex parameter.</summary>
+        FormMapper,
+
+        /// <summary>RequestDelegateFactory's <c>[AsParameters]</c> expansion.</summary>
+        AsParameters,
+    }
+
+    /// <summary>
     /// One part of a form body, named as every host that can serve it reads it.
     /// <paramref name="Required"/> is set when some host refuses a request without it,
-    /// whatever the member says about optionality: on a contract, a positional record's
-    /// constructor-bound part, since the minimal-API form mapper answers 400 when any
-    /// constructor parameter is missing (nullable and <c>[RivetOptional]</c> ones included)
-    /// while MVC binds it as null. Sending it satisfies both.
+    /// whatever the member says about optionality: wherever the minimal-API form mapper can
+    /// serve the endpoint (a contract, a static <c>[RivetEndpoint]</c>), a part the
+    /// constructor binds, since the mapper answers 400 when any constructor parameter is
+    /// missing (nullable and <c>[RivetOptional]</c> ones included) while MVC binds it as null.
+    /// Sending it satisfies both.
     /// </summary>
     internal sealed record FormPart(
         IPropertySymbol Property,
@@ -86,31 +106,29 @@ internal static class FormBinding
     );
 
     /// <summary>
-    /// The members ASP.NET binds on <paramref name="type"/>: each parameter of its single
-    /// public parameterised constructor (a record's primary constructor) with the
-    /// form-bound property it sets, then every other form-bound property with a public
-    /// setter or init accessor. The properties are <see cref="FormBoundProperties"/>, so a
+    /// The members <paramref name="binder"/> binds on <paramref name="type"/>: each parameter
+    /// of the constructor it calls (<see cref="BoundConstructor"/>) with the property it sets,
+    /// then every other property it can see with a public setter or init accessor, less those
+    /// an attribute takes out for it (<see cref="Skips"/>); none when it can't create the type
+    /// (<see cref="CantCreate"/>). The properties are <see cref="FormBoundProperties"/>, so a
     /// derived member hides its base's however accessible it is, and a package base counts.
     /// </summary>
     internal static IReadOnlyList<BoundMember> BoundMembers(
         Compilation compilation,
-        INamedTypeSymbol type
+        WellKnownTypes wkt,
+        INamedTypeSymbol type,
+        Binder binder
     )
     {
         var properties = FormBoundProperties(compilation, type);
-        var constructorParameters = type
-            .InstanceConstructors.Where(constructor =>
-                constructor.DeclaredAccessibility == Accessibility.Public
-                && constructor.Parameters.Length > 0
-            )
-            .ToList()
-            is [var constructor]
-            ? constructor.Parameters
-            : [];
-
         var members = new List<BoundMember>();
+        if (CantCreate(type, properties, binder) is not null)
+        {
+            return members;
+        }
+
         var bound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var parameter in constructorParameters)
+        foreach (var parameter in BoundConstructor(type, properties, binder)?.Parameters ?? [])
         {
             var property = properties.FirstOrDefault(candidate =>
                 string.Equals(candidate.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)
@@ -131,6 +149,7 @@ internal static class FormBinding
                 .Where(property =>
                     property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
                     && !bound.Contains(property.Name)
+                    && Skips(wkt, binder, property) is null
                 )
                 .Select(property => new BoundMember(property.Name, property.Type, property, null))
         );
@@ -138,13 +157,109 @@ internal static class FormBinding
     }
 
     /// <summary>
+    /// The constructor <paramref name="binder"/> creates <paramref name="type"/> with, when its
+    /// parameters bind members; null when the binder sets properties alone (a parameterless
+    /// constructor) or can't create the type (<see cref="CantCreate"/>).
+    /// <list type="bullet">
+    /// <item>MVC (DefaultBindingMetadataProvider.GetRecordTypeConstructor) calls a record
+    /// class's one public constructor when every parameter matches a visible property by its
+    /// exact name and type; otherwise it needs a public parameterless constructor.</item>
+    /// <item>The form mapper (FormDataMetadataFactory) and <c>[AsParameters]</c>
+    /// (ParameterBindingMethodCache.FindConstructor) call a type's one public constructor,
+    /// matching parameters to properties ignoring case. With several, the form mapper binds
+    /// nothing and <c>[AsParameters]</c> calls the parameterless one.</item>
+    /// </list>
+    /// Pinned on real hosts by <c>FormPartNameTests.The_hosts_construct_these_types_differently</c>.
+    /// </summary>
+    internal static IMethodSymbol? BoundConstructor(
+        INamedTypeSymbol type,
+        IReadOnlyList<IPropertySymbol> properties,
+        Binder binder
+    )
+    {
+        var constructors = PublicConstructors(type);
+        if (constructors is not [var constructor] || constructor.Parameters.Length == 0)
+        {
+            return null;
+        }
+
+        return
+            binder != Binder.Mvc
+            || type is { IsRecord: true, IsValueType: false }
+                && constructor.Parameters.All(parameter =>
+                    properties.Any(property =>
+                        property.Name == parameter.Name
+                        && SymbolEqualityComparer.Default.Equals(property.Type, parameter.Type)
+                    )
+                )
+            ? constructor
+            : null;
+    }
+
+    /// <summary>
+    /// Why <paramref name="binder"/> binds no member of <paramref name="type"/> at all, or null
+    /// when it can create it. MVC needs its record constructor (<see cref="BoundConstructor"/>),
+    /// a public parameterless constructor, or a struct, and otherwise fails the request; the
+    /// form mapper answers a type with more than one public constructor with nothing bound.
+    /// </summary>
+    internal static string? CantCreate(
+        INamedTypeSymbol type,
+        IReadOnlyList<IPropertySymbol> properties,
+        Binder binder
+    ) =>
+        binder switch
+        {
+            Binder.Mvc
+                when !type.IsValueType
+                    && BoundConstructor(type, properties, Binder.Mvc) is null
+                    && !PublicConstructors(type)
+                        .Any(constructor => constructor.Parameters.Length == 0) =>
+                "MVC's model binder can't create it: it needs a public parameterless constructor, or a "
+                    + "record's one public constructor whose every parameter matches a property by its "
+                    + "exact name and type",
+            Binder.FormMapper when PublicConstructors(type).Count > 1 =>
+                "the minimal-API form mapper binds nothing on a type with more than one public constructor",
+            _ => null,
+        };
+
+    // What reflection's GetConstructors() lists: a struct's implicit parameterless
+    // constructor isn't one.
+    private static IReadOnlyList<IMethodSymbol> PublicConstructors(INamedTypeSymbol type) =>
+        [
+            .. type.InstanceConstructors.Where(constructor =>
+                constructor.DeclaredAccessibility == Accessibility.Public
+                && !(
+                    type.IsValueType
+                    && constructor is { IsImplicitlyDeclared: true, Parameters.Length: 0 }
+                )
+            ),
+        ];
+
+    /// <summary>
+    /// The attribute that takes <paramref name="property"/> out for <paramref name="binder"/>,
+    /// or null when it binds: MVC skips a <c>[BindNever]</c> member and the form mapper an
+    /// <c>[IgnoreDataMember]</c> one. Each ignores the other's attribute.
+    /// </summary>
+    internal static string? Skips(WellKnownTypes wkt, Binder binder, IPropertySymbol property) =>
+        binder switch
+        {
+            Binder.Mvc when property.HasAttribute(wkt.BindNever) => "[BindNever]",
+            Binder.FormMapper when property.HasAttribute(wkt.IgnoreDataMember) =>
+                "[IgnoreDataMember]",
+            _ => null,
+        };
+
+    /// <summary>
     /// The parts of a form body that <paramref name="type"/> lowers to, base-most first:
     /// what <see cref="FormBoundProperties"/> lists, less <paramref name="excluded"/> (members
     /// a route token carries), <c>[RivetHeader]</c> members and a <c>[JsonExtensionData]</c>
-    /// bag, which no client sends as a field named for it. A non-file member the binders
-    /// can't set (no public setter and no constructor parameter) sends nothing; a file is
-    /// always a part, so a file that makes the body multipart is always listed. Each part is
-    /// named by <see cref="PartName"/>.
+    /// bag, which no client sends as a field named for it. A member is a part when the
+    /// binders of <paramref name="hosts"/> bind it (<see cref="BoundMembers"/>); a non-file
+    /// member none of them can set sends nothing. Where the spec would promise a part a host
+    /// drops it's <c>RIV1100</c> instead: a file member no binder can set (the body would be
+    /// multipart for a part nobody reads), a member one host binds and the other skips, and,
+    /// on a contract, a type MVC can't create while the form mapper calls its constructor.
+    /// Each part is named by <see cref="PartName"/>.
     /// </summary>
     internal static IReadOnlyList<FormPart> Parts(
         Compilation compilation,
@@ -156,9 +271,33 @@ internal static class FormBinding
         string where
     )
     {
-        var bound = type is INamedTypeSymbol named ? BoundMembers(compilation, named) : [];
+        var named = type as INamedTypeSymbol;
+        var properties = FormBoundProperties(compilation, type);
+        var binders = hosts switch
+        {
+            FormHosts.Mvc => new[] { Binder.Mvc },
+            FormHosts.MinimalApi => [Binder.FormMapper],
+            _ => [Binder.Mvc, Binder.FormMapper],
+        };
+        foreach (var binder in binders)
+        {
+            if (named is not null && CantCreate(named, properties, binder) is { } why)
+            {
+                throw Diagnostics.Error(
+                    Diagnostics.UnresolvedBindingSource,
+                    $"form input '{named.Name}' on {where} binds no part: {why}. Give it one public "
+                        + "constructor: a parameterless one with settable properties, or a positional "
+                        + "record's."
+                );
+            }
+        }
+
+        var boundBy = binders.ToDictionary(
+            binder => binder,
+            binder => named is null ? [] : BoundMembers(compilation, wkt, named, binder)
+        );
         var parts = new List<FormPart>();
-        foreach (var property in FormBoundProperties(compilation, type))
+        foreach (var property in properties)
         {
             if (
                 excluded.Contains(property.Name)
@@ -170,26 +309,63 @@ internal static class FormBinding
             }
 
             var isFile = CarriesFiles(wkt, typeWalker, property.Type);
-            var member = bound.FirstOrDefault(candidate =>
-                SymbolEqualityComparer.Default.Equals(candidate.Property, property)
+            var members = binders.ToDictionary(
+                binder => binder,
+                binder =>
+                    boundBy[binder]
+                        .FirstOrDefault(candidate =>
+                            SymbolEqualityComparer.Default.Equals(candidate.Property, property)
+                        )
             );
-            if (member is null && !isFile)
+            if (members.Values.All(member => member is null))
             {
+                if (isFile && binders.All(binder => Skips(wkt, binder, property) is null))
+                {
+                    throw Diagnostics.Error(
+                        Diagnostics.UnresolvedBindingSource,
+                        $"form input member '{property.Name}' on {where} carries files, but nothing "
+                            + "can set it: it has no public setter or init accessor and no constructor "
+                            + "parameter, so the binders drop the part, and the body would be multipart "
+                            + "for a file nobody reads. Give it a public setter or init accessor, or "
+                            + "take it out of the form input."
+                    );
+                }
+
                 continue;
             }
 
+            // All null was handled above, so this is one host binding what the other skips.
+            if (binders.Where(binder => members[binder] is null).ToList() is [var dropped])
+            {
+                var skippedBy = Skips(wkt, dropped, property);
+                throw Diagnostics.Error(
+                    Diagnostics.UnresolvedBindingSource,
+                    $"form input member '{property.Name}' on {where} is "
+                        + (
+                            dropped == Binder.Mvc
+                                ? $"skipped by MVC's model binder ({skippedBy}) but bound by the minimal-API form mapper"
+                                : $"skipped by the minimal-API form mapper ({skippedBy}) but bound by MVC's model binder"
+                        )
+                        + ", so no one form body describes what every host that can serve the contract "
+                        + "reads. Skip it for both ([BindNever] and [IgnoreDataMember]) or neither."
+                );
+            }
+
+            var member = members.Values.First()!;
             parts.Add(
                 new FormPart(
                     property,
                     PartName(
                         wkt,
-                        member ?? new BoundMember(property.Name, property.Type, property, null),
+                        member,
                         typeWalker.GetJsonMemberName(property) ?? Naming.ToCamelCase(property.Name),
                         hosts,
                         where
                     ),
                     isFile,
-                    Required: hosts == FormHosts.Any && member?.ConstructorParameter is not null
+                    Required: hosts != FormHosts.Mvc
+                        && members.GetValueOrDefault(Binder.FormMapper)?.ConstructorParameter
+                            is not null
                 )
             );
         }
@@ -216,8 +392,11 @@ internal static class FormBinding
         string where
     )
     {
+        var readByMvc = hosts != FormHosts.MinimalApi;
+        var readByMapper = hosts != FormHosts.Mvc;
         if (
-            ParameterBindingSources.MvcMemberSource(wkt, member.MvcAttributes, member.Type)
+            readByMvc
+            && ParameterBindingSources.MvcMemberSource(wkt, member.MvcAttributes, member.Type)
                 is { } source
             && source != InputSource.Form
         )
@@ -236,10 +415,9 @@ internal static class FormBinding
             );
         }
 
-        var mvcName = MvcModelName(member.MvcAttributes, member.Type);
-        var mapperName =
-            hosts == FormHosts.Any ? DataMemberName(member.FormMapperAttributes) : null;
-        var binds = mvcName ?? member.Name;
+        var mvcName = readByMvc ? MvcModelName(wkt, member.MvcAttributes, member.Type) : null;
+        var mapperName = readByMapper ? DataMemberName(wkt, member.FormMapperAttributes) : null;
+        var binds = (readByMvc ? mvcName : mapperName) ?? member.Name;
         if (hosts == FormHosts.Any && !Same(binds, mapperName ?? member.Name))
         {
             throw Diagnostics.Error(
@@ -273,6 +451,7 @@ internal static class FormBinding
     /// type (a class-level [Bind(Prefix = "c")]); null when none names one.
     /// </summary>
     internal static string? MvcModelName(
+        WellKnownTypes wkt,
         IReadOnlyList<AttributeData> attributes,
         ITypeSymbol type
     ) =>
@@ -280,17 +459,11 @@ internal static class FormBinding
             .Concat(type.GetAttributes())
             .Where(attribute =>
                 attribute.AttributeClass is { } attributeClass
-                && attributeClass.AllInterfaces.Any(candidate =>
-                    FullName(candidate)
-                    == "Microsoft.AspNetCore.Mvc.ModelBinding.IModelNameProvider"
-                )
+                && wkt.IModelNameProvider is { } provider
+                && attributeClass.AllInterfaces.Contains(provider, SymbolEqualityComparer.Default)
             )
             .Select(attribute =>
-                attribute.NamedArgument(
-                    FullName(attribute.AttributeClass) == "Microsoft.AspNetCore.Mvc.BindAttribute"
-                        ? "Prefix"
-                        : "Name"
-                )
+                attribute.NamedArgument(attribute.Is(wkt.Bind) ? "Prefix" : "Name")
             )
             .OfType<string>()
             .FirstOrDefault(name => name.Length > 0);
@@ -300,12 +473,12 @@ internal static class FormBinding
     /// place of its C# name. The mapper honours no other rename: a member's [FromForm(Name =)]
     /// and [JsonPropertyName] change nothing.
     /// </summary>
-    internal static string? DataMemberName(IReadOnlyList<AttributeData> attributes) =>
+    internal static string? DataMemberName(
+        WellKnownTypes wkt,
+        IReadOnlyList<AttributeData> attributes
+    ) =>
         attributes
-            .Where(attribute =>
-                FullName(attribute.AttributeClass)
-                == "System.Runtime.Serialization.DataMemberAttribute"
-            )
+            .Where(attribute => attribute.Is(wkt.DataMember))
             .Select(attribute => attribute.NamedArgument("Name"))
             .OfType<string>()
             .FirstOrDefault(name => name.Length > 0);
@@ -325,11 +498,10 @@ internal static class FormBinding
             _ => "a custom model binder",
         };
 
-    private static string? FullName(ISymbol? symbol) => symbol?.ToDisplayString(_fullName);
-
     /// <summary>
-    /// The properties ASP.NET's form binder binds on <paramref name="type"/>: the public
-    /// instance properties that aren't indexers, along the whole base chain (the walkable-
+    /// The properties ASP.NET's form binders can see on <paramref name="type"/>: the instance
+    /// properties with a public getter (PropertyHelper.GetVisibleProperties, which both hosts
+    /// list members through) that aren't indexers, along the whole base chain (the walkable-
     /// assembly cutoff doesn't apply: the binder reads a package's base class too), where the
     /// most-derived property of a name, whatever its accessibility, hides the base's.
     /// <c>[JsonIgnore]</c> doesn't count, since the form binder never reads it. Base-most first,
@@ -389,7 +561,9 @@ internal static class FormBinding
             {
                 Declare(
                     property.Name,
-                    property.DeclaredAccessibility == Accessibility.Public ? property : null
+                    property.GetMethod is { DeclaredAccessibility: Accessibility.Public }
+                        ? property
+                        : null
                 );
             }
 
@@ -413,6 +587,16 @@ internal static class FormBinding
     ) =>
         SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile)
         || typeWalker.IsCollectionOf(type, wkt.IFormFile);
+
+    /// <summary>
+    /// What a part of <paramref name="type"/> (one that <see cref="CarriesFiles"/>) sends: one
+    /// file for an <c>IFormFile</c>, an array of them (a multipart array-of-binary part) for a
+    /// collection.
+    /// </summary>
+    internal static TsType FilePartType(WellKnownTypes wkt, ITypeSymbol type) =>
+        SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile)
+            ? new TsType.Primitive("File")
+            : new TsType.Array(new TsType.Primitive("File"));
 
     /// <summary>
     /// The instance, non-indexer properties a metadata type declares that Roslyn didn't

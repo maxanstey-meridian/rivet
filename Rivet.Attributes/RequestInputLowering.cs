@@ -68,8 +68,9 @@ internal static class RequestInputLowering
         || FormBoundProperties(inputType).Any(property => IsFormFiles(property.PropertyType));
 
     /// <summary>
-    /// The properties ASP.NET's form binder binds: the public instance properties that aren't
-    /// indexers, along the whole base chain, where the most-derived property of a name,
+    /// The properties ASP.NET's form binders can see: the instance properties with a public
+    /// getter (PropertyHelper.GetVisibleProperties, which both hosts list members through)
+    /// that aren't indexers, along the whole base chain, where the most-derived property of a name,
     /// whatever its accessibility, hides the base's, so a <c>new</c> member hides its base's.
     /// <c>[JsonIgnore]</c> doesn't count; the form binder never reads it. Roslyn symbols and
     /// <c>System.Type</c> can't share code, so the tool keeps its own copy
@@ -91,14 +92,12 @@ internal static class RequestInputLowering
                 )
             )
             {
-                // Any instance property hides a base's of the same name; only a public one
-                // (a public accessor, as BindingFlags.Public reads it) is bound.
+                // Any instance property hides a base's of the same name; only one with a
+                // public getter is seen, so `{ private get; set; }` binds nothing.
                 if (
                     property.GetIndexParameters().Length == 0
                     && seen.Add(property.Name)
-                    && (
-                        property.GetMethod?.IsPublic == true || property.SetMethod?.IsPublic == true
-                    )
+                    && property.GetMethod?.IsPublic == true
                 )
                 {
                     yield return property;

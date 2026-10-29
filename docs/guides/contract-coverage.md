@@ -21,9 +21,11 @@ A `Map*` route can be a string constant or the contract field's own `.Route`, as
 `app.MapGet(MembersContract.Health.Route, …)`, and `MapGroup` prefixes count either
 way: the contract owns the full path, so a group prefix it doesn't declare is a
 `RouteMismatch`. A convention on the group doesn't lose it, so
-`var api = app.MapGroup("/api").RequireAuthorization();` still prefixes `api.MapGet(…)`. Anything else (a variable, concatenation, interpolation, or a
-`MapGroup` prefix that isn't a constant) is reported as an unresolved
-`RouteMismatch`, because `--check` won't guess a route.
+`var api = app.MapGroup("/api").RequireAuthorization();` still prefixes
+`api.MapGet(…)`. Anything else (a variable, concatenation, interpolation, a `MapGroup`
+prefix that isn't a constant, or a route group `--check` can't trace back to its
+`MapGroup` call, such as a parameter, a field, or what a helper returns) is reported as
+an unresolved `RouteMismatch`, because `--check` won't guess a route.
 
 `--check` reports eight kinds of finding on stderr. The first four are warnings; `UnbindableEnumParameter` (`RIV4005`), `InputBindingMismatch` (`RIV4006`), `SecurityMismatch` (`RIV4008`), and `AuthorizationUnreadable` (`RIV4009`) are errors:
 
@@ -138,14 +140,15 @@ handler body that reads the request or route data through a property (a controll
 `Request` or `RouteData`, `ControllerContext.HttpContext.Request`, an
 `IHttpContextAccessor`'s `HttpContext.Request`), calls `HttpContext.GetRouteValue`, or
 hands the `HttpContext` or `HttpRequest` to another method (`HttpContext.GetTenantId()`).
-Touching only `HttpContext.User`, `Response` or `RequestAborted` doesn't count. A method
-or property the handler calls on `this`, its own class's or a base's, is read too, as deep
-as the calls go, so a controller's private `RouteId()` that reads `Request.RouteValues`
-counts. A helper anywhere else isn't followed: it reaches the request through an argument,
-and handing it the `HttpContext` already counts. Such a handler is never told an input is
-unbound, though what it does bind is still checked. That's also the only way to read a cookie the contract
-declares: ASP.NET has no attribute that binds one, so `--check` reports a declared cookie
-unless the handler can read `Request.Cookies`. An unattributed complex parameter that
+Touching only `HttpContext.User`, `Response`, or `RequestAborted` doesn't count. A method
+or property the handler calls is read too when its source is in your project, as deep as
+the calls go, so a controller's private `RouteId()` that reads `Request.RouteValues`
+counts, and so do an extension it hands `this` (`this.RouteId()`) and a static helper it
+hands an `IHttpContextAccessor`. A method only a package knows is judged by what it's
+handed. Such a handler is never told an input is unbound, though what it does bind is
+still checked. That's also the only way to read a cookie the contract declares: ASP.NET
+has no attribute that binds one, so `--check` reports a declared cookie unless the
+handler can read `Request.Cookies`. An unattributed complex parameter that
 could be a service counts as the body when the contract has one and as a service when it
 doesn't. The `Authorization` header, a `.QueryAuth()` token and the header or query
 parameter of an apiKey scheme the endpoint's security names (its own `.Secure(...)`, or
@@ -155,8 +158,8 @@ security, not its inputs; `--check` takes the same `--security` values as genera
 An Azure Functions trigger hands the function the whole request, so a function is never
 told an input is unbound. Its other parameters are compared, though, because the worker
 fills each one by its name, ignoring case: from a route value first, then a query
-parameter, then a top-level property of a JSON body. It never looks at headers, cookies or
-form fields, and a name nothing carries is `null`, or, for a value type, a failed call. So
+parameter, then a top-level property of a JSON body. It never looks at headers, cookies,
+or form fields, and a name nothing carries is `null`, or, for a value type, a failed call. So
 a misspelt route token is caught:
 
 ```csharp
@@ -167,7 +170,7 @@ public IActionResult Run([HttpTrigger(…, Route = ImagesContract.ThumbnailTrigg
 ```
 
 That's `RIV4006`: the handler binds a query parameter `sz` the contract doesn't declare. A
-parameter named after a declared cookie, header or form field is reported as the query
+parameter named after a declared cookie, header, or form field is reported as the query
 parameter it really is, and the fix is to read the value from the request. A parameter
 named after one of a JSON body's top-level properties is fine, since that's the worker's
 third place to look. [Azure Functions](./azure-functions) has the full binding rules,
@@ -188,11 +191,15 @@ can't be matched (`[Authorize(Policy = "Staff")]` says nothing about bearer toke
 - The spec admits anonymous callers (`.Anonymous()`, `.OrAnonymous()`, or no security at
   all), but the handler requires authentication, so those callers get a 401.
 
-The spec's security is the endpoint's own, else the document's default. A `[RivetEndpoint]`
-action is compared too, with its `[RivetSecure]`, `[RivetOrAnonymous]`, and
-`[RivetAnonymous]` attributes as its spec (an action that also implements a contract field is
-compared once, as the field's handler). That catches `[AllowAnonymous]` sitting beside a
-`[RivetSecure]` that has no anonymous alternative.
+The spec's security is the endpoint's own, else the document's default. Every operation that
+declares its security with attributes is compared too: a `[RivetEndpoint]` method or a
+`[RivetClient]` controller's action against its own `[RivetSecure]`, `[RivetOrAnonymous]`, and
+`[RivetAnonymous]`, and a controller's override of an abstract `[RivetContract]` method against
+the contract method's. A static `[RivetEndpoint]` method is a minimal-API handler, so it's
+compared at each `Map*` call that names it as a method group. A handler that implements
+contract fields is compared under every field it serves, and not again for its own
+attributes: the merge already holds the two to one security (`RIV2012`). That catches
+`[AllowAnonymous]` sitting beside a `[RivetSecure]` that has no anonymous alternative.
 
 ### No security declared means anyone may call
 
@@ -227,9 +234,14 @@ the generation flags would compare against a different spec from the one you shi
   `[AllowAnonymous]` opts out of;
 - `RequireAuthorization()` and `AllowAnonymous()` on the endpoint, on any `MapGroup` it's
   mapped in, and on `MapControllers()`;
-- the fallback policy, set by `AddAuthorization(o => o.FallbackPolicy = ...)` or
-  `AddAuthorizationBuilder().SetFallbackPolicy(...)`, which applies only to an endpoint with
-  no authorization of its own;
+- the fallback policy, set by `AddAuthorization(o => o.FallbackPolicy = ...)`, or
+  `AddAuthorizationBuilder()`'s `SetFallbackPolicy(...)` or `AddFallbackPolicy(name, ...)`,
+  which applies only to an endpoint with no authorization of its own;
+- the default policy, which is what `[Authorize]`, `RequireAuthorization()`, and
+  `new AuthorizeFilter()` mean when they name no policy or role of their own, and what
+  `o.FallbackPolicy = o.DefaultPolicy` copies. ASP.NET's own requires an authenticated user;
+  one you set (`o.DefaultPolicy = ...`, `SetDefaultPolicy(...)`, or
+  `AddDefaultPolicy(name, ...)`) is read like any other policy;
 - for Azure Functions, the trigger's `AuthorizationLevel`. `Anonymous` lets anyone in; any
   other level needs a key, and leaving the level out means the attribute's default,
   `Function`.
@@ -259,6 +271,14 @@ calls that hand the builder back (`.WithName(...)`, `.RequireAuthorization()`), 
 helper that returns one, and into a helper you pass it to, at each call site. A convention on
 a builder it can't trace to its `Map*` call (a lambda's parameter, a field, or a method handed
 on as a delegate) may cover any endpoint on that host, so those endpoints become `RIV4009`.
+
+App-wide setup in a helper (an `AuthorizeFilter`, or a fallback or default policy) applies
+where the helper is called: under that call's condition, unconditionally if any call is, and
+not at all if nothing calls it. A helper handed to a call as a method group, as in
+`services.AddControllers(ConfigureMvc)`, runs where that call does; one stored in a delegate
+can't be followed, so it's unknown. A method nothing calls runs only when the host calls it:
+the entry point, or a Startup class's public `Configure…` methods, which ASP.NET finds by
+name.
 
 ### What it can't see
 

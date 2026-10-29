@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
 using Rivet.Tool.Model;
@@ -11,6 +12,109 @@ namespace Rivet.Tests;
 
 public sealed class OpenApiImporterTests
 {
+    // G.1's import side keeps [RivetSchemaType] only on a member whose C# type the walker
+    // maps to a primitive leaf; the walker refuses it anywhere else (RIV1117). The framework
+    // scalars are the walker's own table; the keyword scalars are held here against the
+    // walker's SpecialType mapping, so neither side can gain or lose one alone.
+    [Fact]
+    public void The_Importers_Built_In_Scalars_Are_The_Walkers_Primitives()
+    {
+        var scalars = SchemaMapper
+            .KeywordScalars.Concat(
+                BuiltInScalars.FrameworkTypes.Select(scalar => "global::" + scalar.MetadataName)
+            )
+            .ToList();
+        string[] notScalars =
+        [
+            "global::System.Text.Json.Nodes.JsonObject",
+            "global::System.Text.Json.Nodes.JsonArray",
+            "Color",
+            "Other",
+            "global::System.Collections.Generic.List<int>",
+        ];
+        var members = scalars
+            .Concat(notScalars)
+            .Select((type, index) => $"public {type} M{index} {{ get; init; }} = default!;");
+        var source = $$"""
+            namespace Test;
+
+            public enum Color { Red }
+
+            public sealed record Other(string Id);
+
+            public sealed class Probe
+            {
+                {{string.Join("\n    ", members)}}
+            }
+            """;
+
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var probe = compilation.GetTypeByMetadataName("Test.Probe")!;
+        TsType Mapped(int index) =>
+            walker.MapType(((IPropertySymbol)probe.GetMembers($"M{index}").Single()).Type);
+
+        for (var index = 0; index < scalars.Count; index++)
+        {
+            Assert.True(
+                Mapped(index) is TsType.Primitive,
+                $"'{scalars[index]}' is an importer scalar the walker maps to {Mapped(index)}"
+            );
+        }
+        for (var index = 0; index < notScalars.Length; index++)
+        {
+            var mapped = Mapped(scalars.Count + index);
+            Assert.False(
+                mapped is TsType.Primitive,
+                $"'{notScalars[index]}' maps to a primitive the importer doesn't know: {mapped}"
+            );
+        }
+    }
+
+    // …and a member that isn't one (a record, a list, an enum) imports without it, while a
+    // scalar beside it keeps its schema type.
+    [Fact]
+    public void Only_Scalar_Members_Import_With_A_Schema_Type()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Color": { "type": "string", "enum": ["red", "blue"] },
+            "Other": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "Holder": {
+                "type": "object",
+                "properties": {
+                    "count": { "type": "integer", "format": "int64" },
+                    "other": { "$ref": "#/components/schemas/Other" },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "color": { "$ref": "#/components/schemas/Color" }
+                },
+                "required": ["count", "other", "tags", "color"]
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec);
+        var holder = CompilationHelper.FindFile(imported, "Holder.cs");
+        var lines = holder.Split('\n');
+        var schemaType = Assert.Single(
+            lines,
+            line => line.Contains("RivetSchemaType", StringComparison.Ordinal)
+        );
+        Assert.Contains("RivetSchemaType(\"integer\")", schemaType);
+        // The attribute belongs to the next member line: the scalar.
+        Assert.Contains(
+            " Count",
+            lines
+                .SkipWhile(line => line != schemaType)
+                .First(line => !line.TrimStart().StartsWith('['))
+        );
+        using var _ = CompilationHelper.EmitImported(imported);
+    }
+
     [Fact]
     public void Record_Property_Deduplication_Skips_Naturally_Occurring_Suffixes()
     {
@@ -540,6 +644,37 @@ public sealed class OpenApiImporterTests
             exception.Message
         );
         Assert.DoesNotContain("'{orgId}'", exception.Message);
+    }
+
+    // A path parameter with neither a schema nor content declares its token in name only:
+    // OpenAPI requires one of them on every parameter, so the document is refused the same way.
+    [Fact]
+    public void Path_Parameter_With_Neither_Schema_Nor_Content_Is_An_Invalid_Document()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/api/tasks/{taskId}": {
+                "get": {
+                    "operationId": "tasks_getTask",
+                    "tags": ["Tasks"],
+                    "parameters": [
+                        { "name": "taskId", "in": "path", "required": true }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """,
+            title: "API"
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() => CompilationHelper.Import(spec));
+
+        Assert.StartsWith(
+            "error RIV3032: invalid OpenAPI document: operation 'tasks_getTask' "
+                + "(GET /api/tasks/{taskId}) declares path parameter 'taskId' with neither a "
+                + "schema nor content.",
+            exception.Message
+        );
     }
 
     [Fact]
@@ -5874,6 +6009,53 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void A_Referenced_Component_Example_Embedding_A_Dangling_Ref_Round_Trips_As_Authored()
+    {
+        // The degrade belongs to inline example values. A $ref example's value is the
+        // component's, which provenance keeps as authored, so degrading it made an unedited
+        // import disagree with its own components.examples (RIV2015).
+        var spec = """
+            {
+                "openapi": "3.1.0",
+                "info": { "title": "Test", "version": "1.0.0" },
+                "components": {
+                    "examples": {
+                        "widget": { "value": { "id": "w1", "related": { "$ref": "#/components/examples/missing" } } }
+                    },
+                    "schemas": {
+                        "Dto": { "type": "object", "properties": { "id": { "type": "string" } } }
+                    }
+                },
+                "paths": {
+                    "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" }, "examples": { "default": { "$ref": "#/components/examples/widget" } } } } } } } }
+                }
+            }
+            """;
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var document = RealCliOpenApiPass.ImportAndEmit(
+            workDirectory.FullName,
+            sourcePath,
+            "first"
+        );
+
+        Assert.Equal(
+            "#/components/examples/missing",
+            document["components"]!["examples"]!["widget"]!["value"]!["related"]![
+                "$ref"
+            ]!.GetValue<string>()
+        );
+        Assert.Equal(
+            "#/components/examples/widget",
+            document["paths"]!["/api/x"]!["get"]!["responses"]!["200"]!["content"]![
+                "application/json"
+            ]!["examples"]!["default"]!["$ref"]!.GetValue<string>()
+        );
+    }
+
+    [Fact]
     public void Import_Deduplicates_Schema_Names_That_Collide_Case_Insensitively()
     {
         // Emitted names become Types/{Name}.cs files; on APFS/NTFS two names
@@ -7473,6 +7655,178 @@ public sealed class OpenApiImporterTests
     public void Malformed_Spec_Is_A_User_Error(string spec)
     {
         Assert.Throws<RivetUserException>(() => CompilationHelper.Import(spec));
+    }
+
+    /// <summary>Imports, compiles, walks, and emits with the document provenance, as the CLI does.</summary>
+    private static JsonNode EmitWithProvenance(ImportResult imported)
+    {
+        var compilation = CompilationHelper.CompileImportResult(imported);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        return JsonNode.Parse(
+            OpenApiEmitter.Emit(
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                security: null,
+                new OpenApiDocumentInfo(
+                    Provenance: OpenApiProvenanceWalker.Walk(compilation, walker)
+                )
+            )
+        )!;
+    }
+
+    // A response's ignored Content-Type header lands where emit writes headers: beside the
+    // ones the contract keeps, or as the whole headers object when the contract keeps none,
+    // judged by the contract's own rule (an empty-named header is one it drops).
+    [Fact]
+    public void Ignored_Content_Type_Comes_Back_When_No_Other_Header_Emits()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/raw": {
+                "get": {
+                    "operationId": "raw",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "headers": {
+                                "": { "schema": { "type": "string" } },
+                                "Content-Type": { "schema": { "type": "string" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var emitted = EmitWithProvenance(CompilationHelper.Import(spec));
+
+        var headers = emitted["paths"]!["/raw"]!["get"]!["responses"]!["200"]!["headers"]!;
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse("""{ "type": "string" }"""),
+                headers["Content-Type"]!["schema"]
+            ),
+            headers.ToJsonString()
+        );
+    }
+
+    // A response the import inlines from a reference that isn't a response component keeps
+    // its ignored Content-Type header at the referencing response.
+    [Fact]
+    public void Ignored_Content_Type_Survives_An_Inlined_Response_Reference()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/a": {
+                "get": {
+                    "operationId": "getA",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "headers": {
+                                "Content-Type": { "schema": { "type": "string" }, "example": "text/csv" }
+                            }
+                        }
+                    }
+                }
+            },
+            "/b": {
+                "get": {
+                    "operationId": "getB",
+                    "responses": { "200": { "$ref": "#/paths/~1a/get/responses/200" } }
+                }
+            }
+            """
+        );
+
+        var emitted = EmitWithProvenance(CompilationHelper.Import(spec));
+
+        Assert.Equal(
+            "text/csv",
+            emitted["paths"]!["/b"]!["get"]!["responses"]!["200"]!["headers"]!["Content-Type"]![
+                "example"
+            ]!.GetValue<string>()
+        );
+    }
+
+    // A Swagger 2 header carries its schema inline; the OpenAPI 3.1 emit needs it under
+    // schema, so the preserved Content-Type comes back in that shape.
+    [Fact]
+    public void Swagger2_Ignored_Content_Type_Comes_Back_In_OpenApi3_Shape()
+    {
+        const string spec = """
+            {
+              "swagger": "2.0",
+              "info": { "title": "T", "version": "1" },
+              "paths": {
+                "/raw": {
+                  "get": {
+                    "operationId": "raw",
+                    "produces": ["text/plain"],
+                    "responses": {
+                      "200": {
+                        "description": "OK",
+                        "headers": {
+                          "Content-Type": { "type": "string", "enum": ["text/plain"], "description": "Always text.", "collectionFormat": "csv" },
+                          "X-Version": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """;
+
+        var emitted = EmitWithProvenance(CompilationHelper.Import(spec));
+
+        var header = emitted["paths"]!["/raw"]!["get"]!["responses"]!["200"]!["headers"]![
+            "Content-Type"
+        ]!;
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse(
+                    """{ "description": "Always text.", "schema": { "type": "string", "enum": ["text/plain"] } }"""
+                ),
+                header
+            ),
+            header.ToJsonString()
+        );
+    }
+
+    // OpenAPI makes an example's value and externalValue optional and only mutually
+    // exclusive, so a component example with neither documents through its summary and
+    // description, and comes back as written.
+    [Fact]
+    public void Component_Example_With_Neither_Value_Nor_ExternalValue_Round_Trips()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "T", "version": "1" },
+              "paths": {},
+              "components": {
+                "examples": {
+                  "Described": { "summary": "A task", "description": "Any task will do." }
+                }
+              }
+            }
+            """;
+
+        var example = EmitWithProvenance(CompilationHelper.Import(spec))["components"]![
+            "examples"
+        ]!["Described"];
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse("""{ "summary": "A task", "description": "Any task will do." }"""),
+                example
+            ),
+            example!.ToJsonString()
+        );
     }
 
     // ========== Escaped component names ==========

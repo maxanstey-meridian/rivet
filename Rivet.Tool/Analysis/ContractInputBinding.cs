@@ -70,7 +70,7 @@ internal static class ContractInputBinding
             .ToList();
         var readsRequest =
             inputs.Any(input => input.Source == InputSource.WholeRequest)
-            || ReadsRequestInBody(handler);
+            || ReadsRequestInBody(wkt, handler);
         var readsWholeForm = inputs.Any(input => input.Source == InputSource.WholeForm);
 
         var settled = new HashSet<DeclaredInput>();
@@ -142,6 +142,7 @@ internal static class ContractInputBinding
 
         foreach (
             var mismatch in CompareBody(
+                wkt,
                 endpoint,
                 body,
                 inputs,
@@ -179,6 +180,7 @@ internal static class ContractInputBinding
     }
 
     private static IEnumerable<InputBindingMismatch> CompareBody(
+        WellKnownTypes wkt,
         TsEndpointDefinition endpoint,
         DeclaredBodyKind body,
         IReadOnlyList<BoundInput> inputs,
@@ -224,7 +226,7 @@ internal static class ContractInputBinding
             case DeclaredBodyKind.Form:
                 if (
                     bodies.FirstOrDefault(input =>
-                        !ParameterBindingSources.IsRawBody(input.Type)
+                        !ParameterBindingSources.IsRawBody(wkt, input.Type)
                     ) is
                     { } json
                 )
@@ -395,7 +397,7 @@ internal static class ContractInputBinding
             InputSource.Header => $"header '{name}'",
             InputSource.Cookie => $"cookie '{name}'",
             InputSource.Form => $"form field '{name}'",
-            InputSource.ValueProviders => $"route, query or form value '{name}'",
+            InputSource.ValueProviders => $"route, query, or form value '{name}'",
             _ => $"'{name}'",
         };
 
@@ -407,7 +409,7 @@ internal static class ContractInputBinding
                     + "from it.",
             (ParameterBindingHost.Functions, _) =>
                 "Read it from the trigger's request: the worker fills a parameter only from a "
-                    + "route value, a query parameter or a JSON body property of its name.",
+                    + "route value, a query parameter, or a JSON body property of its name.",
             (_, InputSource.Route) =>
                 $"Bind it with [FromRoute(Name = \"{name}\")], or a parameter named '{name}'.",
             (_, InputSource.Query) => $"Bind it with [FromQuery(Name = \"{name}\")].",
@@ -428,7 +430,7 @@ internal static class ContractInputBinding
                     + "the value in the handler.",
             InputSource.TriggerMetadata =>
                 "The Functions worker fills a parameter with no binding attribute by its name, "
-                    + "from a route value, a query parameter or a JSON body property, and the "
+                    + "from a route value, a query parameter, or a JSON body property, and the "
                     + "contract declares no input of that name, so it's always null (a misspelt "
                     + "route token, say). Rename it to an input the contract declares, or declare "
                     + "it on the contract's input type.",
@@ -442,43 +444,39 @@ internal static class ContractInputBinding
     /// <summary>
     /// True when the handler's body reaches the request or its route values
     /// (<see cref="ParameterBindingSources.ReadsRequest"/>), so it can pick any input out by
-    /// hand. A method or property getter it calls on <c>this</c> (its own type's or a base's)
-    /// is followed when its source is in the compilation, transitively, each once: a
-    /// controller's private helper reads the same <c>Request</c>. Any other helper reaches
-    /// the request only through an argument, which counts already.
+    /// hand. Every method or property getter it calls whose source is in the compilation is
+    /// followed, transitively, each once, and counts when its own body reads the request: a
+    /// controller's private helper reads the same <c>Request</c>, an extension handed
+    /// <c>this</c> reads it through its receiver, and a static helper handed an
+    /// <c>IHttpContextAccessor</c> through the accessor. A helper only metadata knows is
+    /// judged by what the call hands it.
     /// </summary>
-    private static bool ReadsRequestInBody(IMethodSymbol handler) =>
-        ReadsRequestInBody(handler, new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default));
+    private static bool ReadsRequestInBody(WellKnownTypes wkt, IMethodSymbol handler) =>
+        ReadsRequestInBody(
+            wkt,
+            handler,
+            new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)
+        );
 
-    private static bool ReadsRequestInBody(IMethodSymbol method, HashSet<IMethodSymbol> followed) =>
+    private static bool ReadsRequestInBody(
+        WellKnownTypes wkt,
+        IMethodSymbol method,
+        HashSet<IMethodSymbol> followed
+    ) =>
         followed.Add(method.OriginalDefinition)
         && CoverageChecker.SourceBody(method) is { } body
         && body.Descendants()
             .Any(operation =>
-                ParameterBindingSources.ReadsRequest(operation)
-                || OwnHelper(operation) is { } helper && ReadsRequestInBody(helper, followed)
+                ParameterBindingSources.ReadsRequest(wkt, operation)
+                || Callee(operation) is { } callee && ReadsRequestInBody(wkt, callee, followed)
             );
 
-    /// <summary>The method or property getter <paramref name="operation"/> calls on <c>this</c>.</summary>
-    private static IMethodSymbol? OwnHelper(IOperation operation) =>
+    /// <summary>The method or property getter <paramref name="operation"/> calls.</summary>
+    private static IMethodSymbol? Callee(IOperation operation) =>
         operation switch
         {
-            IInvocationOperation
-            {
-                Instance: IInstanceReferenceOperation
-                {
-                    ReferenceKind: InstanceReferenceKind.ContainingTypeInstance,
-                },
-                TargetMethod: var method,
-            } => method,
-            IPropertyReferenceOperation
-            {
-                Instance: IInstanceReferenceOperation
-                {
-                    ReferenceKind: InstanceReferenceKind.ContainingTypeInstance,
-                },
-                Property.GetMethod: { } getter,
-            } => getter,
+            IInvocationOperation { TargetMethod: var method } => method,
+            IPropertyReferenceOperation { Property.GetMethod: { } getter } => getter,
             _ => null,
         };
 }

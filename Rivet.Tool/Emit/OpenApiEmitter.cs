@@ -581,11 +581,11 @@ public sealed class OpenApiEmitter
                     && !EndpointMerger.EndpointSurfaceEquivalent(existingEndpoint, ep)
                 )
                 {
-                    throw Diagnostics.Error(
-                        Diagnostics.ConflictingOperations,
-                        $"transport identity {ep.HttpMethod.ToUpperInvariant()} {TransportIdentity.NormalizeRoute(pathKey)} is declared by two incompatible operations: "
-                            + $"'{existingEndpoint.ControllerName}.{existingEndpoint.Name}' and '{ep.ControllerName}.{ep.Name}'. "
-                            + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."
+                    throw EndpointMerger.Conflict(
+                        ep.HttpMethod.ToUpperInvariant(),
+                        TransportIdentity.NormalizeRoute(pathKey),
+                        existingEndpoint,
+                        ep
                     );
                 }
 
@@ -1414,12 +1414,17 @@ public sealed class OpenApiEmitter
 
     /// <summary>
     /// The record name the importer should synthesize for an inline request-body
-    /// schema (emitted as <c>x-rivet-input-type</c>). Mirrors the importer's
-    /// <c>{fieldName}Request</c> convention but pins it explicitly, so the name survives
-    /// operationId/tag hand-edits.
+    /// schema (emitted as <c>x-rivet-input-type</c>): the input type's name, unless that's a
+    /// component's (an input record whose body is spelled out inline), whose name the
+    /// importer gives the component, so the inline body's record would come back suffixed.
+    /// Then, or with no input type, it's the importer's <c>{fieldName}Request</c>
+    /// convention, pinned explicitly so the name survives operationId/tag hand-edits.
     /// </summary>
-    private static string SynthesizedInputTypeName(TsEndpointDefinition ep) =>
-        ep.InputTypeName ?? Naming.ToPascalCaseFromSegments(ep.Name) + "Request";
+    private string SynthesizedInputTypeName(TsEndpointDefinition ep) =>
+        ep.InputTypeName is { } name
+        && !_claimedNames.Contains(name, StringComparer.OrdinalIgnoreCase)
+            ? name
+            : Naming.ToPascalCaseFromSegments(ep.Name) + "Request";
 
     private static JsonNode? Node(JsonElement value) => JsonSerializer.SerializeToNode(value);
 
@@ -1498,6 +1503,12 @@ public sealed class OpenApiEmitter
     /// <c>--from</c> contract, <c>[FromForm]</c> action parameters) are spelled out from the
     /// params, unless the contract names a component to reference. An inline body pins the
     /// record name the importer synthesizes for it.
+    /// <para>
+    /// A form body says nothing about fields it doesn't list: a form binder neither fills a
+    /// <c>[JsonExtensionData]</c> bag nor refuses a field it doesn't bind, so neither the
+    /// component's open <c>additionalProperties</c> nor its closed one is true of the form.
+    /// A component that states either is spelled out inline instead of referenced.
+    /// </para>
     /// </summary>
     private JsonObject FormBodySchema(
         TsEndpointDefinition ep,
@@ -1513,6 +1524,7 @@ public sealed class OpenApiEmitter
                 : null;
         // Files first, then fields: the order a body with no record behind it has always had.
         IReadOnlyList<TsEndpointParam> parts = [.. fileParams, .. formFieldParams];
+        var formShaped = definition is { AdditionalProperties: null };
         if (definition is not null && parts.All(part => part.BodyPropertyName is not null))
         {
             var properties = definition.Properties.ToDictionary(
@@ -1528,7 +1540,8 @@ public sealed class OpenApiEmitter
                 .Select(property => property.Name)
                 .ToHashSet(StringComparer.Ordinal);
             if (
-                parts.All(part => part.Name == part.BodyPropertyName)
+                formShaped
+                && parts.All(part => part.Name == part.BodyPropertyName)
                 && sent.SetEquals(parts.Select(part => part.BodyPropertyName!))
                 && !parts.Any(part =>
                     !part.IsOptional
@@ -1549,12 +1562,11 @@ public sealed class OpenApiEmitter
                     .ToList(),
                 part => properties.GetValueOrDefault(part.BodyPropertyName!)
             );
-            AddAdditionalProperties(inline, definition.AdditionalProperties);
             inline["x-rivet-input-type"] = SynthesizedInputTypeName(ep);
             return inline;
         }
 
-        if (definition is not null && fileParams.Count > 0)
+        if (formShaped && fileParams.Count > 0)
         {
             // A --from contract's multipart input named by a definition it ships.
             return MapTypeReference(
@@ -1565,7 +1577,8 @@ public sealed class OpenApiEmitter
 
         // The TS lowerer decomposes the multipart input into params and deliberately never
         // ships the input type definition, so InputTypeName, when present, is only a name
-        // hint for this inline body. Pinning the record name the importer synthesizes keeps
+        // hint for this inline body (or names a shipped one that states additionalProperties,
+        // which the form can't reference). Pinning the record name the importer synthesizes keeps
         // it under hand-edited operationIds, which the {fieldName}Request fallback doesn't.
         var schema = FormSchema(ep, parts, _ => null);
         if (fileParams.Count > 0)
@@ -1625,22 +1638,16 @@ public sealed class OpenApiEmitter
 
             var field = part;
             var context = $"form field '{field.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'";
+            // Its default and constraints are the param's schema already.
             var fieldSchema = BuildParamSchema(field, context);
-            if (field.Description is not null)
-            {
-                fieldSchema["description"] = field.Description;
-            }
-            if (field.IsDeprecated)
-            {
-                fieldSchema["deprecated"] = true;
-            }
-            if (field.Example is { } example)
-            {
-                // JSON Schema 2020-12 has no singular `example`; it joins the examples.
-                var examples = fieldSchema["examples"] as JsonArray ?? [];
-                examples.Add(Node(example));
-                fieldSchema["examples"] = examples;
-            }
+            SchemaEnricher.Annotate(
+                fieldSchema,
+                field.Description,
+                field.IsDeprecated,
+                defaultJson: null,
+                field.Example?.GetRawText(),
+                context
+            );
             properties[field.Name] = fieldSchema;
             if (field.Type is not TsType.Nullable && !field.IsOptional)
             {
@@ -1903,9 +1910,9 @@ public sealed class OpenApiEmitter
         {
             result["value"] = ParseJson(jsonValue);
         }
-        else
+        else if (example.ExternalValue is { } externalValue)
         {
-            result["externalValue"] = example.ExternalValue!;
+            result["externalValue"] = externalValue;
         }
 
         return result;
@@ -1988,12 +1995,14 @@ public sealed class OpenApiEmitter
             return;
         }
 
-        var conflict =
-            !existing.TryGetPropertyValue("value", out var existingValue)
+        var conflict = !existing.TryGetPropertyValue("value", out var existingValue)
+            ? existing.ContainsKey("externalValue")
                 ? "an externalValue where this one has a value"
-            : !JsonNode.DeepEquals(existingValue, value) ? "a different value"
-            : DisagreeingText(existing, "summary", summary)
-                ?? DisagreeingText(existing, "description", description);
+                : "no value where this one has one"
+            : !JsonNode.DeepEquals(existingValue, value)
+                ? "a different value"
+                : DisagreeingText(existing, "summary", summary)
+                    ?? DisagreeingText(existing, "description", description);
         if (conflict is not null)
         {
             throw Diagnostics.Error(

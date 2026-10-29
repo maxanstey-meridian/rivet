@@ -29,8 +29,17 @@ builder
     );
 
 // The contract's .Secure("bearer") endpoints are [Authorize]d, and this is the scheme that
-// lets a caller through. DemoBearerHandler accepts any token; a real app registers
-// JwtBearer (or its own handler) under the same name.
+// lets a caller through. DemoBearerHandler accepts any token, so it never runs outside
+// Development; a real app registers JwtBearer (or its own handler) under the same name, and
+// reads the .QueryAuth() endpoint's ?token= as well as the Authorization header.
+if (!builder.Environment.IsDevelopment())
+{
+    throw new InvalidOperationException(
+        "DemoBearerHandler lets any token through, so this sample runs only in Development. "
+            + "Register a real bearer scheme under the same name to run it anywhere else."
+    );
+}
+
 builder
     .Services.AddAuthentication(DemoBearerHandler.SchemeName)
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, DemoBearerHandler>(

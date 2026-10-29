@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Rivet.Tool.Model;
@@ -42,16 +43,7 @@ public static class EndpointWalker
             }
         }
 
-        // [RivetClient] on classes — all public methods with HTTP attributes
-        var clientMethods = clientTypes
-            .SelectMany(t => t.GetMembers().OfType<IMethodSymbol>())
-            .Where(m =>
-                m.DeclaredAccessibility == Accessibility.Public
-                && !m.IsImplicitlyDeclared
-                && HasHttpMethodAttribute(wkt, m)
-            );
-
-        foreach (var method in clientMethods)
+        foreach (var method in ClientMethods(wkt, clientTypes))
         {
             if (seen.Add(method))
             {
@@ -277,7 +269,6 @@ public static class EndpointWalker
     }
 
     /// <summary>
-    /// True for result containers whose runtime value selects    /// <summary>
     /// True for result containers whose runtime value selects the response's status
     /// and/or shape: any type assignable to IActionResult/IResult whose status is not
     /// statically encoded. Detection is the declared interface boundary — not a list of
@@ -634,19 +625,48 @@ public static class EndpointWalker
     }
 
     /// <summary>
-    /// Substitutes ASP.NET <c>[controller]</c>/<c>[action]</c> route tokens.
-    /// <c>[controller]</c> resolves to the controller class name minus the
+    /// Substitutes ASP.NET <c>[controller]</c>/<c>[action]</c> route tokens and unescapes
+    /// doubled brackets. <c>[controller]</c> resolves to the controller class name minus the
     /// "Controller" suffix; <c>[action]</c> to the action method name.
     /// Token matching is case-insensitive, matching ASP.NET conventions.
     /// </summary>
-    private static string SubstituteRouteTokens(string route, IMethodSymbol method) =>
-        route
-            .Replace(
-                "[controller]",
-                ControllerBaseName(method.ContainingType),
-                StringComparison.OrdinalIgnoreCase
-            )
-            .Replace("[action]", method.Name, StringComparison.OrdinalIgnoreCase);
+    private static string SubstituteRouteTokens(string route, IMethodSymbol method)
+    {
+        // AttributeRouteModel.ReplaceTokens: [controller] and [action] (any case) become their
+        // values, and a doubled bracket is the escape for a literal one, so an MVC route spells
+        // a regex class [[a-z]] and routing reads [a-z].
+        var builder = new StringBuilder(route.Length);
+        for (var index = 0; index < route.Length; index++)
+        {
+            var c = route[index];
+            if (c is '[' or ']' && index + 1 < route.Length && route[index + 1] == c)
+            {
+                builder.Append(c);
+                index++;
+                continue;
+            }
+
+            if (c == '[' && route.IndexOf(']', index + 1) is var close and > 0)
+            {
+                var token = route[(index + 1)..close];
+                var value =
+                    token.Equals("controller", StringComparison.OrdinalIgnoreCase)
+                        ? ControllerBaseName(method.ContainingType)
+                    : token.Equals("action", StringComparison.OrdinalIgnoreCase) ? method.Name
+                    : null;
+                if (value is not null)
+                {
+                    builder.Append(value);
+                    index = close;
+                    continue;
+                }
+            }
+
+            builder.Append(c);
+        }
+
+        return builder.ToString();
+    }
 
     /// <summary>
     /// Combines controller route prefix with method route segment.
@@ -699,14 +719,13 @@ public static class EndpointWalker
     {
         // Extract route param names from the template for implicit classification
         var routeParamNames = RouteParser.ParseRouteParamNames(routeTemplate);
+        var where =
+            $"{RouteParser.StripRouteConstraints(routeTemplate)} (endpoint '{MethodOwner(method)}.{method.Name}')";
         var routeTokens = new Dictionary<string, RouteToken>(StringComparer.OrdinalIgnoreCase);
-        foreach (var token in RouteParser.ParseRouteTokens(routeTemplate))
+        foreach (var token in RouteConstraints.Tokens(routeTemplate, where))
         {
             routeTokens.TryAdd(token.Name, token);
         }
-
-        var where =
-            $"{RouteParser.StripRouteConstraints(routeTemplate)} (endpoint '{MethodOwner(method)}.{method.Name}')";
         var parameters = new List<TsEndpointParam>();
         // MVC rejects multiple body-bound parameters on one action; extraction must
         // not confidently emit a body surface MVC cannot execute. Any Body-classified
@@ -746,9 +765,7 @@ public static class EndpointWalker
             // Collection-of-IFormFile params emit array-of-binary.
             var tsType =
                 source == ParamSource.File
-                    ? typeWalker.IsCollectionOf(param.Type, wkt.IFormFile)
-                        ? new TsType.Array(new TsType.Primitive("File"))
-                        : (TsType)new TsType.Primitive("File")
+                    ? FormBinding.FilePartType(wkt, param.Type)
                     : typeWalker.MapType(param.Type);
             // A C# default value makes the param optional on the wire.
             // FromQuery(Name=)/FromRoute(Name=)/FromForm(Name=) rename the wire surface
@@ -774,9 +791,12 @@ public static class EndpointWalker
                 && typeWalker.IsParamLowerable(param.Type)
             )
             {
-                // A [FromForm] record is bound member by member from the form, under the names
-                // MVC's model binder reads, so its parts are params like a contract's form
-                // input. Its own Name = is a prefix every part is then read under.
+                // A [FromForm] record is bound member by member from the form, so its parts are
+                // params like a contract's form input, named as the one host that serves the
+                // method reads them: an instance method is an MVC action, whose model binder
+                // reads each part under the parameter's own Name = as a prefix; a static one is
+                // a minimal-API handler, whose form mapper reads [DataMember] names and never
+                // prefixes.
                 formInputTypeName = (tsType is TsType.Nullable nullable ? nullable.Inner : tsType)
                     is TsType.TypeRef typeRef
                     ? typeRef.Name
@@ -791,11 +811,15 @@ public static class EndpointWalker
                             typeWalker,
                             param.Type,
                             new HashSet<string>(),
-                            FormBinding.FormHosts.Mvc,
+                            method.IsStatic
+                                ? FormBinding.FormHosts.MinimalApi
+                                : FormBinding.FormHosts.Mvc,
                             where
                         ),
                         formInputTypeName,
-                        FormBinding.MvcModelName(param.GetAttributes(), param.Type)
+                        method.IsStatic
+                            ? null
+                            : FormBinding.MvcModelName(wkt, param.GetAttributes(), param.Type)
                     )
                 );
                 bodySeen = true;
@@ -818,11 +842,7 @@ public static class EndpointWalker
                     or ParamSource.FormField
             )
             {
-                endpointParam = WithAnnotations(
-                    endpointParam,
-                    typeWalker.ReadMemberAnnotations(param, tsType),
-                    param
-                );
+                endpointParam = typeWalker.AnnotatedParam(endpointParam, param);
             }
             if (
                 source == ParamSource.Route
@@ -894,34 +914,6 @@ public static class EndpointWalker
 
         return (parameters, formInputTypeName);
     }
-
-    /// <summary>
-    /// An action's route, query, header or form-field parameter with its annotations, read as a
-    /// property's are (ContractWalker's lowered params carry the same): description,
-    /// constraints, deprecated, example and format. A <c>[RivetDefault]</c> wins over the C#
-    /// default value, which is source text rather than a JSON literal.
-    /// </summary>
-    private static TsEndpointParam WithAnnotations(
-        TsEndpointParam endpointParam,
-        TypeWalker.MemberAnnotations annotations,
-        IParameterSymbol param
-    ) =>
-        endpointParam with
-        {
-            Type = annotations.ApplyLeaf(endpointParam.Type),
-            Description = annotations.Description,
-            IsDeprecated = annotations.IsDeprecated,
-            DefaultValue = annotations.DefaultValue ?? endpointParam.DefaultValue,
-            Constraints = annotations.Constraints,
-            SchemaExamples = ContractWalker.SchemaExamples(
-                annotations.Example,
-                $"[RivetExample] on parameter '{param.Name}'"
-            ),
-            Format = annotations is { IsFormatSpecified: true, Format: not "" }
-                ? annotations.Format
-                : null,
-            IsFormatSpecified = annotations.IsFormatSpecified,
-        };
 
     /// <summary>
     /// RIV1110: an annotated endpoint is the spec's source, so every enum it binds from
@@ -1042,13 +1034,8 @@ public static class EndpointWalker
     /// declare the same full name (System.Runtime.dll and System.Private.CoreLib.dll
     /// both do) — so the ct guards must not rely on symbol equality.
     /// </summary>
-    private static bool IsCancellationToken(ITypeSymbol type)
-    {
-        return type is INamedTypeSymbol named
-            && named.TypeKind == TypeKind.Struct
-            && named.Name == "CancellationToken"
-            && named.ContainingNamespace?.ToDisplayString() == "System.Threading";
-    }
+    private static bool IsCancellationToken(WellKnownTypes wkt, ITypeSymbol type) =>
+        SymbolEqualityComparer.Default.Equals(type, wkt.CancellationToken);
 
     private enum BindingSource
     {
@@ -1114,7 +1101,7 @@ public static class EndpointWalker
             ThrowContradictoryBinding(param, explicitSources);
         }
 
-        if (IsCancellationToken(param.Type))
+        if (IsCancellationToken(wkt, param.Type))
         {
             if (explicitSources.Any(source => source != BindingSource.Services))
             {
@@ -1145,7 +1132,7 @@ public static class EndpointWalker
                 BindingSource.Header => ParamSource.Header,
                 _ => throw new InvalidOperationException(),
             };
-            if (IsFormFileType(wkt, typeWalker, param))
+            if (FormBinding.CarriesFiles(wkt, typeWalker, param.Type))
             {
                 if (declared == BindingSource.Form)
                 {
@@ -1158,7 +1145,7 @@ public static class EndpointWalker
 
         // IFormFile parameter (single or collection) → File source. The type itself
         // is the strongly semantic transport declaration.
-        if (IsFormFileType(wkt, typeWalker, param))
+        if (FormBinding.CarriesFiles(wkt, typeWalker, param.Type))
         {
             return ParamSource.File;
         }
@@ -1173,19 +1160,6 @@ public static class EndpointWalker
         // No declaration, no convention: the transport source is unknown.
         return ThrowUnresolvedBinding(method, param);
     }
-
-    /// <summary>
-    /// True for IFormFile itself or a collection of it — the single strongly semantic
-    /// file transport type. Shared by the explicit-source apply step and the
-    /// unattributed convention so both sites cannot drift.
-    /// </summary>
-    private static bool IsFormFileType(
-        WellKnownTypes wkt,
-        TypeWalker typeWalker,
-        IParameterSymbol param
-    ) =>
-        SymbolEqualityComparer.Default.Equals(param.Type, wkt.IFormFile)
-        || typeWalker.IsCollectionOf(param.Type, wkt.IFormFile);
 
     /// <summary>
     /// Refusal for an unattributed parameter whose transport source cannot be
@@ -1542,6 +1516,22 @@ public static class EndpointWalker
 
         return responses;
     }
+
+    /// <summary>
+    /// The operations a [RivetClient] class declares: its public methods with an [Http*]
+    /// verb. <see cref="Walk"/> emits them and <c>--check</c> compares their security.
+    /// </summary>
+    internal static IEnumerable<IMethodSymbol> ClientMethods(
+        WellKnownTypes wkt,
+        IEnumerable<INamedTypeSymbol> clientTypes
+    ) =>
+        clientTypes
+            .SelectMany(type => type.GetMembers().OfType<IMethodSymbol>())
+            .Where(method =>
+                method.DeclaredAccessibility == Accessibility.Public
+                && !method.IsImplicitlyDeclared
+                && HasHttpMethodAttribute(wkt, method)
+            );
 
     internal static bool HasHttpMethodAttribute(WellKnownTypes wkt, IMethodSymbol method) =>
         method

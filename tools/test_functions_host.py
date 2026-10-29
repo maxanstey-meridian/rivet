@@ -208,9 +208,10 @@ class FunctionsHostTests(unittest.TestCase):
                 self.assertEqual((200, {"kind": "route", "other": "body", "term": "query"}), get(names + "?term=query", b'{"Other":"body","term":"body"}', json_body, "POST"))
                 self.assertEqual((200, {"kind": "route", "other": None, "term": "body"}), get(names, b'{"term":"body"}', {"Content-Type": "text/plain"}, "POST"))
                 self.assertEqual((200, {"kind": "Route"}), get(base + "probe/case/Route"))
-                # Headers and form fields never reach a parameter, and a name nothing carries
-                # is null.
+                # Headers, cookies, and form fields never reach a parameter, and a name nothing
+                # carries is null.
                 self.assertEqual((200, {"kind": "route", "other": None, "term": None}), get(names, headers={"other": "header", "term": "header"}))
+                self.assertEqual((200, {"kind": "route", "other": None, "term": None}), get(names, headers={"Cookie": "other=cookie; term=cookie"}))
                 self.assertEqual((200, {"kind": "route", "other": None, "term": None}), get(names, b"other=form&term=form", {"Content-Type": "application/x-www-form-urlencoded"}, "POST"))
                 # A value type nothing carries fails the invocation.
                 self.assertEqual(500, get(base + "probe/count")[0])

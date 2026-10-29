@@ -120,7 +120,11 @@ internal sealed class SecurityDeclaration(
                 .ToList();
             if (declared.Count == 0)
             {
-                if (attributes.Any(attribute => IsAllowAnonymous(wkt, attribute)))
+                if (
+                    attributes.Any(attribute =>
+                        HandlerAuthorization.IsAllowAnonymous(wkt, attribute.AttributeClass)
+                    )
+                )
                 {
                     return new SecurityRequirements([]);
                 }
@@ -197,16 +201,6 @@ internal sealed class SecurityDeclaration(
             yield return type;
         }
     }
-
-    private static bool IsAllowAnonymous(WellKnownTypes wkt, AttributeData attribute) =>
-        attribute.Is(wkt.AllowAnonymous)
-        || (
-            wkt.IAllowAnonymous is { } marker
-            && attribute.AttributeClass?.AllInterfaces.Contains(
-                marker,
-                SymbolEqualityComparer.Default
-            ) == true
-        );
 
     private static (string Scheme, IReadOnlyList<string> Scopes) SchemeAndScopes(
         AttributeData attribute,

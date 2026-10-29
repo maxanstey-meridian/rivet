@@ -1191,14 +1191,21 @@ public sealed class MetadataAttributeTests
             .Clone();
     }
 
+    // A brand is a scalar already, so its advice is to change its Value, not to make it one.
     [Theory]
-    [InlineData("ItemDto", "the schema 'ItemDto'")]
-    [InlineData("List<string>", "an array")]
-    [InlineData("Dictionary<string, int>?", "a dictionary (nullable)")]
-    [InlineData("Email", "the [RivetScalar] brand 'Email'")]
+    [InlineData("ItemDto", "the schema 'ItemDto'", "mark it [RivetScalar]")]
+    [InlineData("List<string>", "an array", "mark it [RivetScalar]")]
+    [InlineData("Dictionary<string, int>?", "a dictionary (nullable)", "mark it [RivetScalar]")]
+    [InlineData("Email", "the [RivetScalar] brand 'Email'", "the Value property on 'Email'")]
+    [InlineData(
+        "Email?",
+        "the [RivetScalar] brand 'Email' (nullable)",
+        "the Value property on 'Email'"
+    )]
     public void RivetSchemaType_On_A_NonPrimitive_Member_Is_Refused(
         string memberType,
-        string mapsTo
+        string mapsTo,
+        string advice
     )
     {
         var source = $$"""
@@ -1221,7 +1228,8 @@ public sealed class MetadataAttributeTests
         Assert.StartsWith($"error {Diagnostics.SchemaTypeOnNonPrimitive}:", refusal.Message);
         Assert.Contains("'Holder.Value'", refusal.Message);
         Assert.Contains($"maps to {mapsTo}", refusal.Message);
-        Assert.Contains("[RivetScalar]", refusal.Message);
+        Assert.Contains(advice, refusal.Message);
+        Assert.Contains("remove [RivetSchemaType]", refusal.Message);
     }
 
     // The same reader serves a polymorphic variant's members and a route, query or header

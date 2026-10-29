@@ -264,6 +264,152 @@ public sealed class FormPartNameTests
         );
     }
 
+    [Theory]
+    // A second public constructor: MVC calls the parameterless one and sets the properties;
+    // the form mapper binds nothing at all.
+    [InlineData(true, "two-ctor", HttpStatusCode.OK, "{\"Title\":\"t\"}")]
+    [InlineData(false, "two-ctor", HttpStatusCode.OK, "null")]
+    // A class whose one constructor takes parameters: the form mapper calls it; MVC can't
+    // create it (it calls a constructor with parameters only for a record).
+    [InlineData(true, "ctor-only", HttpStatusCode.InternalServerError, "")]
+    [InlineData(false, "ctor-only", HttpStatusCode.OK, "{\"Title\":\"Title\",\"Plain\":\"Plain\"}")]
+    // A record whose constructor parameter matches its property only ignoring case: MVC
+    // wants the exact name, so it can't create it either.
+    [InlineData(true, "record-mismatch", HttpStatusCode.InternalServerError, "")]
+    [InlineData(
+        false,
+        "record-mismatch",
+        HttpStatusCode.OK,
+        "{\"Title\":\"Title\",\"Plain\":\"Plain\"}"
+    )]
+    public async Task The_hosts_construct_these_types_differently(
+        bool mvc,
+        string shape,
+        HttpStatusCode status,
+        string bound
+    )
+    {
+        await using var host = await StartAsync(mvc);
+        var (actual, body) = await host.PostAsync(
+            $"/form-parts/{(mvc ? "mvc" : "minimal")}/{shape}",
+            Multipart([("t", false), ("Title", false), ("Plain", false)])
+        );
+
+        Assert.Equal(status, actual);
+        if (status == HttpStatusCode.OK)
+        {
+            Assert.Equal(bound, body);
+        }
+    }
+
+    [Theory]
+    [InlineData(typeof(FormTwoCtor), "Any", "more than one public constructor")]
+    [InlineData(typeof(FormTwoCtor), "MinimalApi", "more than one public constructor")]
+    [InlineData(typeof(FormCtorOnly), "Any", "MVC's model binder can't create it")]
+    [InlineData(typeof(FormCtorOnly), "Mvc", "MVC's model binder can't create it")]
+    [InlineData(typeof(FormRecordMismatch), "Any", "exact name and type")]
+    public void Generation_refuses_a_form_input_a_host_can_t_create(
+        Type type,
+        string hosts,
+        string why
+    )
+    {
+        var error = Assert.Throws<RivetUserException>(() =>
+            GenerationParts(type, Enum.Parse<FormBinding.FormHosts>(hosts))
+        );
+
+        Assert.Contains("RIV1100", error.Message);
+        Assert.Contains("binds no part", error.Message);
+        Assert.Contains(why, error.Message);
+    }
+
+    [Fact]
+    public void Each_host_alone_names_the_parts_of_a_type_it_can_create()
+    {
+        Assert.Equal(
+            ["t"],
+            GenerationParts(typeof(FormTwoCtor), FormBinding.FormHosts.Mvc)
+                .Select(part => part.Name)
+        );
+        // The form mapper calls the constructor, so its parameter's part is required.
+        Assert.Equal(
+            [("title", true), ("plain", false)],
+            GenerationParts(typeof(FormCtorOnly), FormBinding.FormHosts.MinimalApi)
+                .Select(part => (part.Name, part.Required))
+        );
+    }
+
+    [Theory]
+    // MVC skips [BindNever] and binds [IgnoreDataMember]; the form mapper the reverse.
+    // Neither binds a file nothing can set.
+    [InlineData(true, "{\"Skipped\":\"Skipped\",\"Plain\":\"Plain\"}")]
+    [InlineData(false, "{\"Never\":\"Never\",\"Plain\":\"Plain\"}")]
+    public async Task The_hosts_skip_these_members_differently(bool mvc, string bound)
+    {
+        await using var host = await StartAsync(mvc);
+        var (status, body) = await host.PostAsync(
+            $"/form-parts/{(mvc ? "mvc" : "minimal")}/skips",
+            Multipart([
+                ("Skipped", false),
+                ("Never", false),
+                ("Both", false),
+                ("Plain", false),
+                ("ReadOnlyFile", true),
+                ("PrivateSet", true),
+            ])
+        );
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(bound, body);
+    }
+
+    [Fact]
+    public void Each_host_alone_drops_the_members_it_skips()
+    {
+        string[] members = ["Skipped", "Never", "Both", "Plain"];
+        IEnumerable<string> Names(FormBinding.FormHosts hosts) =>
+            members.SelectMany(member =>
+                GenerationParts(typeof(FormSkips), hosts, member).Select(part => part.Name)
+            );
+
+        Assert.Equal(["skipped", "plain"], Names(FormBinding.FormHosts.Mvc));
+        Assert.Equal(["never", "plain"], Names(FormBinding.FormHosts.MinimalApi));
+    }
+
+    [Theory]
+    [InlineData("Skipped", "skipped by the minimal-API form mapper ([IgnoreDataMember])")]
+    [InlineData("Never", "skipped by MVC's model binder ([BindNever])")]
+    public void Generation_refuses_a_member_one_host_skips(string member, string why)
+    {
+        var error = Assert.Throws<RivetUserException>(() =>
+            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, member)
+        );
+
+        Assert.Contains("RIV1100", error.Message);
+        Assert.Contains($"'{member}'", error.Message);
+        Assert.Contains(why, error.Message);
+    }
+
+    [Theory]
+    [InlineData("ReadOnlyFile")]
+    [InlineData("PrivateSet")]
+    public void Generation_refuses_a_file_nothing_can_set(string member)
+    {
+        foreach (var hosts in Enum.GetValues<FormBinding.FormHosts>())
+        {
+            var error = Assert.Throws<RivetUserException>(() =>
+                GenerationParts(typeof(FormSkips), hosts, member)
+            );
+
+            Assert.Contains("RIV1100", error.Message);
+            Assert.Contains($"'{member}' on", error.Message);
+            Assert.Contains("nothing can set it", error.Message);
+        }
+
+        // A member both hosts skip is no part, and refused by neither.
+        Assert.Empty(GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, "Both"));
+    }
+
     // ---------------------------------------------------------------
     // Generation: contracts and [FromForm] actions.
     // ---------------------------------------------------------------
@@ -330,7 +476,9 @@ public sealed class FormPartNameTests
             ["campaign", "email", "referrer", "displayName", "x-source"],
             schema.GetProperty("properties").EnumerateObject().Select(property => property.Name)
         );
-        Assert.Equal("SignupForm", schema.GetProperty("x-rivet-input-type").GetString());
+        // SignupForm is a component, whose name import gives the component, so the inline
+        // body's record is pinned by the importer's {fieldName}Request convention instead.
+        Assert.Equal("SignupRequest", schema.GetProperty("x-rivet-input-type").GetString());
     }
 
     [Fact]
@@ -425,6 +573,7 @@ public sealed class FormPartNameTests
     [Fact]
     public void A_FromForm_record_on_an_action_is_its_parts_named_as_MVC_reads_them()
     {
+        // An instance method is an MVC action.
         var source = """
             using System;
             using System.Runtime.Serialization;
@@ -453,18 +602,18 @@ public sealed class FormPartNameTests
             [RivetType]
             public sealed record UploadResult(string Id);
 
-            public static class Endpoints
+            public sealed class UploadsController : ControllerBase
             {
                 [RivetEndpoint]
                 [HttpPost("/api/uploads")]
                 [ProducesResponseType(typeof(UploadResult), 200)]
-                public static Task<IActionResult> Upload([FromForm] UploadForm form)
+                public Task<IActionResult> Upload([FromForm] UploadForm form)
                     => throw new NotImplementedException();
 
                 [RivetEndpoint]
                 [HttpPost("/api/uploads/prefixed")]
                 [ProducesResponseType(typeof(UploadResult), 200)]
-                public static Task<IActionResult> Prefixed([FromForm(Name = "p")] UploadForm form)
+                public Task<IActionResult> Prefixed([FromForm(Name = "p")] UploadForm form)
                     => throw new NotImplementedException();
             }
             """;
@@ -499,6 +648,68 @@ public sealed class FormPartNameTests
             "binary",
             schema.GetProperty("properties").GetProperty("file").GetProperty("format").GetString()
         );
+    }
+
+    [Fact]
+    public void A_FromForm_record_on_a_static_endpoint_is_its_parts_named_as_the_form_mapper_reads_them()
+    {
+        // A static method is a minimal-API handler: the form mapper reads [DataMember] names,
+        // ignores a member's [FromForm(Name)], and never prefixes by the parameter's Name =.
+        var source = """
+            using System;
+            using System.Runtime.Serialization;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed class UploadForm
+            {
+                [FromForm(Name = "ignored")]
+                public string? Renamed { get; set; }
+
+                [DataMember(Name = "alias")]
+                public string? Other { get; set; }
+
+                public IFormFile? File { get; set; }
+            }
+
+            [RivetType]
+            public sealed record UploadResult(string Id);
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/uploads")]
+                [ProducesResponseType(typeof(UploadResult), 200)]
+                public static Task<IActionResult> Upload([FromForm] UploadForm form)
+                    => throw new NotImplementedException();
+
+                [RivetEndpoint]
+                [HttpPost("/api/uploads/named")]
+                [ProducesResponseType(typeof(UploadResult), 200)]
+                public static Task<IActionResult> Named([FromForm(Name = "p")] UploadForm form)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = CompilationHelper.WalkMerged(source).Endpoints;
+        foreach (var route in new[] { "/api/uploads", "/api/uploads/named" })
+        {
+            Assert.Equal(
+                [
+                    ("renamed", ParamSource.FormField),
+                    ("alias", ParamSource.FormField),
+                    ("file", ParamSource.File),
+                ],
+                endpoints
+                    .Single(endpoint => endpoint.RouteTemplate == route)
+                    .Params.Select(param => (param.Name, param.Source))
+            );
+        }
     }
 
     // ---------------------------------------------------------------
@@ -541,6 +752,10 @@ public sealed class FormPartNameTests
                 Map<FormDisagreedRecord>(app, "disagreed-record");
                 Map<FormBareRecord>(app, "bare");
                 Map<FormOptionalRecord>(app, "optional");
+                Map<FormTwoCtor>(app, "two-ctor");
+                Map<FormCtorOnly>(app, "ctor-only");
+                Map<FormRecordMismatch>(app, "record-mismatch");
+                Map<FormSkips>(app, "skips");
             }
         );
 
@@ -668,6 +883,52 @@ public sealed record FormBareRecord(string? A, string? B);
 
 public sealed record FormOptionalRecord(string Title, [property: RivetOptional] string? Note);
 
+public sealed class FormTwoCtor
+{
+    public FormTwoCtor() { }
+
+    public FormTwoCtor(string title) => Title = title;
+
+    [FromForm(Name = "t")]
+    [DataMember(Name = "t")]
+    public string? Title { get; set; }
+}
+
+public sealed class FormCtorOnly(string title)
+{
+    public string Title { get; } = title;
+
+    public string? Plain { get; set; }
+}
+
+public sealed record FormRecordMismatch
+{
+    public FormRecordMismatch(string title) => Title = title;
+
+    public string Title { get; }
+
+    public string? Plain { get; set; }
+}
+
+public sealed class FormSkips
+{
+    [IgnoreDataMember]
+    public string? Skipped { get; set; }
+
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
+    public string? Never { get; set; }
+
+    [IgnoreDataMember]
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
+    public string? Both { get; set; }
+
+    public string? Plain { get; set; }
+
+    public IFormFile? ReadOnlyFile { get; }
+
+    public IFormFile? PrivateSet { get; private set; }
+}
+
 /// <summary>The MVC handlers for <see cref="FormPartNameTests"/>.</summary>
 [ApiController]
 public sealed class FormPartController : ControllerBase
@@ -692,4 +953,16 @@ public sealed class FormPartController : ControllerBase
 
     [HttpPost("/form-parts/mvc/optional")]
     public string Optional([FromForm] FormOptionalRecord form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/two-ctor")]
+    public string TwoCtor([FromForm] FormTwoCtor form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/ctor-only")]
+    public string CtorOnly([FromForm] FormCtorOnly form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/record-mismatch")]
+    public string RecordMismatch([FromForm] FormRecordMismatch form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/skips")]
+    public string Skips([FromForm] FormSkips form) => FormEcho.Of(form);
 }

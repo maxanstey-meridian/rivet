@@ -861,6 +861,135 @@ public sealed class TerminalAndAdapterTests
         Assert.Contains("declared discriminator 'kind'", refusal.Message);
     }
 
+    // The walk reaches a bag through a dictionary's values, through an object a bag entry
+    // holds (written as a member of the bag's owner), and through an object-typed member,
+    // and names where each sits on the wire.
+    [Theory]
+    [InlineData("dictionary", false)]
+    [InlineData("dictionary", true)]
+    [InlineData("bag entry", false)]
+    [InlineData("bag entry", true)]
+    [InlineData("object member", false)]
+    [InlineData("object member", true)]
+    public async Task A_repeated_extension_data_key_is_found_on_every_path_the_serializer_writes(
+        string path,
+        bool mvc
+    )
+    {
+        var clashing = new Extended("x") { Extra = new() { ["name"] = Element("1") } };
+        var (result, at) = path switch
+        {
+            "dictionary" => (
+                (RivetResult)
+                    Define
+                        .Get<Dictionary<string, Extended>>("/extended")
+                        .Success(new() { ["ok"] = new Extended("ok"), ["bad"] = clashing }),
+                "bad"
+            ),
+            "bag entry" => (
+                Define
+                    .Get<ExtendedObjects>("/extended")
+                    .Success(new ExtendedObjects("x") { Extra = new() { ["nested"] = clashing } }),
+                "nested"
+            ),
+            _ => (
+                Define.Get<ObjectHolder>("/extended").Success(new ObjectHolder(clashing)),
+                "payload"
+            ),
+        };
+
+        var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(result, mvc)
+        );
+
+        Assert.Contains($"'Extended' at '{at}'", refusal.Message);
+        Assert.Contains("[JsonExtensionData] 'Extra' holds the key 'name'", refusal.Message);
+    }
+
+    // A [RivetUnion] wrapper is written as its bare variant, so a variant's bag is walked.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_repeated_extension_data_key_in_a_union_variant_is_refused(bool mvc)
+    {
+        var result = Define
+            .Get<ExtendedOrTextPage>("/extended")
+            .Success(
+                new ExtendedOrTextPage([
+                    new ExtendedOrText(null, "plain"),
+                    new ExtendedOrText(
+                        new Extended("x") { Extra = new() { ["name"] = Element("1") } },
+                        null
+                    ),
+                ])
+            );
+
+        var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(result, mvc)
+        );
+
+        Assert.Contains("'Extended' at 'items[1]'", refusal.Message);
+        Assert.Contains("[JsonExtensionData] 'Extra' holds the key 'name'", refusal.Message);
+    }
+
+    // A handler that returns a cyclic graph (an entity with a parent pointer, say) gets the
+    // serializer's own depth error at once: the walk stops at the serializer's MaxDepth
+    // instead of backing off to try every other path down to it.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_cyclic_payload_that_reaches_a_bag_fails_in_the_serializer_without_a_long_walk(
+        bool mvc
+    )
+    {
+        var root = new TreeNode();
+        for (var i = 0; i < 8; i++)
+        {
+            root.Children.Add(new TreeNode { Parent = root });
+        }
+
+        var result = Define.Get<TreeNode>("/tree").Success(root);
+
+        await Assert.ThrowsAsync<JsonException>(() =>
+            Task.Run(() => ExecuteAsync(result, mvc)).WaitAsync(TimeSpan.FromSeconds(30))
+        );
+    }
+
+    // The walk stops exactly where the serializer does, at the host's MaxDepth (64 by
+    // default, 32 in MVC's options): a repeated key in the deepest object it writes is still
+    // found, and one level deeper is the serializer's to refuse.
+    [Theory]
+    [InlineData(false, 64, true)]
+    [InlineData(false, 65, false)]
+    [InlineData(true, 32, true)]
+    [InlineData(true, 33, false)]
+    public async Task The_walk_reaches_as_deep_as_the_serializer_writes(
+        bool mvc,
+        int depth,
+        bool written
+    )
+    {
+        var chain = new Chain { Extra = new() { ["next"] = Element("1") } };
+        for (var i = 1; i < depth; i++)
+        {
+            chain = new Chain { Next = chain };
+        }
+
+        var result = Define.Get<Chain>("/chain").Success(chain);
+
+        if (written)
+        {
+            var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+                ExecuteAsync(result, mvc)
+            );
+            Assert.Contains("[JsonExtensionData] 'Extra' holds the key 'next'", refusal.Message);
+        }
+        else
+        {
+            await Assert.ThrowsAsync<JsonException>(() => ExecuteAsync(result, mvc));
+        }
+    }
+
     private static JsonElement Element(string json) => JsonDocument.Parse(json).RootElement;
 
     // [JsonPolymorphic] with nothing registered can't be read or written at all: the
@@ -1120,6 +1249,37 @@ public sealed class TerminalAndAdapterTests
     }
 
     public sealed record ExtendedPage(IReadOnlyList<Extended> Items);
+
+    public sealed record ExtendedObjects(string Name)
+    {
+        [JsonExtensionData]
+        public Dictionary<string, object> Extra { get; init; } = [];
+    }
+
+    public sealed record ObjectHolder(object Payload);
+
+    [RivetUnion]
+    public sealed record ExtendedOrText(Extended? Extended, string? Text);
+
+    public sealed record ExtendedOrTextPage(IReadOnlyList<ExtendedOrText> Items);
+
+    public sealed class TreeNode
+    {
+        public TreeNode? Parent { get; init; }
+
+        public List<TreeNode> Children { get; } = [];
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extra { get; init; } = [];
+    }
+
+    public sealed class Chain
+    {
+        public Chain? Next { get; init; }
+
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extra { get; init; } = [];
+    }
 
     [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
     [JsonDerivedType(typeof(TaggedPet), "pet")]

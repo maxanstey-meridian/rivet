@@ -297,9 +297,7 @@ public sealed class AcceptsBinaryTests
             endpoints
         );
 
-        var (_, _, readEndpoints, _) = JsonContractReader.Read(json);
-
-        var ep = Assert.Single(readEndpoints);
+        var ep = Assert.Single(JsonContractReader.Read(json).Endpoints);
         Assert.Equal("application/octet-stream", ep.BinaryRequestContentType);
         Assert.DoesNotContain(ep.Params, p => p.Source == ParamSource.Body);
     }

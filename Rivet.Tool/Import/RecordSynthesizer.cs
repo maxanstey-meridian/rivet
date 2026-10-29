@@ -397,7 +397,15 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                 prop.CSharpType,
                 reverseMap
             );
-            templateProps.Add(prop with { CSharpType = templatedType });
+            // A member re-typed to a type parameter is no longer the instance's scalar, so the
+            // instance's [RivetSchemaType] goes with it (the walker refuses it on `T`, RIV1117).
+            templateProps.Add(
+                prop with
+                {
+                    CSharpType = templatedType,
+                    SchemaType = mapper.IsBuiltInScalar(templatedType) ? prop.SchemaType : null,
+                }
+            );
         }
 
         return new GeneratedRecord(

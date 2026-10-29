@@ -48,6 +48,7 @@ public static class CoverageChecker
     public static IReadOnlyList<CoverageWarning> Check(
         Compilation compilation,
         WellKnownTypes wkt,
+        DiscoveredSymbols discovered,
         IReadOnlyList<ContractEndpoint> contractEndpoints,
         ContractSecurityMetadata? security,
         string functionsRoutePrefix
@@ -70,11 +71,13 @@ public static class CoverageChecker
                 .. SecurityWarnings(
                     compilation,
                     wkt,
+                    discovered,
                     security,
                     fieldMap,
                     new Dictionary<IFieldSymbol, List<TerminalImplementation>>(
                         SymbolEqualityComparer.Default
-                    )
+                    ),
+                    mapHandlers: null
                 ),
             ];
         }
@@ -169,7 +172,15 @@ public static class CoverageChecker
         return
         [
             .. warnings,
-            .. SecurityWarnings(compilation, wkt, security, fieldMap, implementations),
+            .. SecurityWarnings(
+                compilation,
+                wkt,
+                discovered,
+                security,
+                fieldMap,
+                implementations,
+                mapHandlers
+            ),
         ];
     }
 
@@ -382,12 +393,12 @@ public static class CoverageChecker
                 continue;
             }
 
-            // A handler is read once per field for RIV4005, which its route doesn't change, and
-            // once per route it's mapped on for RIV4006, whose route values do.
-            var checkedHandlers = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
-            var checkedRoutes = new Dictionary<IMethodSymbol, HashSet<string?>>(
-                SymbolEqualityComparer.Default
-            );
+            // Every mapping of a handler is read, for RIV4005 and RIV4006 alike: its route
+            // values and its body inference both depend on the Map* call, and a method group
+            // mapped with both MapGet and MapPost binds an unattributed array from the query on
+            // one and the body on the other. A warning more than one mapping gives (they point
+            // at the handler or its parameter) is reported once.
+            var reported = new HashSet<CoverageWarning>();
             foreach (var implementation in fieldImplementations)
             {
                 if (
@@ -395,52 +406,33 @@ public static class CoverageChecker
                     { Handler: { } handler, BindingHost: { } host, InfersBody: var infersBody }
                 )
                 {
-                    if (checkedHandlers.Add(handler))
-                    {
-                        warnings.AddRange(
-                            UnbindableEnumParameters(
-                                wkt,
-                                field,
-                                endpoint,
-                                handler,
-                                host,
-                                infersBody
+                    warnings.AddRange(
+                        UnbindableEnumParameters(wkt, field, endpoint, handler, host, infersBody)
+                            .Concat(
+                                ContractInputBinding
+                                    .Compare(
+                                        wkt,
+                                        security,
+                                        endpoint,
+                                        handler,
+                                        host,
+                                        infersBody,
+                                        implementation.Context.Route
+                                    )
+                                    .Select(mismatch => new CoverageWarning(
+                                        CoverageWarningKind.InputBindingMismatch,
+                                        field.ContainingType.Name,
+                                        field.Name,
+                                        mismatch.Expected,
+                                        mismatch.Actual,
+                                        mismatch.Location,
+                                        Message: $"{field.ContainingType.Name}.{field.Name} "
+                                            + $"({endpoint.HttpMethod} {endpoint.RouteTemplate}): "
+                                            + mismatch.Problem
+                                    ))
                             )
-                        );
-                    }
-
-                    if (!checkedRoutes.TryGetValue(handler, out var routes))
-                    {
-                        routes = [];
-                        checkedRoutes[handler] = routes;
-                    }
-
-                    if (routes.Add(implementation.Context.Route))
-                    {
-                        warnings.AddRange(
-                            ContractInputBinding
-                                .Compare(
-                                    wkt,
-                                    security,
-                                    endpoint,
-                                    handler,
-                                    host,
-                                    infersBody,
-                                    implementation.Context.Route
-                                )
-                                .Select(mismatch => new CoverageWarning(
-                                    CoverageWarningKind.InputBindingMismatch,
-                                    field.ContainingType.Name,
-                                    field.Name,
-                                    mismatch.Expected,
-                                    mismatch.Actual,
-                                    mismatch.Location,
-                                    Message: $"{field.ContainingType.Name}.{field.Name} "
-                                        + $"({endpoint.HttpMethod} {endpoint.RouteTemplate}): "
-                                        + mismatch.Problem
-                                ))
-                        );
-                    }
+                            .Where(reported.Add)
+                    );
                 }
 
                 if (
@@ -511,36 +503,40 @@ public static class CoverageChecker
     /// <summary>
     /// K.5: each handler's authorization against the security its spec declares, asking only
     /// whether a caller must authenticate (schemes and policies can't be matched). The spec is
-    /// a contract field's own security, or a <c>[RivetEndpoint]</c> action's
-    /// <c>[RivetSecure]</c>-family attributes (<see cref="SecurityDeclaration.FromAttributes"/>),
-    /// else the document's default. None at all is what the emitted OpenAPI says it is: no
-    /// credentials needed. A secured spec over a handler anyone can reach, and a spec admitting
-    /// anonymous callers over a handler that requires authentication, are RIV4008. When the
-    /// document declares no security scheme at all, the handlers that require authentication
-    /// under a spec that says nothing are one RIV4008, since one missing default is the cause.
-    /// Authorization --check can't read is RIV4009, never a guess. A <c>[RivetEndpoint]</c>
-    /// action that implements a contract field is compared once, as the field's handler.
+    /// a contract field's own security; for an override of an abstract <c>[RivetContract]</c>
+    /// method, that method's <c>[RivetSecure]</c>-family attributes; for a
+    /// <c>[RivetEndpoint]</c> method or a <c>[RivetClient]</c> controller's action, its own
+    /// (<see cref="SecurityDeclaration.FromAttributes"/>); else the document's default. None at
+    /// all is what the emitted OpenAPI says it is: no credentials needed. An instance method is
+    /// an MVC action; a static one is a minimal-API handler, compared at each Map* call that
+    /// names it as a method group. A secured spec over a handler anyone can reach, and a spec
+    /// admitting anonymous callers over a handler that requires authentication, are RIV4008.
+    /// When the document declares no security scheme at all, the handlers that require
+    /// authentication under a spec that says nothing are one RIV4008, since one missing default
+    /// is the cause. Authorization --check can't read is RIV4009, never a guess. A handler is
+    /// compared under every contract field it serves, and then not again for its attributes:
+    /// the merge holds the two to one security (RIV2012).
     /// </summary>
     private static IEnumerable<CoverageWarning> SecurityWarnings(
         Compilation compilation,
         WellKnownTypes wkt,
+        DiscoveredSymbols discovered,
         ContractSecurityMetadata? security,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
-        IReadOnlyDictionary<IFieldSymbol, List<TerminalImplementation>> implementations
+        IReadOnlyDictionary<IFieldSymbol, List<TerminalImplementation>> implementations,
+        MapHandlerIndex? mapHandlers
     )
     {
-        var actions = SymbolDiscovery
-            .Discover(compilation)
-            .EndpointMethods.Where(method => !method.IsStatic && !method.IsAbstract)
-            .ToList();
-        if (fieldMap.Count == 0 && actions.Count == 0)
+        var operations = AttributeOperations(compilation, wkt, discovered).ToList();
+        if (fieldMap.Count == 0 && operations.Count == 0)
         {
             yield break;
         }
 
         var authorization = HandlerAuthorization.Scan(compilation, wkt);
         var comparison = new SecurityComparison(security);
-        var compared = new HashSet<(ISymbol?, SyntaxNode?)>();
+        var compared = new HashSet<(ISymbol, ISymbol, SyntaxNode?)>();
+        var handled = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
         foreach (var (field, endpoint) in fieldMap)
         {
             if (!implementations.TryGetValue(field, out var fieldImplementations))
@@ -553,7 +549,7 @@ public static class CoverageChecker
                 field.Name,
                 $"{field.ContainingType.Name}.{field.Name} ({endpoint.HttpMethod} {endpoint.RouteTemplate})",
                 endpoint.Security,
-                IsContract: true
+                AttributesOn: null
             );
             foreach (
                 var context in fieldImplementations.Select(implementation => implementation.Context)
@@ -561,12 +557,13 @@ public static class CoverageChecker
             {
                 if (
                     context.Handler is not { } handler
-                    || !compared.Add((handler, context.MapCall?.Syntax))
+                    || !compared.Add((field, handler, context.MapCall?.Syntax))
                 )
                 {
                     continue;
                 }
 
+                handled.Add(handler);
                 var verdict = context switch
                 {
                     { BindingHost: ParameterBindingHost.Functions } => authorization.ForFunction(
@@ -591,32 +588,47 @@ public static class CoverageChecker
             }
         }
 
-        foreach (var action in actions)
+        foreach (var (handler, spec) in operations)
         {
-            var (httpMethod, route) = EndpointWalker.ResolveActionRoute(wkt, action);
-            if (httpMethod is null || !compared.Add((action, null)))
+            if (!handled.Add(handler))
             {
                 continue;
             }
 
-            var label = $"{action.ContainingType.Name}.{action.Name}";
-            var spec = new SecuritySpec(
-                action.ContainingType.Name,
-                action.Name,
-                $"{label} ({httpMethod} {route ?? "(unresolved route)"})",
-                SecurityDeclaration.FromAttributes(wkt, action, label),
-                IsContract: false
-            );
-            if (
-                comparison.Compare(
-                    spec,
-                    authorization.ForMvc(action),
-                    action.Locations.FirstOrDefault()
-                ) is
-                { } warning
-            )
+            IEnumerable<Verdict> verdicts;
+            if (handler.IsStatic)
             {
-                yield return warning;
+                mapHandlers ??= IndexMapHandlers(compilation, wkt);
+                verdicts = SourceBody(handler) is { } body
+                    ? mapHandlers
+                        .GetValueOrDefault((body.Syntax.SyntaxTree, body.Syntax.Span))
+                        ?.Select(mapped =>
+                        {
+                            var groups = ResolveMapGroups(wkt, mapped.MapCall.Arguments[0].Value);
+                            return authorization.ForMinimalApi(
+                                mapped.Symbol,
+                                mapped.MapCall,
+                                groups.Groups,
+                                groups.Root
+                            );
+                        })
+                        ?? []
+                    : [];
+            }
+            else
+            {
+                verdicts = [authorization.ForMvc(handler)];
+            }
+
+            foreach (var verdict in verdicts)
+            {
+                if (
+                    comparison.Compare(spec, verdict, handler.Locations.FirstOrDefault()) is
+                    { } warning
+                )
+                {
+                    yield return warning;
+                }
             }
         }
 
@@ -627,16 +639,102 @@ public static class CoverageChecker
     }
 
     /// <summary>
+    /// Every operation whose spec is declared by attributes, with that spec: an override of
+    /// an abstract <c>[RivetContract]</c> method (the contract method's security), then a
+    /// <c>[RivetEndpoint]</c> method or a <c>[RivetClient]</c> controller's action (its own),
+    /// the way <see cref="EndpointWalker.Walk"/> finds them. An abstract method has no handler
+    /// of its own, and a method that isn't an operation (no [Http*] verb) has no spec.
+    /// </summary>
+    private static IEnumerable<(IMethodSymbol Handler, SecuritySpec Spec)> AttributeOperations(
+        Compilation compilation,
+        WellKnownTypes wkt,
+        DiscoveredSymbols discovered
+    )
+    {
+        var contractMethods = discovered
+            .ContractTypes.Where(type => type is { IsAbstract: true, IsStatic: false })
+            .SelectMany(type => type.GetMembers().OfType<IMethodSymbol>())
+            .Where(method => method is { MethodKind: MethodKind.Ordinary, IsAbstract: true })
+            .ToHashSet(SymbolEqualityComparer.Default);
+        if (contractMethods.Count > 0)
+        {
+            foreach (var type in RoslynExtensions.GetAllTypes(compilation.Assembly.GlobalNamespace))
+            {
+                foreach (
+                    var method in type.GetMembers()
+                        .OfType<IMethodSymbol>()
+                        .Where(method => method is { IsOverride: true, IsAbstract: false })
+                )
+                {
+                    for (
+                        var overridden = method.OverriddenMethod;
+                        overridden is not null;
+                        overridden = overridden.OverriddenMethod
+                    )
+                    {
+                        if (
+                            contractMethods.Contains(overridden.OriginalDefinition)
+                            && Spec(
+                                (IMethodSymbol)overridden.OriginalDefinition,
+                                "the contract method"
+                            )
+                                is { } spec
+                        )
+                        {
+                            yield return (method, spec);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // EndpointWalker.Walk's operations: every [RivetEndpoint] method, and a [RivetClient]
+        // class's.
+        var annotated = discovered
+            .EndpointMethods.Concat(EndpointWalker.ClientMethods(wkt, discovered.ClientTypes))
+            .Where(method => !method.IsAbstract)
+            .Distinct(SymbolEqualityComparer.Default)
+            .Cast<IMethodSymbol>();
+        foreach (var method in annotated)
+        {
+            if (Spec(method, method.IsStatic ? "the method" : "the action") is { } spec)
+            {
+                yield return (method, spec);
+            }
+        }
+
+        SecuritySpec? Spec(IMethodSymbol declaring, string attributesOn)
+        {
+            var (httpMethod, route) = EndpointWalker.ResolveActionRoute(wkt, declaring);
+            if (httpMethod is null)
+            {
+                return null;
+            }
+
+            var label = $"{declaring.ContainingType.Name}.{declaring.Name}";
+            return new SecuritySpec(
+                declaring.ContainingType.Name,
+                declaring.Name,
+                $"{label} ({httpMethod} {route ?? "(unresolved route)"})",
+                SecurityDeclaration.FromAttributes(wkt, declaring, label),
+                attributesOn
+            );
+        }
+    }
+
+    /// <summary>
     /// What a handler's spec says about security: its own requirement (null inherits the
-    /// document's), and whether it's a contract field or a <c>[RivetEndpoint]</c> action, which
-    /// say it in different words.
+    /// document's), and where it's declared, which decides how a diagnostic spells the fix:
+    /// a contract field's builder calls (<paramref name="AttributesOn"/> null), or
+    /// <c>[RivetSecure]</c>-family attributes on what <paramref name="AttributesOn"/> names.
     /// </summary>
     private sealed record SecuritySpec(
         string ContractName,
         string FieldName,
         string Label,
         SecurityRequirements? Own,
-        bool IsContract
+        string? AttributesOn
     );
 
     /// <summary>One spec's security against one handler's verdict (K.5).</summary>
@@ -666,9 +764,9 @@ public static class CoverageChecker
                 verdict.Because.Count > 0
                     ? string.Join(", ", verdict.Because)
                     : "nothing on it, its controller or route group, or the app requires an authenticated user";
-            var anonymous = spec.IsContract
-                ? "say .Anonymous() in the contract"
-                : "declare [RivetAnonymous] on the action";
+            var anonymous = spec.AttributesOn is { } attributesOn
+                ? $"declare [RivetAnonymous] on {attributesOn}"
+                : "say .Anonymous() in the contract";
             if (requirements is null)
             {
                 if (!requiresAuthentication)
@@ -682,7 +780,7 @@ public static class CoverageChecker
                     return null;
                 }
 
-                var declare = spec.IsContract ? ".Secure(...)" : "[RivetSecure(...)]";
+                var declare = spec.AttributesOn is null ? ".Secure(...)" : "[RivetSecure(...)]";
                 return Warning(
                     CoverageWarningKind.SecurityMismatch,
                     $"{spec.Label}: the spec declares no security and the document has no "
@@ -707,10 +805,12 @@ public static class CoverageChecker
                 var admits =
                     inherited ? "the document's default security admits anonymous callers"
                     : requirements.Alternatives.Count == 0
-                        ? spec.IsContract ? "the contract says .Anonymous()"
-                            : "the action's security is anonymous"
-                    : spec.IsContract ? "the contract says .OrAnonymous()"
-                    : "the action's security says [RivetOrAnonymous]";
+                        ? spec.AttributesOn is { } anonymousOn
+                                ? $"{anonymousOn}'s security is anonymous"
+                            : "the contract says .Anonymous()"
+                    : spec.AttributesOn is { } optionalOn
+                        ? $"{optionalOn}'s security says [RivetOrAnonymous]"
+                    : "the contract says .OrAnonymous()";
                 return Warning(
                     CoverageWarningKind.SecurityMismatch,
                     $"{spec.Label}: {admits}, but the handler requires authentication ({why}), "
@@ -777,7 +877,7 @@ public static class CoverageChecker
                     + "scheme, then [assembly: RivetGlobalSecurity(0)] and "
                     + "[assembly: RivetGlobalSecurityScheme(0, \"<scheme>\", new string[0])]. "
                     + "Then mark the endpoints anyone may call .Anonymous() ([RivetAnonymous] "
-                    + "on a [RivetEndpoint] action)."
+                    + "where the security is declared with attributes)."
             );
         }
     }
@@ -1218,7 +1318,8 @@ public static class CoverageChecker
     /// receiver the chain starts from. It follows locals with one known value and convention
     /// calls that hand back the builder they're given (<c>.RequireAuthorization()</c>,
     /// <c>.WithTags(...)</c>), so <c>var api = app.MapGroup("/api").RequireAuthorization();</c>
-    /// still names the group. A local it can't follow leaves the chain unresolved. The route
+    /// still names the group. A local it can't follow leaves the chain unresolved, and so does
+    /// a route group it can't trace to its MapGroup call. The route
     /// prefix (<see cref="Prefix"/>) and the groups' authorization (K.5) both read it.
     /// </summary>
     private sealed record MapGroupChain(
@@ -1287,9 +1388,35 @@ public static class CoverageChecker
                     current = passed;
                     continue;
                 case var root:
-                    return new MapGroupChain(groups, Unresolved: false, root!);
+                    // A route group the chain doesn't reach a MapGroup call for (a parameter,
+                    // a field, or a helper's answer) has a prefix --check can't see, so the
+                    // route stays unresolved rather than losing it.
+                    return new MapGroupChain(
+                        groups,
+                        Unresolved: DerivesFrom(root?.Type, wkt.RouteGroupBuilder),
+                        root!
+                    );
             }
         }
+    }
+
+    /// <summary><paramref name="type"/> is <paramref name="target"/> or derives from it.</summary>
+    internal static bool DerivesFrom(ITypeSymbol? type, INamedTypeSymbol? target)
+    {
+        if (target is null)
+        {
+            return false;
+        }
+
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, target))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

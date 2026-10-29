@@ -44,6 +44,7 @@ internal static class UnrepresentedFieldReporter
                 if (value is JsonObject pathItem)
                 {
                     ReportPathItem(
+                        root,
                         EffectivePathItem(root, pathItem, []),
                         $"#/paths/{JsonPointer.Escape(path)}",
                         warnings,
@@ -123,6 +124,7 @@ internal static class UnrepresentedFieldReporter
     }
 
     private static void ReportPathItem(
+        JsonObject root,
         JsonObject pathItem,
         string pointer,
         List<string> warnings,
@@ -161,14 +163,24 @@ internal static class UnrepresentedFieldReporter
             }
             foreach (var (status, value) in responses)
             {
-                if (value is not JsonObject response || response.ContainsKey("$ref"))
+                // A response component keeps its own fields as raw provenance; any other
+                // reference is inlined by the import, so its fields belong to this pointer.
+                if (
+                    value is not JsonObject reference
+                    || OpenApiImporter.InlinedResponse(reference, root) is not { } response
+                )
                 {
                     continue;
                 }
                 var responsePointer = $"{operationPointer}/responses/{JsonPointer.Escape(status)}";
                 Preserve(preserved, response, responsePointer, "links");
                 PreserveMediaEncodings(response, responsePointer, preserved);
-                PreserveIgnoredResponseHeaders(response, responsePointer, preserved);
+                PreserveIgnoredResponseHeaders(
+                    response,
+                    responsePointer,
+                    preserved,
+                    OpenApiImporter.IsSwagger2(root)
+                );
             }
         }
     }
@@ -176,37 +188,93 @@ internal static class UnrepresentedFieldReporter
     /// <summary>
     /// A response header named <c>Content-Type</c> is one OpenAPI says to ignore, so the
     /// contract leaves it out and it comes back verbatim: under the emitted headers when the
-    /// response keeps others, or as the response's whole <c>headers</c> when it was the only one.
+    /// response keeps others, or as the response's whole <c>headers</c> when it keeps none.
+    /// A Swagger 2 header comes back in OpenAPI 3 shape, since that's what emit writes.
     /// </summary>
     private static void PreserveIgnoredResponseHeaders(
         JsonObject response,
         string responsePointer,
-        List<OpenApiPreservedFieldProvenance> preserved
+        List<OpenApiPreservedFieldProvenance> preserved,
+        bool swagger2
     )
     {
         if (response["headers"] is not JsonObject headers)
         {
             return;
         }
-        var ignored = headers
-            .Where(header =>
-                OpenApiStructure.IsReservedHeaderName(header.Key, isResponseHeader: true)
-            )
-            .Select(header => header.Key)
-            .ToList();
+        // The contract's own rule decides which headers emit, so the ignored one lands under
+        // an emitted headers object or brings the whole object back when none emits.
+        var kept = new List<string>();
+        var ignored = new List<string>();
+        foreach (var (name, _) in headers)
+        {
+            switch (ContractBuilder.ResponseHeaderNameDrop(name, kept))
+            {
+                case null:
+                    kept.Add(name);
+                    break;
+                case ContractBuilder.IgnoredResponseHeader:
+                    ignored.Add(name);
+                    break;
+            }
+        }
         if (ignored.Count == 0)
         {
             return;
         }
-        if (ignored.Count == headers.Count)
+        if (kept.Count == 0)
         {
-            Preserve(preserved, response, responsePointer, "headers");
+            var whole = new JsonObject();
+            foreach (var (name, header) in headers)
+            {
+                whole[name] = Header(header, swagger2);
+            }
+            PreserveValue(preserved, responsePointer, "headers", whole);
             return;
         }
         foreach (var name in ignored)
         {
-            Preserve(preserved, headers, $"{responsePointer}/headers", name);
+            PreserveValue(
+                preserved,
+                $"{responsePointer}/headers",
+                name,
+                Header(headers[name], swagger2)
+            );
         }
+    }
+
+    /// <summary>
+    /// A response header as OpenAPI 3 writes it. A Swagger 2 header carries its schema inline
+    /// (<c>type</c>, <c>format</c>, <c>items</c>, <c>enum</c> and the rest); OpenAPI 3 moves
+    /// those under <c>schema</c> and keeps <c>description</c> and its extensions beside it.
+    /// <c>collectionFormat</c> has no slot on a header there: its <c>simple</c> style is the
+    /// only one a header takes. A <c>$ref</c> stays a reference.
+    /// </summary>
+    private static JsonNode? Header(JsonNode? header, bool swagger2)
+    {
+        if (
+            !swagger2
+            || header is not JsonObject swaggerHeader
+            || swaggerHeader.ContainsKey("$ref")
+        )
+        {
+            return header?.DeepClone();
+        }
+        var converted = new JsonObject();
+        var schema = new JsonObject();
+        foreach (var (key, value) in swaggerHeader)
+        {
+            if (key == "description" || key.StartsWith("x-", StringComparison.Ordinal))
+            {
+                converted[key] = value?.DeepClone();
+            }
+            else if (key != "collectionFormat")
+            {
+                schema[key] = value?.DeepClone();
+            }
+        }
+        converted["schema"] = schema;
+        return converted;
     }
 
     private static void PreserveMediaEncodings(
@@ -268,6 +336,21 @@ internal static class UnrepresentedFieldReporter
     )
     {
         if (owner[name] is { } value)
+        {
+            preserved.Add(
+                new OpenApiPreservedFieldProvenance(ownerPointer, name, value.ToJsonString())
+            );
+        }
+    }
+
+    private static void PreserveValue(
+        List<OpenApiPreservedFieldProvenance> preserved,
+        string ownerPointer,
+        string name,
+        JsonNode? value
+    )
+    {
+        if (value is not null)
         {
             preserved.Add(
                 new OpenApiPreservedFieldProvenance(ownerPointer, name, value.ToJsonString())

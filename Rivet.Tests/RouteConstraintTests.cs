@@ -157,6 +157,92 @@ public sealed class RouteConstraintTests
     }
 
     [Fact]
+    public void Constraint_Agrees_With_A_Property_Its_Schema_Type_Calls_Integer()
+    {
+        // [RivetSchemaType("integer")] (as import writes it) and {id:int} both emit
+        // type: integer, format: int32.
+        var source = Contract(
+            "RouteDefinition<MessageInput, ThingDto> Get = Define.Get<MessageInput, ThingDto>(\"/integer-messages/{messageIndex:int}\")",
+            "[RivetType] public sealed record MessageInput([property: RivetSchemaType(\"integer\")] int MessageIndex);"
+        );
+
+        var parameter = PathParam(source, "messageIndex");
+
+        Assert.Equal("integer", Keyword(parameter, "type"));
+        Assert.Equal("int32", Keyword(parameter, "format"));
+    }
+
+    [Fact]
+    public void Constraint_Bounds_That_Meet_An_Exclusive_Bound_Are_RIV1125()
+    {
+        var source = Contract(
+            "RouteDefinition<PageInput, ThingDto> Get = Define.Get<PageInput, ThingDto>(\"/exclusive-pages/{page:int:min(5)}\")",
+            "[RivetType] public sealed record PageInput([property: Range(1, 5, MaximumIsExclusive = true)] int Page);"
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains("admit no value", exception.Message);
+    }
+
+    [Fact]
+    public void Declared_Path_Parameter_Named_Only_Ignoring_Case_Is_RIV1123()
+    {
+        // An OpenAPI path parameter's name must equal its token, so .Parameter<int>("Id")
+        // can't declare {id}.
+        var source = Contract(
+            "RouteDefinition<ThingDto> Get = Define.Get<ThingDto>(\"/cased-things/{id}\").Parameter<int>(\"Id\", \"path\", true)"
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
+
+        Assert.Contains(Diagnostics.InvalidBuilderArgument, exception.Message);
+        Assert.Contains("the route's token is '{id}'", exception.Message);
+        Assert.Contains("spell it \"id\"", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("/two-params/{a}{b}")]
+    [InlineData("/optional-default/{id?=5}")]
+    [InlineData("/unclosed/{id")]
+    public void Template_Routing_Refuses_Is_RIV1125(string route)
+    {
+        var source = Contract($"RouteDefinition<ThingDto> Get = Define.Get<ThingDto>(\"{route}\")");
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains("routing refuses it at startup", exception.Message);
+    }
+
+    [Fact]
+    public void A_Repeated_Token_Is_Read_Rather_Than_Refused()
+    {
+        // Routing refuses a template that repeats a parameter, but an imported OpenAPI path
+        // can repeat one (Cloudflare's /accounts/{account_id}/…/accounts/{account_id}), so
+        // the read keeps each occurrence under its own spelling and the walk goes on.
+        var tokens = RouteParser.ParseRouteTokens("/accounts/{id:int}/maps/{ID}/x/{id?}");
+
+        Assert.Equal(["id", "ID", "id"], tokens.Select(token => token.Name));
+        Assert.Equal("int", Assert.Single(tokens[0].Constraints).Name);
+        Assert.Empty(tokens[1].Constraints);
+        Assert.True(tokens[2].IsOptional);
+
+        var source = Contract(
+            "RouteDefinition<ThingDto> Get = Define.Get<ThingDto>(\"/accounts/{id}/maps/{id}\").Parameter<string>(\"id\", \"path\", true)"
+        );
+        var endpoint = Assert.Single(CompilationHelper.WalkContract(source).Endpoints);
+        Assert.Equal("/accounts/{id}/maps/{id}", endpoint.RouteTemplate);
+    }
+
+    [Fact]
     public void Constraint_Bounds_Intersect_With_The_Property_Range()
     {
         var source = Contract(
@@ -201,11 +287,12 @@ public sealed class RouteConstraintTests
     }
 
     [Theory]
-    [InlineData("{id:int:guid}", "can never both match")]
+    [InlineData("{id:int:guid}", "give it two types")]
     [InlineData("{id:min(1)}", "admits only integers", true)]
     [InlineData("{id:int:length(3)}", "constrains the characters of a string")]
     [InlineData("{id:int:min(10):max(5)}", "admit no value")]
     [InlineData("{id:int:min(one)}", "needs an integer")]
+    [InlineData("{id:regex}", "needs a pattern", true)]
     [InlineData("{id:alpha:regex(^x$)}", "a schema holds one pattern", true)]
     public void Constraint_The_Type_Cannot_Hold_Is_RIV1125(
         string token,
@@ -384,6 +471,35 @@ public sealed class RouteConstraintTests
         Assert.Contains("ThingsController.Get", exception.Message);
     }
 
+    [Fact]
+    public void Controller_Regex_Class_Is_Read_With_MVC_Bracket_Escapes()
+    {
+        // An MVC attribute route writes a regex class [[a-z]], since a bare [ starts a
+        // token; routing reads [a-z].
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            [Route("api/[controller]")]
+            public sealed class CodesController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet("{code:regex(^[[a-z]]{{2}}$)}")]
+                public ThingDto Get(string code) => new(code);
+            }
+            """;
+
+        var endpoint = Assert.Single(CompilationHelper.WalkMerged(source).Endpoints);
+
+        Assert.Equal("/api/Codes/{code}", endpoint.RouteTemplate);
+        Assert.Equal("^[a-zA-Z]{2}$", Assert.Single(endpoint.Params).Constraints?.Pattern);
+    }
+
     private static string UnboundControllerToken(string token) =>
         $$"""
             using Microsoft.AspNetCore.Mvc;
@@ -481,6 +597,12 @@ public sealed class RouteConstraintTests
     }
 
     [Theory]
+    [InlineData(@"^\d{4}$")]
+    [InlineData("^ab$")]
+    [InlineData("^[a-f0-9]+$")]
+    [InlineData("^(a|b)?[0-9]+$")]
+    [InlineData("^[^a-z]$")]
+    [InlineData(@"^(?<year>\d{4})-x$")]
     [InlineData("^[a-z0-9_-]+$")]
     [InlineData("^[a-z.-]$")]
     [InlineData("^[ab-]$")]
@@ -493,11 +615,27 @@ public sealed class RouteConstraintTests
     [InlineData(@"^\d{3}-[A-Z]{2}$")]
     public void Folded_Pattern_Matches_What_Routing_Matches(string pattern)
     {
-        // The folded pattern, run with no flags, must admit exactly what routing's
-        // IgnoreCase regex admits: a trailing or leading '-' stays a literal.
+        // The folded pattern, run with no flags, must admit exactly what routing's own regex
+        // constraint (compiled with IgnoreCase) admits: a trailing or leading '-' stays a
+        // literal.
         var folded = new Regex(RouteConstraints.IgnoringCase(pattern));
-        var routing = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-        string[] samples = ["123-AB", "123-ab", "abc-123_x", "ABC-123_X", "a-b", "AB-", "-"];
+        var routing = new Microsoft.AspNetCore.Routing.Constraints.RegexRouteConstraint(
+            pattern
+        ).Constraint;
+        string[] samples =
+        [
+            "123-AB",
+            "123-ab",
+            "abc-123_x",
+            "ABC-123_X",
+            "a-b",
+            "AB-",
+            "-",
+            "2024-X",
+            "2024-x",
+            "B42",
+            "Fe09",
+        ];
         var inputs = samples.Concat(Enumerable.Range(0x20, 0x5F).Select(c => ((char)c).ToString()));
 
         foreach (var input in inputs)

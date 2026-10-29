@@ -22,20 +22,31 @@ that takes a body and returns 204).
 Every `{token}` in a route is a path parameter, and the spec has to say what type it
 is. Rivet takes the answer from the first of these it finds:
 
-1. **A property on `TInput`** whose name matches the token, ignoring case, `_`, and `-`
+1. **A declared parameter**, `.Parameter<T>("id", "path", required: true)`. It replaces
+   whatever `TInput` would have said about the token. Its name has to be the token's,
+   exactly: `.Parameter<int>("Id", ...)` on `{id}` is `RIV1123`, since an OpenAPI path
+   parameter is matched to its token by name. The importer writes these; you rarely
+   need to.
+2. **A property on `TInput`** whose name matches the token, ignoring case, `_`, and `-`
    (`{thing_id}` finds `ThingId`). The parameter gets the property's type and its
    annotations (see below).
-2. **A declared parameter**, `.Parameter<T>("id", "path", required: true)`. The importer
-   writes these; you rarely need to.
 3. **A type constraint** in the route: `{id:guid}`, `{page:int}`.
+
+Whichever of the first two types the token, its constraints are checked against it
+(below), so a declaration doesn't get to wave a contradiction through.
 
 A token none of those declare is `RIV1019`, and generation stops. The only type left
 to guess is a plain string, and that's usually a fib: the handler binds a `Guid`, and
 the spec would tell every client any string will do. Untyped verbs count too:
 `Define.Post("/forms/{id}/archive")` has no input, so its `{id}` needs a constraint.
 
-Constraints are read the way ASP.NET routing reads them, stacked, optional, and with
-defaults (`{id:int:min(1)}`, `{id:int?}`, `{page:int=1}`):
+Constraints are read by ASP.NET routing's own template parser, stacked, optional, and
+with defaults (`{id:int:min(1)}`, `{id:int?}`, `{page:int=1}`). A template routing would
+refuse at startup (`{a}{b}`, `{id?=5}`, an unclosed `{`) stops generation with `RIV1125`
+instead of reaching the spec. On a controller, an attribute route spells a regex class
+with doubled brackets, `regex(^[[a-z]]{{2}}$)`, because a single `[` starts a
+`[controller]`-style token; Rivet unescapes them as MVC does before reading the
+constraint.
 
 | Constraint | Path parameter schema |
 |---|---|
@@ -50,8 +61,9 @@ defaults (`{id:int:min(1)}`, `{id:int?}`, `{page:int=1}`):
 | `regex(p)` | `pattern`, with each letter matching either case, because routing ignores case and a JSON Schema pattern can't |
 
 The `?` and the default are routing's business: an OpenAPI path parameter is always
-required. `required` adds nothing for the same reason, and a custom constraint you
-register in code is invisible to Rivet, so it adds nothing either.
+required. `required` adds nothing for the same reason. `file` and `nonfile` say whether
+the segment looks like a file name, which no schema keyword can, so they add nothing
+either, and a custom constraint you register in code is invisible to Rivet.
 
 A token with a property *and* a constraint gets both, and they have to agree.
 `{id:int}` over a `string Id` is `RIV1125`: routing lets only integers through while
@@ -93,13 +105,6 @@ guessing the default would put the wrong value in the spec.
 | `.WithResponseHeader<T>(status, name[, description][, required:])` | Declare a typed response header on a status (`responses[status].headers`). The non-generic overload declares a string header. Rivet never sets it: emitting the header is handler code. `required: true` is a promise the adapters hold you to, so a response at that status written without the header throws `RivetContractViolationException` (see [Runtime responses](#runtime-responses)). Each (status, name) pair may be declared once. |
 | `.WithResponseHeader<T>(name[, description][, required:])` | Same, targeting the endpoint's success status; omit `<T>` for a string header. |
 
-A response header can't be called `Content-Type`, in any casing. OpenAPI says a response
-header by that name "SHALL be ignored", so the spec would never carry it while the
-adapters held the handler to it. Generation stops with `RIV2009` and the builder throws
-at startup; a response's media type is `.ProducesContentType(...)` (or the status's
-`.ResponseContent(...)`). A `schemaType:` on a typed header re-types a primitive, so on a
-`T` that maps to anything else (a record, a collection, an enum, a `[RivetScalar]` brand)
-it's `RIV1117` rather than quietly vanishing.
 | `.Secure(scheme[, scopes...])` | One way in: the named scheme, granting these scopes. Call it again for another way in; OpenAPI ORs them. Define the scheme with `--security` or `[assembly: RivetSecurityScheme(...)]`. See [Security](#security). |
 | `.AndSecure(scheme[, scopes...])` | Adds a scheme to the alternative the previous `.Secure()` started: the caller needs both. |
 | `.OrAnonymous()` | Adds a no-credentials alternative (`{}`), so authentication is optional. |
@@ -113,6 +118,14 @@ it's `RIV1117` rather than quietly vanishing.
 | `.AcceptsContentType(mediaType)` | Declared media type for a non-JSON request body (e.g. `"text/plain"` for a `string` body). The body SCHEMA is unchanged — only the content-type key. **Spec-only.** Mutually exclusive with `.FormEncoded()` / `.AcceptsBinary()`. |
 | `.ProducesContentType(mediaType)` | Declared media type for a non-JSON success response (e.g. `"text/html"`). Schema unchanged; error responses stay `application/json`. `.Success(...)` writes with it, and a non-JSON type needs a `string` payload. Mutually exclusive with `.ProducesFile()`. |
 | `.RequestExampleJson(json, ...)` / `.ResponseExampleJson(status, json, ...)` | Attach examples. **Runtime no-ops** — read by Roslyn only. The `...Ref` variants reference component examples: one id is one `components.examples` entry, so every endpoint that pins it must give the same value (and, where they say one, the same summary and description), or generation stops with `RIV2015`. |
+
+A response header can't be called `Content-Type`, in any casing. OpenAPI says a response
+header by that name "SHALL be ignored", so the spec would never carry it while the
+adapters held the handler to it. Generation stops with `RIV2009` and the builder throws
+at startup; a response's media type is `.ProducesContentType(...)` (or the status's
+`.ResponseContent(...)`). A `schemaType:` on a typed header re-types a primitive, so on a
+`T` that maps to anything else (a record, a collection, an enum, a `[RivetScalar]` brand)
+it's `RIV1117` rather than quietly vanishing.
 
 ## Status keys
 
@@ -231,9 +244,10 @@ started (`RIV1114`).
   set it before the endpoint runs instead. That's deliberate. Rivet can't simply check
   in an `OnStarting` callback of its own, because callbacks run last-registered-first
   and the handler registers its callback after the middleware has, so Rivet's would
-  run first and still find no header. Only a `UseRivet()` middleware registered ahead
-  of everything else would run last, and that's a new pipeline requirement for every
-  host to buy a header style that's rare in practice.
+  run first and still find no header. Only a new middleware of Rivet's that every host
+  registered ahead of everything else (a hypothetical `UseRivet()`; there's no such
+  thing today) would run last, and that's a pipeline requirement to buy a header style
+  that's rare in practice.
 
 See [Runtime Validation](/guides/runtime-validation) for the exact enforcement scope
 and `RivetContractViolationHandler` for the structured failure envelope.

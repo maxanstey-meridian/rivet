@@ -1,3 +1,5 @@
+using Rivet.Tool;
+
 namespace Rivet.Tests;
 
 /// <summary>
@@ -76,6 +78,7 @@ public sealed class CliExitCodeTests
     [InlineData("--help")]
     [InlineData("-h")]
     [InlineData("--project", "Api.csproj", "--help")]
+    [InlineData("--tool-version", "--help")]
     public void Help_Prints_Usage_To_Stdout_And_Exits_Zero(params string[] args)
     {
         using var work = new TempDir();
@@ -84,6 +87,23 @@ public sealed class CliExitCodeTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("Usage:", result.StdOut);
+        Assert.Equal("", result.StdErr);
+    }
+
+    // rivet-ts runs --tool-version to check a binary it didn't download itself, so it prints
+    // the bare release to stdout and exits 0 whatever else is on the command line.
+    [Theory]
+    [InlineData("--tool-version")]
+    [InlineData("--tool-version", "--bogus")]
+    [InlineData("--from", "missing.json", "--tool-version")]
+    public void Tool_Version_Prints_The_Release_To_Stdout_And_Exits_Zero(params string[] args)
+    {
+        using var work = new TempDir();
+
+        var result = CliRunner.RunCli(work.FullName, args);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(CliParser.ToolVersion, result.StdOut.TrimEnd('\r', '\n'));
         Assert.Equal("", result.StdErr);
     }
 
@@ -297,7 +317,10 @@ public sealed class CliExitCodeTests
 
     [Theory]
     [InlineData("oauth2", "error RIV2018: invalid --security value")]
-    [InlineData("admin=bearer,admin=cookie:sid", "duplicate --security scheme name")]
+    // Enum.TryParse would read a number as a location ("1" is header) and write "in": "7".
+    [InlineData("apikey:7:X-Key", "error RIV2018: invalid --security value")]
+    [InlineData("apikey:1:X-Key", "error RIV2018: invalid --security value")]
+    [InlineData("admin=bearer,admin=cookie:sid", "error RIV2011: duplicate --security scheme name")]
     public async Task Invalid_Security_Exits_1_Without_Stack_Trace(
         string securitySchemes,
         string expectedError

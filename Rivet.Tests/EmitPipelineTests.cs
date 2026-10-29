@@ -227,7 +227,7 @@ public sealed class EmitPipelineTests : IDisposable
               ]
             }
             """;
-        var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
+        var (types, enums, endpoints, brands, _) = JsonContractReader.Read(json);
         var input = new EmitPipeline.EmitInput(
             enums,
             endpoints,

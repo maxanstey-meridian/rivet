@@ -42,12 +42,7 @@ public static class EndpointMerger
                     continue;
                 }
 
-                throw Diagnostics.Error(
-                    Diagnostics.ConflictingOperations,
-                    $"transport identity {key.Method} {key.Route} is declared by two incompatible endpoints: "
-                        + $"'{existing.ControllerName}.{existing.Name}' and '{endpoint.ControllerName}.{endpoint.Name}'. "
-                        + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."
-                );
+                throw Conflict(key.Method, key.Route, existing, endpoint);
             }
 
             byTransportIdentity[key] = endpoint;
@@ -56,6 +51,33 @@ public static class EndpointMerger
 
         return merged;
     }
+
+    /// <summary>
+    /// RIV2012 for two endpoints at one transport identity that aren't
+    /// <see cref="EndpointSurfaceEquivalent"/>. When security is all that differs, it says
+    /// what each one's security is and how to align them; otherwise it names both.
+    /// </summary>
+    internal static RivetUserException Conflict(
+        string method,
+        string route,
+        TsEndpointDefinition existing,
+        TsEndpointDefinition endpoint
+    ) =>
+        EndpointSurfaceEquivalent(existing, endpoint with { Security = existing.Security })
+            ? Diagnostics.Error(
+                Diagnostics.ConflictingOperations,
+                $"transport identity {method} {route} is declared by two endpoints that agree on everything but security: "
+                    + $"'{existing.ControllerName}.{existing.Name}' {DescribeSecurity(existing.Security)}, and "
+                    + $"'{endpoint.ControllerName}.{endpoint.Name}' {DescribeSecurity(endpoint.Security)}. "
+                    + "Declare the same security on both: an action that serves a contract's operation repeats it with "
+                    + "[RivetSecure(...)], [RivetAndSecure(...)], [RivetOrAnonymous], or [RivetAnonymous]."
+            )
+            : Diagnostics.Error(
+                Diagnostics.ConflictingOperations,
+                $"transport identity {method} {route} is declared by two incompatible endpoints: "
+                    + $"'{existing.ControllerName}.{existing.Name}' and '{endpoint.ControllerName}.{endpoint.Name}'. "
+                    + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."
+            );
 
     /// <summary>
     /// True when two endpoint definitions describe the same supported HTTP surface:
@@ -124,21 +146,45 @@ public static class EndpointMerger
             ? left is null && right is null
             : CanonicalSecurity(left).SetEquals(CanonicalSecurity(right));
 
+    // Each alternative as JSON, its schemes and their scopes sorted: JSON quotes every name,
+    // so no two different alternatives share a key.
     private static HashSet<string> CanonicalSecurity(SecurityRequirements security) =>
         security
             .Alternatives.Select(alternative =>
-                string.Join(
-                    "&",
+                JsonSerializer.Serialize(
                     alternative
                         .Schemes.Select(scheme =>
-                            scheme.Name
-                            + ":"
-                            + string.Join(",", scheme.Scopes.Order(StringComparer.Ordinal))
+                            (string[])[scheme.Name, .. scheme.Scopes.Order(StringComparer.Ordinal)]
                         )
-                        .Order(StringComparer.Ordinal)
+                        .OrderBy(scheme => JsonSerializer.Serialize(scheme), StringComparer.Ordinal)
                 )
             )
             .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>What an endpoint's security says, for a diagnostic.</summary>
+    private static string DescribeSecurity(SecurityRequirements? security) =>
+        security switch
+        {
+            null => "declares none, so it inherits the document's",
+            { Alternatives: [] } => "is anonymous",
+            _ => "requires "
+                + string.Join(
+                    " or ",
+                    security.Alternatives.Select(alternative =>
+                        alternative.Schemes.Count == 0
+                            ? "nothing (anonymous)"
+                            : string.Join(
+                                " and ",
+                                alternative.Schemes.Select(scheme =>
+                                    scheme.Scopes.Count == 0
+                                        ? $"'{scheme.Name}'"
+                                        : $"'{scheme.Name}' with scopes "
+                                            + string.Join(", ", scheme.Scopes.Select(s => $"'{s}'"))
+                                )
+                            )
+                    )
+                ),
+        };
 
     /// <summary>
     /// Parameter-surface equivalence: the same set of (wire name, source, mapped type)

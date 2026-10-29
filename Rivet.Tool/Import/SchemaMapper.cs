@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Import;
@@ -607,7 +608,7 @@ internal sealed class SchemaMapper
                                         : "has no oneOf union and no allOf descendants"
                                 )
                                 + (
-                                    propertyless && schema.AdditionalProperties is not null
+                                    propertyless && !SchemaClassifier.IsEmptyRecordComponent(schema)
                                         ? " — imported as a dictionary."
                                         : " — imported as a regular record."
                                 )
@@ -620,10 +621,7 @@ internal sealed class SchemaMapper
                     // An empty record with a [JsonExtensionData] bag is emitted with
                     // additionalProperties: {} beside Rivet's empty-record marker; the marker
                     // says it's a record, not a dictionary.
-                    if (
-                        schema.AdditionalProperties is null
-                        || SchemaClassifier.HasExtension(schema, "x-rivet-empty-record")
-                    )
+                    if (SchemaClassifier.IsEmptyRecordComponent(schema))
                     {
                         records.Add(
                             new GeneratedRecord(
@@ -1332,8 +1330,13 @@ internal sealed class SchemaMapper
     internal string? ResolveLeafSchemaType(IOpenApiSchema schema, string csharpType) =>
         IsBuiltInScalar(csharpType) ? ResolveSchemaType(schema) : null;
 
-    private static readonly HashSet<string> _keywordScalars =
-    [
+    /// <summary>
+    /// The C# keyword scalars the walker maps through Roslyn's <c>SpecialType</c> (and
+    /// <c>byte[]</c>, which it maps to a base64 string). The framework scalars come from the
+    /// walker's own table, <see cref="BuiltInScalars"/>.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> KeywordScalars = new HashSet<string>
+    {
         "string",
         "bool",
         "sbyte",
@@ -1350,36 +1353,21 @@ internal sealed class SchemaMapper
         "char",
         "object",
         "byte[]",
-    ];
+    };
 
-    private static readonly HashSet<string> _frameworkScalars =
-    [
-        "System.DateTime",
-        "System.DateTimeOffset",
-        "System.DateOnly",
-        "System.TimeOnly",
-        "System.TimeSpan",
-        "System.Guid",
-        "System.Uri",
-        "System.Int128",
-        "System.UInt128",
-        "System.Half",
-        "System.Text.Json.JsonElement",
-        "System.Text.Json.JsonDocument",
-        "System.Text.Json.Nodes.JsonNode",
-        "System.Text.Json.Nodes.JsonValue",
-        "Microsoft.AspNetCore.Http.IFormFile",
-    ];
+    private static readonly HashSet<string> _frameworkScalars = BuiltInScalars
+        .FrameworkTypes.Select(scalar => scalar.MetadataName)
+        .ToHashSet();
 
     /// <summary>
     /// Whether the walker maps <paramref name="csharpType"/> to a primitive. A bare framework
     /// name is the framework type only while no generated type shadows it
     /// (<see cref="QualifyFrameworkScalarIfShadowed"/> qualifies it otherwise).
     /// </summary>
-    private bool IsBuiltInScalar(string csharpType)
+    internal bool IsBuiltInScalar(string csharpType)
     {
         var name = csharpType.TrimEnd('?');
-        if (_keywordScalars.Contains(name))
+        if (KeywordScalars.Contains(name))
         {
             return true;
         }
@@ -1395,7 +1383,7 @@ internal sealed class SchemaMapper
                 );
     }
 
-    internal string? ResolveSchemaType(IOpenApiSchema schema) =>
+    private string? ResolveSchemaType(IOpenApiSchema schema) =>
         (schema.Type is { } type ? SchemaClassifier.TypeKeyword(type) : null)
         ?? (Unwrap(schema) is { } inner ? ResolveSchemaType(inner) : null);
 
@@ -2468,13 +2456,13 @@ internal sealed class SchemaMapper
             return true;
         }
 
-        // If the target is a property-less object schema, resolve to Dictionary
-        // (no record was generated for it in MapSchemas) — unless marked as empty record
+        // A property-less object component resolves to the empty record MapSchemas wrote for
+        // it, or to a dictionary when MapSchemas wrote none (one rule: IsEmptyRecordComponent).
         if (SchemaClassifier.IsObject(effective) && effective.Properties is not { Count: > 0 })
         {
             if (
                 effectiveId is not null
-                && effective.AdditionalProperties is null
+                && SchemaClassifier.IsEmptyRecordComponent(effective)
                 && _ctx.SchemaNameMap.TryGetValue(effectiveId, out var emptyRecordName)
             )
             {

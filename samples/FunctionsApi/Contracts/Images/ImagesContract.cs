@@ -9,6 +9,7 @@ public static class ImagesContract
     public const string TriggerRoute = "images/{format}";
     public const string Route = Prefix + "/" + TriggerRoute;
     public const string ThumbnailTriggerRoute = "images/{format}/thumbnails/{size}";
+    public const string ThumbnailRoute = Prefix + "/" + ThumbnailTriggerRoute;
 
     public static readonly FileRouteDefinition<ImageInput> Download = Define
         .File<ImageInput>(Route)
@@ -19,7 +20,7 @@ public static class ImagesContract
 
     // A route value (size) and a query parameter (?fit=) the worker binds by name.
     public static readonly RouteDefinition<ThumbnailInput, ThumbnailDto> Thumbnail = Define
-        .Get<ThumbnailInput, ThumbnailDto>(Prefix + "/" + ThumbnailTriggerRoute)
+        .Get<ThumbnailInput, ThumbnailDto>(ThumbnailRoute)
         .Returns<ErrorResponse>(404)
         .Anonymous();
 }

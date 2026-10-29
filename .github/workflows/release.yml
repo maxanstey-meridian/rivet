@@ -27,8 +27,10 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # The tag sets the version, as publish.yml packs the NuGet tool, so the binary and
+      # the package can't disagree when a tag goes out without a csproj bump.
       - name: Publish self-contained binary
-        run: dotnet publish Rivet.Tool -c Release -r ${{ matrix.rid }} --self-contained -o ./publish
+        run: dotnet publish Rivet.Tool -c Release -r ${{ matrix.rid }} --self-contained -p:Version=${GITHUB_REF_NAME#v} -o ./publish
 
       - name: Rename binary
         run: |
@@ -53,10 +55,11 @@ jobs:
           mkdir -p smoke/bin
           tar -xzf rivet-${{ matrix.rid }}.tar.gz -C smoke/bin
           rivet=./smoke/bin/rivet-${{ matrix.rid }}
-          # rivet-ts trusts this to gate binaryPath, so it must be the tag's release.
+          # rivet-ts trusts this to gate binaryPath, so it must be the tag's release
+          # (and the build-metadata strip must hold).
           test "$("$rivet" --tool-version)" = "${GITHUB_REF_NAME#v}"
           dotnet restore samples/ContractApi/ContractApi.csproj
-          "$rivet" --project samples/ContractApi/ContractApi.csproj --security bearer --output smoke/project
+          "$rivet" --project samples/ContractApi/ContractApi.csproj --output smoke/project
           "$rivet" --from-openapi Rivet.Tests/Fixtures/openapi-petstore-v3.json --namespace PetStore --output smoke/petstore
           "$rivet" smoke/petstore --output smoke/files
           "$rivet" --from Rivet.Tests/Fixtures/contract-sample.json --output smoke/from

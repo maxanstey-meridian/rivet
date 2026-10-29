@@ -76,8 +76,8 @@ internal enum EnumParser
     /// <summary>
     /// The Azure Functions worker's input converters: none of them turns a string into an
     /// enum, so a route or query value falls through to JsonPocoConverter, which parses the
-    /// raw text as JSON. An unquoted member name isn't JSON; only an integer converts, and
-    /// anything else fails the invocation with a 500 (pinned by tools/test_functions_host.py).
+    /// raw text as JSON. A member name, quoted or not, doesn't convert; only an integer does,
+    /// and anything else fails the invocation with a 500 (pinned by tools/test_functions_host.py).
     /// </summary>
     FunctionsJson,
 }
@@ -108,11 +108,6 @@ internal sealed record BoundInput(
 /// </summary>
 internal static class ParameterBindingSources
 {
-    private static readonly SymbolDisplayFormat _fullName = new(
-        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
-        genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters
-    );
-
     private static readonly ConditionalWeakTable<
         Compilation,
         StrongBox<bool>
@@ -221,7 +216,7 @@ internal static class ParameterBindingSources
             // [AsParameters], so members don't expand further.
             return type is INamedTypeSymbol container
                 ? FormBinding
-                    .BoundMembers(wkt.Compilation, container)
+                    .BoundMembers(wkt.Compilation, wkt, container, FormBinding.Binder.AsParameters)
                     .SelectMany(member =>
                         MinimalApi(
                             wkt,
@@ -256,7 +251,7 @@ internal static class ParameterBindingSources
         {
             return [Leaf(InputSource.WholeRequest)];
         }
-        if (IsSimple(type, ParameterBindingHost.MinimalApi))
+        if (IsSimple(wkt, type, ParameterBindingHost.MinimalApi))
         {
             return [Leaf(RouteOrQuery(name, routeParameters))];
         }
@@ -267,9 +262,9 @@ internal static class ParameterBindingSources
         // inferred but the method does not allow inferred body parameters"). A complex type is
         // a body or a registered service.
         if (
-            IsStringValues(type)
+            IsStringValues(wkt, type)
             || type is IArrayTypeSymbol { ElementType: var element }
-                && IsSimple(element, ParameterBindingHost.MinimalApi)
+                && IsSimple(wkt, element, ParameterBindingHost.MinimalApi)
         )
         {
             return [Leaf(infersBody ? InputSource.Body : InputSource.Query)];
@@ -293,7 +288,7 @@ internal static class ParameterBindingSources
         // The model name: a simple parameter's key, and the prefix a complex one's members
         // are read under, so [FromQuery(Name = "f")] SearchRecord f reads ?f.Search=, never
         // ?Search=. Without one, MVC falls back to the empty prefix: ?Search=.
-        var modelName = FormBinding.MvcModelName(parameter.GetAttributes(), type);
+        var modelName = FormBinding.MvcModelName(wkt, parameter.GetAttributes(), type);
         BoundInput Leaf(InputSource source) =>
             new(
                 parameter.Name,
@@ -341,7 +336,7 @@ internal static class ParameterBindingSources
         // complex type (collections included) is the body, unless it's a service, or one of the
         // properties it binds carries a binding source of its own; then it gets none and is
         // bound member by member from the value providers.
-        if (IsSimple(type, ParameterBindingHost.Mvc))
+        if (IsSimple(wkt, type, ParameterBindingHost.Mvc))
         {
             return [Leaf(RouteOrQuery(parameter.Name, routeParameters))];
         }
@@ -350,7 +345,7 @@ internal static class ParameterBindingSources
             type is INamedTypeSymbol withSources
             && IsComplex(wkt, type, ParameterBindingHost.Mvc)
             && FormBinding
-                .BoundMembers(wkt.Compilation, withSources)
+                .BoundMembers(wkt.Compilation, wkt, withSources, FormBinding.Binder.Mvc)
                 .Any(member => MvcOwnSource(wkt, member.MvcAttributes, member.Type) is not null)
             ? Members(withSources, InputSource.ValueProviders)
             : [Leaf(InputSource.BodyOrService)];
@@ -408,7 +403,7 @@ internal static class ParameterBindingSources
         {
             Special.FormFile => new(InputSource.Form, null),
             Special.WholeForm => new(InputSource.WholeForm, null),
-            _ when FullName(type) == "System.Threading.CancellationToken" => new(
+            _ when SymbolEqualityComparer.Default.Equals(type, wkt.CancellationToken) => new(
                 InputSource.NotRequest,
                 null
             ),
@@ -458,10 +453,17 @@ internal static class ParameterBindingSources
             yield break;
         }
 
-        foreach (var member in FormBinding.BoundMembers(wkt.Compilation, type))
+        var mvc = host == ParameterBindingHost.Mvc;
+        foreach (
+            var member in FormBinding.BoundMembers(
+                wkt.Compilation,
+                wkt,
+                type,
+                mvc ? FormBinding.Binder.Mvc : FormBinding.Binder.FormMapper
+            )
+        )
         {
             var (name, memberType) = (member.Name, member.Type);
-            var mvc = host == ParameterBindingHost.Mvc;
             var attributes = mvc ? member.MvcAttributes : member.FormMapperAttributes;
             var own = mvc ? MvcOwnSource(wkt, attributes, memberType) : null;
             var effective = own?.Source ?? source;
@@ -471,8 +473,8 @@ internal static class ParameterBindingSources
                 prefix,
                 name,
                 mvc
-                    ? FormBinding.MvcModelName(attributes, memberType)
-                    : FormBinding.DataMemberName(attributes)
+                    ? FormBinding.MvcModelName(wkt, attributes, memberType)
+                    : FormBinding.DataMemberName(wkt, attributes)
             );
             var memberPath = $"{path}.{name}";
             var reaches = ReachesEnumParser(effective);
@@ -577,20 +579,14 @@ internal static class ParameterBindingSources
         {
             return [Leaf(InputSource.WholeRequest)];
         }
-        if (
-            attributes.Any(attribute =>
-                FullName(attribute.AttributeClass)
-                == "Microsoft.Azure.Functions.Worker.Http.FromBodyAttribute"
-            )
-        )
+        if (attributes.Any(attribute => attribute.Is(wkt.FunctionsFromBody)))
         {
             return [Leaf(InputSource.Body)];
         }
         if (
             attributes.Length > 0
-            || FullName(parameter.Type)
-                is "Microsoft.Azure.Functions.Worker.FunctionContext"
-                    or "System.Threading.CancellationToken"
+            || SymbolEqualityComparer.Default.Equals(parameter.Type, wkt.FunctionContext)
+            || SymbolEqualityComparer.Default.Equals(parameter.Type, wkt.CancellationToken)
         )
         {
             return [Leaf(InputSource.NotRequest)];
@@ -630,6 +626,9 @@ internal static class ParameterBindingSources
     private static bool ScanForSuppression(Compilation compilation)
     {
         const string property = "SuppressInferBindingSourcesForParameters";
+        var apiBehaviorOptions = compilation.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Mvc.ApiBehaviorOptions"
+        );
         var suppressed = false;
         foreach (var tree in compilation.SyntaxTrees)
         {
@@ -651,7 +650,7 @@ internal static class ParameterBindingSources
                             {
                                 Property: { Name: property, ContainingType: var options },
                             }
-                        && FullName(options) == "Microsoft.AspNetCore.Mvc.ApiBehaviorOptions"
+                        && SymbolEqualityComparer.Default.Equals(options, apiBehaviorOptions)
                     )
             )
             {
@@ -663,10 +662,9 @@ internal static class ParameterBindingSources
                     }
                 )
                 {
-                    var span = assignment.Syntax.GetLocation().GetLineSpan();
                     throw Diagnostics.Error(
                         Diagnostics.BindingInferenceUnreadable,
-                        $"{span.Path}({span.StartLinePosition.Line + 1},{span.StartLinePosition.Character + 1}): "
+                        $"{assignment.Syntax.SourcePosition()}: "
                             + $"ApiBehaviorOptions.{property} is set to a value that isn't a compile-time "
                             + "constant, so Rivet can't tell whether MVC infers binding sources for "
                             + "[ApiController] actions, and every input and enum binding check on an MVC "
@@ -701,9 +699,7 @@ internal static class ParameterBindingSources
         attribute?.NamedArgument("Name") is string { Length: > 0 } name ? name : null;
 
     private static bool IsServiceAttribute(WellKnownTypes wkt, AttributeData attribute) =>
-        attribute.Is(wkt.FromServices)
-        || FullName(attribute.AttributeClass)
-            == "Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute";
+        attribute.Is(wkt.FromServices) || attribute.Is(wkt.FromKeyedServices);
 
     /// <summary>[ModelBinder] or a subclass such as the generic [ModelBinder&lt;TBinder&gt;].</summary>
     private static bool IsModelBinder(WellKnownTypes wkt, AttributeData attribute)
@@ -733,25 +729,26 @@ internal static class ParameterBindingSources
         RawBody,
     }
 
-    private static Special Classify(WellKnownTypes wkt, ITypeSymbol type) =>
-        FullName(type) switch
+    private static Special Classify(WellKnownTypes wkt, ITypeSymbol type)
+    {
+        bool Is(INamedTypeSymbol? candidate) =>
+            SymbolEqualityComparer.Default.Equals(type, candidate);
+
+        return type switch
         {
-            _ when IsRequest(type) => Special.Request,
-            "Microsoft.AspNetCore.Http.HttpResponse"
-            or "System.Security.Claims.ClaimsPrincipal"
-            or "System.Threading.CancellationToken" => Special.NotRequest,
-            "Microsoft.AspNetCore.Http.IFormCollection"
-            or "Microsoft.AspNetCore.Http.IFormFileCollection" => Special.WholeForm,
-            _ when IsRawBody(type) => Special.RawBody,
+            _ when IsRequest(wkt, type) => Special.Request,
+            _ when Is(wkt.HttpResponse) || Is(wkt.ClaimsPrincipal) || Is(wkt.CancellationToken) =>
+                Special.NotRequest,
+            _ when Is(wkt.IFormCollection) || Is(wkt.IFormFileCollection) => Special.WholeForm,
+            _ when IsRawBody(wkt, type) => Special.RawBody,
             _ when IsFormFile(wkt, type) => Special.FormFile,
             _ => Special.None,
         };
+    }
 
     /// <summary>HttpContext or HttpRequest: the request itself, from which anything can be read.</summary>
-    public static bool IsRequest(ITypeSymbol type) =>
-        FullName(type)
-            is "Microsoft.AspNetCore.Http.HttpContext"
-                or "Microsoft.AspNetCore.Http.HttpRequest";
+    public static bool IsRequest(WellKnownTypes wkt, ITypeSymbol type) =>
+        Is(type, wkt.HttpContext) || Is(type, wkt.HttpRequest);
 
     /// <summary>
     /// True when an operation in a handler's body hands over the request or its route values
@@ -761,9 +758,12 @@ internal static class ParameterBindingSources
     /// passed to a call, even as <c>object</c>, since the callee may read anything from it. An
     /// extension's receiver is an argument, so <c>HttpContext.GetRouteValue("id")</c> and an
     /// app's own <c>HttpContext.GetTenantId()</c> both count. Reading the context's User,
-    /// RequestAborted or Response isn't: they carry no input.
+    /// RequestAborted or Response isn't: they carry no input. This judges one operation; a
+    /// helper whose source is in the compilation is followed into by
+    /// <c>ContractInputBinding.ReadsRequestInBody</c>, so the argument rule decides only for a
+    /// helper metadata alone knows.
     /// </summary>
-    public static bool ReadsRequest(IOperation operation) =>
+    public static bool ReadsRequest(WellKnownTypes wkt, IOperation operation) =>
         operation switch
         {
             IArgumentOperation { Value: var value } => (
@@ -772,20 +772,19 @@ internal static class ParameterBindingSources
                     : value
             ).Type
                 is { } type
-                && IsRequest(type),
-            IPropertyReferenceOperation { Property.Type: var type } => FullName(type)
-                is "Microsoft.AspNetCore.Http.HttpRequest"
-                    or "Microsoft.AspNetCore.Routing.RouteData",
+                && IsRequest(wkt, type),
+            IPropertyReferenceOperation { Property.Type: var type } => Is(type, wkt.HttpRequest)
+                || Is(type, wkt.RouteData),
             _ => false,
         };
 
     /// <summary>Stream or PipeReader: the raw request body, whatever its media type.</summary>
-    public static bool IsRawBody(ITypeSymbol type) =>
-        FullName(type) is "System.IO.Stream" or "System.IO.Pipelines.PipeReader";
+    public static bool IsRawBody(WellKnownTypes wkt, ITypeSymbol type) =>
+        Is(type, wkt.Stream) || Is(type, wkt.PipeReader);
 
     /// <summary>StringValues or <c>StringValues?</c>, which minimal APIs bind like a string array.</summary>
-    private static bool IsStringValues(ITypeSymbol type) =>
-        FullName(
+    private static bool IsStringValues(WellKnownTypes wkt, ITypeSymbol type) =>
+        Is(
             type
                 is INamedTypeSymbol
                 {
@@ -793,8 +792,9 @@ internal static class ParameterBindingSources
                     TypeArguments: [var inner],
                 }
                 ? inner
-                : type
-        ) == "Microsoft.Extensions.Primitives.StringValues";
+                : type,
+            wkt.StringValues
+        );
 
     /// <summary>An IFormFile, or a collection of them (anything assignable to IEnumerable&lt;IFormFile&gt;).</summary>
     private static bool IsFormFile(WellKnownTypes wkt, ITypeSymbol type) =>
@@ -819,7 +819,7 @@ internal static class ParameterBindingSources
     /// [TypeConverter] (its IsComplexType test); minimal APIs never consult a TypeConverter, so
     /// for them such a type is a body or a service.
     /// </summary>
-    private static bool IsSimple(ITypeSymbol type, ParameterBindingHost host)
+    private static bool IsSimple(WellKnownTypes wkt, ITypeSymbol type, ParameterBindingHost host)
     {
         if (
             type is INamedTypeSymbol
@@ -829,23 +829,20 @@ internal static class ParameterBindingSources
             }
         )
         {
-            return IsSimple(inner, host);
+            return IsSimple(wkt, inner, host);
         }
 
         return type.SpecialType is >= SpecialType.System_Boolean and <= SpecialType.System_String
             || type.SpecialType == SpecialType.System_DateTime
             || type.TypeKind == TypeKind.Enum
-            || FullName(type) == "System.Uri"
+            || Is(type, wkt.Uri)
             || HasPublicStaticMethod(type, "TryParse")
             || type.AllInterfaces.Any(candidate =>
-                FullName(candidate.OriginalDefinition) == "System.IParsable<TSelf>"
+                Is(candidate.OriginalDefinition, wkt.IParsableOfT)
             )
             || host == ParameterBindingHost.Mvc
                 && type.GetAttributes()
-                    .Any(attribute =>
-                        FullName(attribute.AttributeClass)
-                        == "System.ComponentModel.TypeConverterAttribute"
-                    );
+                    .Any(attribute => Is(attribute.AttributeClass, wkt.TypeConverter));
     }
 
     /// <summary>A class or struct bound member by member: not simple, not a collection, not special.</summary>
@@ -856,7 +853,7 @@ internal static class ParameterBindingSources
     ) =>
         type is INamedTypeSymbol { TypeKind: TypeKind.Class or TypeKind.Struct } named
         && named.SpecialType == SpecialType.None
-        && !IsSimple(type, host)
+        && !IsSimple(wkt, type, host)
         && !named.AllInterfaces.Any(candidate =>
             candidate.OriginalDefinition.SpecialType
             == SpecialType.System_Collections_Generic_IEnumerable_T
@@ -895,5 +892,6 @@ internal static class ParameterBindingSources
                 && SymbolEqualityComparer.Default.Equals(candidate.TypeArguments[0], element)
             );
 
-    private static string? FullName(ISymbol? symbol) => symbol?.ToDisplayString(_fullName);
+    private static bool Is(ISymbol? symbol, INamedTypeSymbol? candidate) =>
+        candidate is not null && SymbolEqualityComparer.Default.Equals(symbol, candidate);
 }

@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.AspNetCore.Routing.Patterns;
 
 namespace Rivet.Tool.Analysis;
 
@@ -67,92 +68,80 @@ public static class RouteParser
     }
 
     /// <summary>
-    /// The route parameters of a template with what ASP.NET routing reads from each token:
-    /// its inline constraints in order (<c>{id:int:min(1)}</c>), the optional marker
-    /// (<c>{id?}</c>), a default value (<c>{page=1}</c>) and the catch-all prefix. Doubled
-    /// braces in a constraint argument (<c>regex(^\d{{4}}$)</c>, the template's escape)
-    /// come back single.
+    /// The route parameters of a template as ASP.NET routing reads them, by routing's own
+    /// parser (<see cref="RoutePatternFactory.Parse(string)"/>): each token's inline
+    /// constraints in order (<c>{id:int:min(1)}</c>), the optional marker (<c>{id?}</c>), a
+    /// default value (<c>{page=1}</c>) and the catch-all prefix, with a constraint argument's
+    /// doubled braces (<c>regex(^\d{{4}}$)</c>, the template's escape) come back single.
+    /// A template routing refuses at startup throws its <see cref="RoutePatternException"/>,
+    /// except for a token that repeats an earlier one's name: routing refuses that too, but
+    /// an imported OpenAPI path can repeat one, so each repeat comes back as its own token
+    /// under its own name rather than stopping the read.
     /// </summary>
-    public static IReadOnlyList<RouteToken> ParseRouteTokens(string template) =>
-        [.. ScanRouteParams(template).Select(token => ParseToken(token.Name, token.Body))];
-
-    private readonly record struct RouteParamToken(string Name, string Body, int Start, int Length);
-
-    /// <summary>
-    /// Reads a token body after its name the way ASP.NET's inline parameter parser does:
-    /// <c>:constraint</c> or <c>:constraint(argument)</c> repeated, then <c>=default</c> or a
-    /// trailing <c>?</c>. An argument ends at the first <c>)</c> followed by another
-    /// constraint, a default, the optional marker or the end, so a regex may hold
-    /// parentheses and colons of its own.
-    /// </summary>
-    private static RouteToken ParseToken(string name, string body)
+    public static IReadOnlyList<RouteToken> ParseRouteTokens(string template)
     {
-        var isCatchAll = body.StartsWith('*');
-        var index = body.IndexOfAny([':', '=', '?']);
-        var constraints = new List<RouteConstraint>();
-        string? defaultValue = null;
-        var isOptional = false;
-
-        while (index >= 0 && index < body.Length && body[index] == ':')
-        {
-            var nameStart = index + 1;
-            var nameEnd = nameStart;
-            while (nameEnd < body.Length && body[nameEnd] is not ('(' or ':' or '=' or '?'))
-            {
-                nameEnd++;
-            }
-
-            string? argument = null;
-            index = nameEnd;
-            if (nameEnd < body.Length && body[nameEnd] == '(')
-            {
-                var close = ClosingParenthesis(body, nameEnd + 1);
-                argument = Unescape(body[(nameEnd + 1)..close]);
-                index = close + 1;
-            }
-
-            constraints.Add(new RouteConstraint(body[nameStart..nameEnd].Trim(), argument));
-        }
-
-        if (index >= 0 && index < body.Length)
-        {
-            if (body[index] == '=')
-            {
-                defaultValue = body[(index + 1)..];
-            }
-            else if (body[index] == '?')
-            {
-                isOptional = true;
-            }
-        }
-
-        return new RouteToken(name, constraints, isOptional, defaultValue, isCatchAll);
+        var (parseable, repeats) = RenameRepeats(template);
+        return
+        [
+            .. RoutePatternFactory
+                .Parse(parseable)
+                .Parameters.Select(parameter => new RouteToken(
+                    repeats.GetValueOrDefault(parameter.Name, parameter.Name),
+                    [
+                        .. parameter.ParameterPolicies.Select(policy =>
+                            Constraint(policy.Content ?? "")
+                        ),
+                    ],
+                    parameter.IsOptional,
+                    parameter.Default?.ToString(),
+                    parameter.IsCatchAll
+                )),
+        ];
     }
 
-    private static int ClosingParenthesis(string body, int start)
+    // The template with each repeated parameter name (compared ignoring case, as routing
+    // does) replaced by a placeholder routing accepts, and the placeholder-to-name map.
+    private static (string Template, Dictionary<string, string> Repeats) RenameRepeats(
+        string template
+    )
     {
-        for (var scan = start; scan < body.Length; scan++)
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var repeats = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var builder = new StringBuilder(template.Length);
+        var position = 0;
+        foreach (var token in ScanRouteParams(template))
         {
-            if (
-                body[scan] == ')'
-                && (
-                    scan + 1 == body.Length
-                    || body[scan + 1] is ':' or '='
-                    || body[scan + 1] == '?' && scan + 2 == body.Length
-                )
+            if (seen.Add(token.Name))
+            {
+                continue;
+            }
+
+            var placeholder = $"rivetRepeat{repeats.Count}";
+            while (
+                repeats.ContainsKey(placeholder)
+                || template.Contains(placeholder, StringComparison.OrdinalIgnoreCase)
             )
             {
-                return scan;
+                placeholder += "_";
             }
+
+            repeats[placeholder] = token.Name;
+            var nameStart = template.IndexOf(token.Name, token.Start, StringComparison.Ordinal);
+            builder.Append(template, position, nameStart - position).Append(placeholder);
+            position = nameStart + token.Name.Length;
         }
 
-        // No closing parenthesis: routing refuses the template at startup. Read the rest
-        // as the argument so the constraint is still checked rather than dropped.
-        return body.Length;
+        builder.Append(template, position, template.Length - position);
+        return (builder.ToString(), repeats);
     }
 
-    private static string Unescape(string argument) =>
-        argument.Replace("{{", "{").Replace("}}", "}");
+    // An inline policy's text: "int", or "min(1)" with its argument.
+    private static RouteConstraint Constraint(string content) =>
+        content.IndexOf('(') is var open and >= 0 && content.EndsWith(')')
+            ? new RouteConstraint(content[..open], content[(open + 1)..^1])
+            : new RouteConstraint(content, null);
+
+    private readonly record struct RouteParamToken(string Name, int Start, int Length);
 
     /// <summary>
     /// Scans a route template for {…} parameter tokens, using brace-depth tracking so
@@ -202,7 +191,7 @@ public static class RouteParser
 
             if (name.Length > 0)
             {
-                yield return new RouteParamToken(name, body, start, end - start + 1);
+                yield return new RouteParamToken(name, start, end - start + 1);
             }
 
             index = end + 1;

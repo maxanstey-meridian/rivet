@@ -528,6 +528,46 @@ public sealed class EnumParameterBindingCheckTests
     }
 
     [Fact]
+    public void Method_Group_Mapped_With_Post_Then_Get_Is_Read_On_Each_Mapping()
+    {
+        // Each Map* call infers the body for itself: the POST mapping reads the array from a
+        // JSON body, the GET mappings from the query. The first mapping doesn't speak for the
+        // others, and a warning two mappings share is reported once.
+        const string handler = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class StreetEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    app.MapPost("/api/streets", Handle);
+                    app.MapGet("/api/streets", Handle);
+                    app.MapGet("/api/roads", Handle);
+                }
+
+                private static IResult Handle(StreetKind[] kinds) =>
+                    StreetsContract.List.Success(new StreetDto("1")).ToResult();
+            }
+            """;
+
+        var warnings = RunCheck(Contract, StreetKind(Camel), handler);
+
+        var warning = AssertReported(warnings);
+        Assert.Equal("List", warning.FieldName);
+        Assert.Contains("minimal API parameter 'kinds'", warning.Message);
+        var bindings = warnings
+            .Where(w => w.FieldName == "List" && w.Kind == CoverageWarningKind.InputBindingMismatch)
+            .Select(w => w.Actual)
+            .ToList();
+        Assert.Equal(["request body", "query parameter 'kinds'"], bindings);
+    }
+
+    [Fact]
     public void Minimal_Api_MapMethods_Lowercase_Get_Unattributed_Enum_Array_Is_Not_Reported()
     {
         // ASP.NET matches the body-less verbs ordinally on the verbs as written, so "get"

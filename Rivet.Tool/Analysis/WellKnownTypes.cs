@@ -10,11 +10,11 @@ namespace Rivet.Tool.Analysis;
 public sealed class WellKnownTypes(Compilation c)
 {
     private const string Mvc = "Microsoft.AspNetCore.Mvc.";
+    private const string HttpResults = "Microsoft.AspNetCore.Http.HttpResults.";
+    private const string Authorization = "Microsoft.AspNetCore.Authorization.";
 
     /// <summary>The compilation these symbols were resolved from.</summary>
     public Compilation Compilation { get; } = c;
-    private const string HttpResults = "Microsoft.AspNetCore.Http.HttpResults.";
-    private const string Authorization = "Microsoft.AspNetCore.Authorization.";
 
     private static readonly (string MetadataName, string Verb)[] _httpMethodTable =
     [
@@ -69,6 +69,57 @@ public sealed class WellKnownTypes(Compilation c)
         c.GetTypeByMetadataName(Mvc + "FromServicesAttribute");
     public INamedTypeSymbol? ModelBinder { get; } =
         c.GetTypeByMetadataName(Mvc + "ModelBinderAttribute");
+    public INamedTypeSymbol? FromKeyedServices { get; } =
+        c.GetTypeByMetadataName(
+            "Microsoft.Extensions.DependencyInjection.FromKeyedServicesAttribute"
+        );
+
+    // What names and excludes a form or complex member: MVC's model name ([From*] Name =,
+    // [BindProperty] Name =, [Bind] Prefix =) and [BindNever]; the minimal-API form mapper's
+    // [DataMember] Name = and [IgnoreDataMember].
+    public INamedTypeSymbol? IModelNameProvider { get; } =
+        c.GetTypeByMetadataName(Mvc + "ModelBinding.IModelNameProvider");
+    public INamedTypeSymbol? Bind { get; } = c.GetTypeByMetadataName(Mvc + "BindAttribute");
+    public INamedTypeSymbol? BindNever { get; } =
+        c.GetTypeByMetadataName(Mvc + "ModelBinding.BindNeverAttribute");
+    public INamedTypeSymbol? DataMember { get; } =
+        c.GetTypeByMetadataName("System.Runtime.Serialization.DataMemberAttribute");
+    public INamedTypeSymbol? IgnoreDataMember { get; } =
+        c.GetTypeByMetadataName("System.Runtime.Serialization.IgnoreDataMemberAttribute");
+
+    // Handler parameters that carry nothing from the request, or the Functions worker's own.
+    public INamedTypeSymbol? CancellationToken { get; } =
+        c.GetTypeByMetadataName("System.Threading.CancellationToken");
+    public INamedTypeSymbol? HttpResponse { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpResponse");
+    public INamedTypeSymbol? ClaimsPrincipal { get; } =
+        c.GetTypeByMetadataName("System.Security.Claims.ClaimsPrincipal");
+    public INamedTypeSymbol? IFormCollection { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormCollection");
+    public INamedTypeSymbol? IFormFileCollection { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.IFormFileCollection");
+    public INamedTypeSymbol? FunctionContext { get; } =
+        c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.FunctionContext");
+    public INamedTypeSymbol? FunctionsFromBody { get; } =
+        c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.Http.FromBodyAttribute");
+
+    // What a handler reads the request through (the request itself, its route values, or its
+    // raw body), and the types a binder reads from one string.
+    public INamedTypeSymbol? HttpContext { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpContext");
+    public INamedTypeSymbol? HttpRequest { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Http.HttpRequest");
+    public INamedTypeSymbol? RouteData { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.RouteData");
+    public INamedTypeSymbol? Stream { get; } = c.GetTypeByMetadataName("System.IO.Stream");
+    public INamedTypeSymbol? PipeReader { get; } =
+        c.GetTypeByMetadataName("System.IO.Pipelines.PipeReader");
+    public INamedTypeSymbol? StringValues { get; } =
+        c.GetTypeByMetadataName("Microsoft.Extensions.Primitives.StringValues");
+    public INamedTypeSymbol? Uri { get; } = c.GetTypeByMetadataName("System.Uri");
+    public INamedTypeSymbol? IParsableOfT { get; } = c.GetTypeByMetadataName("System.IParsable`1");
+    public INamedTypeSymbol? TypeConverter { get; } =
+        c.GetTypeByMetadataName("System.ComponentModel.TypeConverterAttribute");
 
     // Implemented by [ApiController]: marks an API controller, whose unattributed complex
     // parameters MVC infers as [FromBody].
@@ -200,12 +251,12 @@ public sealed class WellKnownTypes(Compilation c)
     public INamedTypeSymbol? RivetAnonymous { get; } = RivetType(c, "RivetAnonymousAttribute");
 
     // ASP.NET authorization (K.5): the attributes and the metadata interfaces they implement,
-    // the options and builder a fallback policy is set on, the static classes declaring
-    // AddAuthorization/AddAuthorizationBuilder and AddAuthorizationCore, the endpoint
-    // builders' RequireAuthorization/AllowAnonymous extensions, and MapGroup's builder. They
-    // span assemblies: Microsoft.AspNetCore.Authorization (attributes, options, builder,
-    // AddAuthorizationCore), Microsoft.AspNetCore.Metadata (the two interfaces) and
-    // Microsoft.AspNetCore.Authorization.Policy (AddAuthorization and the endpoint extensions).
+    // the options and builder the fallback and default policies are set on, the endpoint
+    // builders' RequireAuthorization/AllowAnonymous extensions, MapGroup's builder, and an
+    // Azure Functions trigger's AuthorizationLevel. They span assemblies:
+    // Microsoft.AspNetCore.Authorization (attributes, options, builder),
+    // Microsoft.AspNetCore.Metadata (the two interfaces), Microsoft.AspNetCore.Authorization.Policy
+    // (the endpoint extensions) and the Functions worker's HTTP extension (the level).
     public INamedTypeSymbol? Authorize { get; } =
         c.GetTypeByMetadataName(Authorization + "AuthorizeAttribute");
     public INamedTypeSymbol? AllowAnonymous { get; } =
@@ -221,14 +272,6 @@ public sealed class WellKnownTypes(Compilation c)
     public INamedTypeSymbol? AuthorizationEndpointConventionBuilderExtensions { get; } =
         c.GetTypeByMetadataName(
             "Microsoft.AspNetCore.Builder.AuthorizationEndpointConventionBuilderExtensions"
-        );
-    public INamedTypeSymbol? PolicyServiceCollectionExtensions { get; } =
-        c.GetTypeByMetadataName(
-            "Microsoft.Extensions.DependencyInjection.PolicyServiceCollectionExtensions"
-        );
-    public INamedTypeSymbol? AuthorizationServiceCollectionExtensions { get; } =
-        c.GetTypeByMetadataName(
-            "Microsoft.Extensions.DependencyInjection.AuthorizationServiceCollectionExtensions"
         );
     public INamedTypeSymbol? RouteGroupBuilder { get; } =
         c.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.RouteGroupBuilder");

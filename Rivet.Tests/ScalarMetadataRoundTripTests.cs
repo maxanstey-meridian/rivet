@@ -42,7 +42,7 @@ public sealed class ScalarMetadataRoundTripTests
         Assert.Equal("date-time", contractParameter["format"]!.GetValue<string>());
         Assert.True(contractParameter["isFormatSpecified"]!.GetValue<bool>());
 
-        var (types, enums, endpoints, brands) = JsonContractReader.Read(contractJson);
+        var (types, enums, endpoints, brands, _) = JsonContractReader.Read(contractJson);
         var emitted = JsonNode.Parse(
             OpenApiEmitter.Emit(
                 endpoints,

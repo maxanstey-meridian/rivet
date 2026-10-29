@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Microsoft.AspNetCore.Routing.Patterns;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -35,6 +36,27 @@ internal static class RouteConstraints
     private const string AlphaPattern = "^[a-zA-Z]*$";
 
     /// <summary>
+    /// <paramref name="template"/>'s route tokens (<see cref="RouteParser.ParseRouteTokens"/>).
+    /// A template routing refuses at startup (an unclosed parameter, an optional one with a
+    /// default, two parameters in a row) stops generation here rather than reaching the spec.
+    /// </summary>
+    public static IReadOnlyList<RouteToken> Tokens(string template, string where)
+    {
+        try
+        {
+            return RouteParser.ParseRouteTokens(template);
+        }
+        catch (RoutePatternException exception)
+        {
+            throw Diagnostics.Error(
+                Diagnostics.RouteConstraintContradictsType,
+                $"route template '{template}' on {where}: routing refuses it at startup "
+                    + $"({exception.Message.TrimEnd('.')}). Fix the template."
+            );
+        }
+    }
+
+    /// <summary>
     /// The type <paramref name="token"/>'s type constraint gives its parameter, or null when
     /// it has none. Two type constraints that disagree admit nothing, so they are refused.
     /// </summary>
@@ -54,7 +76,8 @@ internal static class RouteConstraints
                 throw Contradiction(
                     token,
                     where,
-                    $"its constraints '{declaredBy}' and '{constraint}' can never both match"
+                    $"its constraints '{declaredBy}' and '{constraint}' give it two types, and a "
+                        + "parameter has one; keep one of them"
                 );
             }
 
@@ -124,7 +147,10 @@ internal static class RouteConstraints
                     token,
                     where,
                     constraint,
-                    IgnoringCase(constraint.Argument ?? "")
+                    IgnoringCase(
+                        constraint.Argument
+                            ?? throw Malformed(token, where, constraint, "a pattern")
+                    )
                 ),
                 _ => constraints,
             };
@@ -132,6 +158,9 @@ internal static class RouteConstraints
 
         if (
             constraints.Minimum > constraints.Maximum
+            || constraints.Minimum >= constraints.ExclusiveMaximum
+            || constraints.ExclusiveMinimum >= constraints.Maximum
+            || constraints.ExclusiveMinimum >= constraints.ExclusiveMaximum
             || constraints.MinLength > constraints.MaxLength
         )
         {
@@ -264,9 +293,11 @@ internal static class RouteConstraints
     /// ASP.NET's regex constraint does (it compiles with <c>IgnoreCase</c>) and a JSON
     /// Schema pattern, which has no flags, otherwise would not: <c>a</c> becomes
     /// <c>[aA]</c>, and a class gains the other case of its letters (<c>[a-f]</c> becomes
-    /// <c>[a-fA-F]</c>). Escapes (<c>\d</c>, <c>J</c>, <c>\p{L}</c>) and group syntax
+    /// <c>[a-fA-F]</c>). Escapes (<c>\d</c>, <c>\x4a</c>, <c>\p{L}</c>) and group syntax
     /// (<c>(?&lt;name&gt;</c>, <c>(?:</c>) are copied as written. A pattern with no letter
-    /// to fold comes back unchanged.
+    /// to fold comes back unchanged. Only ASCII letters written as themselves fold: an
+    /// escaped letter (<c>\x4a</c>, <c>\u004A</c>) and a non-ASCII one stay one-case, so
+    /// the spec admits a little less than routing does there.
     /// </summary>
     internal static string IgnoringCase(string pattern)
     {
@@ -525,10 +556,18 @@ internal static class RouteConstraints
             _ => type,
         };
 
+    /// <summary>
+    /// The two scalars emit the same schema: the same format, and the same JSON type, where
+    /// a <c>number</c> with an integer format is the <c>integer</c> the emitter writes for it
+    /// (<c>[RivetSchemaType("integer")] int</c> and <c>{id:int}</c> agree).
+    /// </summary>
     private static bool SameScalar(TsType? leaf, TsType.Primitive constrained) =>
         leaf is TsType.Primitive primitive
-        && primitive.Name == constrained.Name
+        && JsonType(primitive) == JsonType(constrained)
         && primitive.Format == constrained.Format;
+
+    private static string JsonType(TsType.Primitive primitive) =>
+        IsInteger(primitive) ? "integer" : primitive.Name;
 
     private static bool IsInteger(TsType? leaf) =>
         leaf

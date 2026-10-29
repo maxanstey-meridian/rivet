@@ -2,6 +2,7 @@ namespace Rivet;
 
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -15,7 +16,8 @@ using System.Text.Json.Serialization.Metadata;
 /// written with) puts that name in the JSON twice. The spec can't describe such an object,
 /// and readers disagree about which value wins, so the adapter refuses the response.
 /// The payload's graph is read from the host's type info, as the serializer will write it;
-/// a graph that reaches no bag (decided once per options and type) is never walked.
+/// a graph that reaches no bag (decided once per options and type) is never walked, and a
+/// graph nested deeper than the serializer writes (a cycle, say) is left for it to refuse.
 /// </summary>
 internal static class RivetExtensionDataKeys
 {
@@ -24,6 +26,10 @@ internal static class RivetExtensionDataKeys
         JsonPropertyInfo[] Members,
         JsonPropertyInfo? Bag
     );
+
+    // Visit's answer for a graph nested past the serializer's MaxDepth: every caller hands a
+    // non-null answer straight back, so the whole walk stops at the first such path.
+    private static readonly string _tooDeep = new("too deep");
 
     private static readonly ConditionalWeakTable<
         JsonSerializerOptions,
@@ -47,9 +53,16 @@ internal static class RivetExtensionDataKeys
     {
         var path = new List<string>();
         var maxDepth = options.MaxDepth == 0 ? 64 : options.MaxDepth;
-        return Visit(value, declaredType, null, options, path, maxDepth);
+        var found = Visit(value, declaredType, null, options, path, maxDepth);
+        return ReferenceEquals(found, _tooDeep) ? null : found;
     }
 
+    /// <summary>
+    /// <paramref name="depthLeft"/> is how many more objects and arrays the serializer opens,
+    /// nested, before it refuses the payload. Past that it throws on its own, so the walk
+    /// stops there (<see cref="_tooDeep"/>) rather than backing off and trying the next
+    /// sibling, which on a cyclic graph means trying every path down to the cap.
+    /// </summary>
     private static string? Visit(
         object? value,
         Type declaredType,
@@ -59,8 +72,7 @@ internal static class RivetExtensionDataKeys
         int depthLeft
     )
     {
-        // Past the serializer's depth it throws on its own; nothing more to find here.
-        if (value is null || depthLeft == 0)
+        if (value is null)
         {
             return null;
         }
@@ -69,6 +81,17 @@ internal static class RivetExtensionDataKeys
         if (!ReachesBag(info.Type, options))
         {
             return null;
+        }
+
+        if (
+            depthLeft == 0
+            && info.Kind
+                is JsonTypeInfoKind.Object
+                    or JsonTypeInfoKind.Enumerable
+                    or JsonTypeInfoKind.Dictionary
+        )
+        {
+            return _tooDeep;
         }
 
         switch (info.Kind)
@@ -108,10 +131,9 @@ internal static class RivetExtensionDataKeys
             case JsonTypeInfoKind.Enumerable:
             case JsonTypeInfoKind.Dictionary:
                 var itemType = RivetHostJsonOptions.ItemTypes(info).Last();
-                var index = 0;
-                foreach (var item in Items(value, info.Kind))
+                foreach (var (segment, item) in Items(value, info.Kind))
                 {
-                    path.Add($"[{index++}]");
+                    path.Add(segment);
                     var found = Visit(item, itemType, null, options, path, depthLeft - 1);
                     path.RemoveAt(path.Count - 1);
                     if (found is not null)
@@ -121,6 +143,9 @@ internal static class RivetExtensionDataKeys
                 }
 
                 return null;
+            // A [RivetUnion] wrapper is written as its variant, in its place.
+            case JsonTypeInfoKind.None when UnionVariant(info, value) is { } variant:
+                return Visit(variant.Value, variant.DeclaredType, null, options, path, depthLeft);
             default:
                 return null;
         }
@@ -150,10 +175,11 @@ internal static class RivetExtensionDataKeys
                     + "Keep the bag's keys apart from the type's members";
             }
 
-            // An object-valued bag entry is written as whatever it holds.
+            // An object-valued bag entry is written as whatever it holds, as a member of the
+            // object that holds the bag.
             if (entry is not null and not JsonElement and not JsonNode)
             {
-                path.Add($".{bag.Name}.{key}");
+                path.Add($".{key}");
                 var found = Visit(entry, typeof(object), null, options, path, depthLeft - 1);
                 path.RemoveAt(path.Count - 1);
                 if (found is not null)
@@ -256,6 +282,14 @@ internal static class RivetExtensionDataKeys
                             pending.Push(derived.DerivedType);
                         }
 
+                        if (IsUnion(info))
+                        {
+                            foreach (var variant in RivetUnionVariants.Of(type))
+                            {
+                                pending.Push(variant.PropertyType);
+                            }
+                        }
+
                         switch (info.Kind)
                         {
                             case JsonTypeInfoKind.Object:
@@ -286,12 +320,51 @@ internal static class RivetExtensionDataKeys
                 options
             );
 
-    private static IEnumerable Items(object value, JsonTypeInfoKind kind) =>
-        kind == JsonTypeInfoKind.Dictionary
-            ? value is IDictionary dictionary
-                ? dictionary.Values
-                : ((IEnumerable)value).Cast<object>().Select(EntryValue)
-            : (IEnumerable)value;
+    /// <summary>
+    /// Whether <paramref name="info"/> is written by <see cref="RivetUnionJsonConverter{T}"/>:
+    /// the converter the serializer picked, not the attribute, so a host converter that
+    /// replaces it is taken at its word like any other.
+    /// </summary>
+    private static bool IsUnion(JsonTypeInfo info) =>
+        info.Converter.GetType() is { IsGenericType: true } converter
+        && converter.GetGenericTypeDefinition() == typeof(RivetUnionJsonConverter<>);
+
+    /// <summary>
+    /// The variant a [RivetUnion] wrapper is written as, and the type it's written as: its
+    /// first non-null variant property, as <see cref="RivetUnionJsonConverter{T}"/> writes it.
+    /// Null for any other converter, or a wrapper with no variant set (written as null).
+    /// </summary>
+    private static (object Value, Type DeclaredType)? UnionVariant(
+        JsonTypeInfo info,
+        object value
+    ) => IsUnion(info) ? RivetUnionVariants.Written(RivetUnionVariants.Of(info.Type), value) : null;
+
+    /// <summary>
+    /// A sequence's items or a dictionary's values, each with where it sits on the wire: a
+    /// list item at its index, a dictionary value under its key.
+    /// </summary>
+    private static IEnumerable<(string Segment, object? Value)> Items(
+        object value,
+        JsonTypeInfoKind kind
+    )
+    {
+        var index = 0;
+        foreach (var item in (IEnumerable)value)
+        {
+            if (kind != JsonTypeInfoKind.Dictionary)
+            {
+                yield return ($"[{index++}]", item);
+                continue;
+            }
+
+            // A dictionary enumerates KeyValuePair<TKey, TValue>, or DictionaryEntry when it
+            // isn't generic.
+            var (key, entry) = item is DictionaryEntry pair
+                ? (pair.Key, pair.Value)
+                : (Read(item!, "Key"), Read(item!, "Value"));
+            yield return ($".{Convert.ToString(key, CultureInfo.InvariantCulture)}", entry);
+        }
+    }
 
     private static IEnumerable<(string Key, object? Value)> Entries(object? bag) =>
         bag switch
@@ -309,7 +382,6 @@ internal static class RivetExtensionDataKeys
             ),
         };
 
-    // A dictionary that isn't an IDictionary enumerates KeyValuePair<TKey, TValue>.
-    private static object? EntryValue(object pair) =>
-        pair.GetType().GetProperty("Value")!.GetValue(pair);
+    private static object? Read(object pair, string property) =>
+        pair.GetType().GetProperty(property)!.GetValue(pair);
 }

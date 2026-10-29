@@ -184,8 +184,6 @@ internal static class ContractBuilder
         {
             inputType = SynthesizeParamInputType(paramProperties, mapper, fieldName);
         }
-        string? requestBodyType = null;
-
         // An optional request body (required:false — the
         // OpenAPI default) is modeled by a nullable TInput, which the emitter
         // re-emits as required:false. Only for pure-body inputs on
@@ -277,7 +275,6 @@ internal static class ContractBuilder
             binaryRequestContentType,
             requestContentType,
             responseContentType,
-            requestBodyType,
             operation.RequestBody is null ? null : operation.RequestBody.Required,
             operation.RequestBody is not null,
             requestContents,
@@ -292,7 +289,9 @@ internal static class ContractBuilder
     /// OpenAPI requires every path template token to be a declared path parameter, so one
     /// with no declaration is an invalid document. Importing it would leave a token nothing
     /// types, which generation refuses (RIV1019); writing a string parameter for it would be
-    /// the guess RIV1019 exists to refuse, so import refuses the document instead.
+    /// the guess RIV1019 exists to refuse, so import refuses the document instead. A path
+    /// parameter with neither a schema nor content is invalid the same way (OpenAPI requires
+    /// one of them on every parameter), and it would leave its token untyped just the same.
     /// </summary>
     private static void RequireDeclaredPathTokens(
         string route,
@@ -301,6 +300,26 @@ internal static class ContractBuilder
         IReadOnlyList<IOpenApiParameter> parameters
     )
     {
+        var operationName = operation.OperationId is { Length: > 0 } operationId
+            ? $"operation '{operationId}' ({httpMethod.ToUpperInvariant()} {route})"
+            : $"operation {httpMethod.ToUpperInvariant()} {route}";
+        var shapeless = parameters
+            .Where(parameter =>
+                parameter.In == ParameterLocation.Path
+                && parameter.Schema is null
+                && parameter.Content is not { Count: > 0 }
+            )
+            .Select(parameter => $"'{parameter.Name}'")
+            .ToList();
+        if (shapeless.Count > 0)
+        {
+            throw OpenApiImporter.InvalidSpec(
+                $"{operationName} declares path {(shapeless.Count == 1 ? "parameter" : "parameters")} "
+                    + $"{string.Join(", ", shapeless)} with neither a schema nor content. OpenAPI "
+                    + "requires one of them on every parameter; give it a schema in the source document."
+            );
+        }
+
         var declared = parameters
             .Where(parameter => parameter.In == ParameterLocation.Path)
             .Select(parameter => parameter.Name)
@@ -315,9 +334,6 @@ internal static class ContractBuilder
             return;
         }
 
-        var operationName = operation.OperationId is { Length: > 0 } operationId
-            ? $"operation '{operationId}' ({httpMethod.ToUpperInvariant()} {route})"
-            : $"operation {httpMethod.ToUpperInvariant()} {route}";
         var tokens = string.Join(", ", undeclared.Select(token => $"'{{{token}}}'"));
         throw OpenApiImporter.InvalidSpec(
             $"{operationName} has path template {(undeclared.Count == 1 ? "token" : "tokens")} "
@@ -575,6 +591,24 @@ internal static class ContractBuilder
     /// Response headers (previously out-of-scope) become .WithResponseHeader()
     /// calls. Headers on a status the contract cannot declare are dropped loudly.
     /// </summary>
+    internal const string IgnoredResponseHeader = "ignored";
+
+    /// <summary>
+    /// Why the contract leaves a response header out, judged by its name against the names it
+    /// already keeps for that status, or null when it keeps it: a header needs a name, and
+    /// HTTP header names are case-insensitive, so a second spelling is the same header.
+    /// <see cref="IgnoredResponseHeader"/> is OpenAPI's own rule: it ignores a response header
+    /// named Content-Type, so the contract leaves it out unreported (the adapters would demand
+    /// it, and emit refuses it, RIV2009). UnrepresentedFieldReporter reads this same rule to
+    /// keep that header verbatim beside the ones the contract emits.
+    /// </summary>
+    internal static string? ResponseHeaderNameDrop(string name, IEnumerable<string> keptNames) =>
+        string.IsNullOrEmpty(name) ? "empty-name"
+        : OpenApiStructure.IsReservedHeaderName(name, isResponseHeader: true)
+            ? IgnoredResponseHeader
+        : keptNames.Contains(name, StringComparer.OrdinalIgnoreCase) ? "duplicate-name"
+        : null;
+
     private static IReadOnlyList<GeneratedResponseHeader> ResolveResponseHeaders(
         OpenApiOperation operation,
         SchemaMapper mapper,
@@ -606,18 +640,25 @@ internal static class ContractBuilder
             }
             foreach (var (name, header) in response.Headers)
             {
-                if (string.IsNullOrEmpty(name))
+                var drop = ResponseHeaderNameDrop(
+                    name,
+                    headers
+                        .Where(existing =>
+                            string.Equals(
+                                existing.StatusKey,
+                                statusStr,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                        .Select(existing => existing.Name)
+                );
+                if (drop == IgnoredResponseHeader)
                 {
-                    unsupported.Add($"header name= status={statusStr} reason=empty-name");
                     continue;
                 }
-
-                // OpenAPI ignores a response header named Content-Type, so it isn't part of
-                // the contract (the adapters would demand it, and emit refuses it, RIV2009).
-                // UnrepresentedFieldReporter keeps an inline response's verbatim, and a
-                // response component keeps its own as raw provenance.
-                if (OpenApiStructure.IsReservedHeaderName(name, isResponseHeader: true))
+                if (drop is not null)
                 {
+                    unsupported.Add($"header name={name} status={statusStr} reason={drop}");
                     continue;
                 }
 
@@ -626,21 +667,6 @@ internal static class ContractBuilder
                     unsupported.Add(
                         $"header name={name} status={statusStr} reason=undeclared-status"
                     );
-                    continue;
-                }
-
-                if (
-                    headers.Any(existing =>
-                        string.Equals(
-                            existing.StatusKey,
-                            statusStr,
-                            StringComparison.OrdinalIgnoreCase
-                        ) && string.Equals(existing.Name, name, StringComparison.OrdinalIgnoreCase)
-                    )
-                )
-                {
-                    // HTTP header names are case-insensitive: a second spelling is the same header.
-                    unsupported.Add($"header name={name} status={statusStr} reason=duplicate-name");
                     continue;
                 }
 
@@ -886,28 +912,52 @@ internal static class ContractBuilder
                 continue;
             }
 
+            // OpenAPI ignores a header parameter named Accept, Content-Type or Authorization:
+            // other fields of the document carry each, so the contract leaves it out.
             if (
                 param.In is ParameterLocation.Header
-                && param.Name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+                && OpenApiStructure.IsReservedHeaderName(param.Name, isResponseHeader: false)
             )
             {
+                var isContentType = param.Name.Equals(
+                    "Content-Type",
+                    StringComparison.OrdinalIgnoreCase
+                );
                 if (
-                    param is OpenApiParameterReference
-                    || param.Extensions?.ContainsKey(
-                        OpenApiImporter.ImportedParameterReferenceExtension
-                    ) == true
-                    || requestBodyIsReference
-                    || !IsReservedContentTypeRepresented(requestContentTypes, param.Schema)
+                    isContentType
+                    && (
+                        param is OpenApiParameterReference
+                        || param.Extensions?.ContainsKey(
+                            OpenApiImporter.ImportedParameterReferenceExtension
+                        ) == true
+                        || requestBodyIsReference
+                        || !IsReservedContentTypeRepresented(requestContentTypes, param.Schema)
+                    )
                 )
                 {
                     unsupported.Add(
                         $"param name={param.Name} in=header reason=reserved-content-type-unrepresented"
                     );
                 }
+                var (diagnostic, carriedBy) =
+                    isContentType
+                        ? (
+                            Diagnostics.ImportReservedContentTypeHeaderDropped,
+                            "request media types are represented by requestBody.content"
+                        )
+                    : param.Name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
+                        ? (
+                            Diagnostics.ImportReservedAuthorizationHeaderDropped,
+                            "authentication is represented by security and components.securitySchemes"
+                        )
+                    : (
+                        Diagnostics.ImportReservedAcceptHeaderDropped,
+                        "response media types are represented by responses[*].content"
+                    );
                 warnings.Add(
                     Diagnostics.Prefix(
-                        Diagnostics.ImportReservedContentTypeHeaderDropped,
-                        $"Reserved header parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}'; request media types are represented by requestBody.content."
+                        diagnostic,
+                        $"Reserved header parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}'; {carriedBy}."
                     )
                 );
                 continue;
@@ -939,33 +989,6 @@ internal static class ContractBuilder
                 )
             )
             {
-                continue;
-            }
-
-            if (
-                param.In is ParameterLocation.Header
-                && param.Name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
-            )
-            {
-                warnings.Add(
-                    Diagnostics.Prefix(
-                        Diagnostics.ImportReservedAuthorizationHeaderDropped,
-                        $"Reserved header parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}'; authentication is represented by security and components.securitySchemes."
-                    )
-                );
-                continue;
-            }
-            if (
-                param.In is ParameterLocation.Header
-                && param.Name.Equals("Accept", StringComparison.OrdinalIgnoreCase)
-            )
-            {
-                warnings.Add(
-                    Diagnostics.Prefix(
-                        Diagnostics.ImportReservedAcceptHeaderDropped,
-                        $"Reserved header parameter dropped: {httpMethod.ToUpperInvariant()} {route} declares '{param.Name}'; response media types are represented by responses[*].content."
-                    )
-                );
                 continue;
             }
 
@@ -1650,7 +1673,10 @@ internal static class ContractBuilder
         var componentExampleId = TryGetComponentExampleId(example);
         var resolvedJson = TryGetExampleJson(example);
         IReadOnlyDictionary<string, string>? referencedComponents = null;
-        if (resolvedJson is not null)
+        // A $ref example's value is the component's, kept as authored, so it stays exactly as
+        // provenance holds it (ReadComponentExamples) and the components it embeds come back
+        // from there too; only an inline value is degraded and marked.
+        if (resolvedJson is not null && componentExampleId is null)
         {
             var resolved = PreserveEmbeddedExampleRefs(
                 resolvedJson,
@@ -1672,8 +1698,7 @@ internal static class ContractBuilder
                     mediaType,
                     name,
                     ComponentExampleId: componentExampleId,
-                    ResolvedJson: resolvedJson,
-                    ReferencedComponents: referencedComponents
+                    ResolvedJson: resolvedJson
                 )
                 : null;
         }

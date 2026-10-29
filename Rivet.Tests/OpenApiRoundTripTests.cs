@@ -690,13 +690,47 @@ public sealed class OpenApiRoundTripTests
             }
             """;
 
-        var (_, rewalker) = RoundTrip(source);
+        var (reEndpoints, rewalker) = RoundTrip(source);
 
         var meta = rewalker.Definitions["Meta"];
         Assert.Null(meta.Type);
         Assert.Empty(meta.Properties);
         Assert.True(meta.AdditionalProperties);
-        Assert.True(rewalker.Definitions["Tagged"].AdditionalProperties);
+        var tagged = rewalker.Definitions["Tagged"];
+        Assert.True(tagged.AdditionalProperties);
+        // Every $ref to the empty record resolves to it, not to a dictionary.
+        Assert.Equal(
+            new TsType.TypeRef("Meta"),
+            tagged.Properties.Single(p => p.Name == "meta").Type
+        );
+
+        // …so emit∘import is a fixed point: the second emit writes what the first did.
+        var compilation = CompilationHelper.CreateCompilation(source);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        var first = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
+        );
+        var second = OpenApiEmitter.Emit(
+            reEndpoints,
+            rewalker.Definitions,
+            rewalker.Brands,
+            rewalker.Enums,
+            null
+        );
+        var schemas0 = JsonNode.Parse(first)!["components"]!["schemas"]!;
+        var schemas1 = JsonNode.Parse(second)!["components"]!["schemas"]!;
+        foreach (var component in new[] { "Meta", "Tagged" })
+        {
+            Assert.True(
+                JsonNode.DeepEquals(schemas0[component], schemas1[component]),
+                $"'{component}' drifted across the round-trip.\n--- first ---\n{schemas0[component]}\n--- second ---\n{schemas1[component]}"
+            );
+        }
     }
 
     // An imported record's bag carries whatever its source admits, so the source's word wins:
@@ -1688,6 +1722,41 @@ public sealed class OpenApiRoundTripTests
 
         var userEndpoint = endpoints.First(e => e.RouteTemplate == "/api/users");
         Assert.IsType<TsType.Generic>(userEndpoint.ReturnType);
+    }
+
+    // A template whose first instance takes a scalar argument: the member re-typed to `T`
+    // leaves the instance's [RivetSchemaType("integer")] behind, which the walker would refuse
+    // on a type parameter (RIV1117); the template's own scalar members keep theirs.
+    [Fact]
+    public void Generic_With_Scalar_Argument_Survives_RoundTrip()
+    {
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Wrapper<T>(T Value, string Label);
+
+            [RivetContract]
+            public static class WrappersContract
+            {
+                public static readonly RouteDefinition<Wrapper<long>> Get =
+                    Define.Get<Wrapper<long>>("/api/wrapped");
+            }
+            """;
+
+        var (endpoints, walker) = RoundTrip(source);
+
+        var wrapper = walker.Definitions["Wrapper"];
+        Assert.Equal(["T"], wrapper.TypeParameters);
+        Assert.Equal(
+            new TsType.TypeParam("T"),
+            wrapper.Properties.Single(p => p.Name == "value").Type
+        );
+        Assert.IsType<TsType.Primitive>(wrapper.Properties.Single(p => p.Name == "label").Type);
+        var generic = Assert.IsType<TsType.Generic>(endpoints.Single().ReturnType);
+        Assert.Equal("Wrapper", generic.Name);
     }
 
     // ========== x-rivet-csharp-type round-trips ==========

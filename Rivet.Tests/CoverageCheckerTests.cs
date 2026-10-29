@@ -2053,6 +2053,54 @@ public sealed class CoverageCheckerTests
         Assert.Contains("unresolved route", warning.Actual);
     }
 
+    // A route group the receiver chain can't trace to its MapGroup call has a prefix --check
+    // can't see, so the route is unresolved rather than compared as if it had none.
+    [Theory]
+    [InlineData(
+        "var api = app.MapApi(); api.MapGet(\"/items\", Handler);",
+        "private static RouteGroupBuilder MapApi(this IEndpointRouteBuilder app) => app.MapGroup(\"/v2\");"
+    )]
+    [InlineData(
+        "_group.MapGet(\"/items\", Handler);",
+        "private static RouteGroupBuilder _group = null!;"
+    )]
+    [InlineData(
+        "MapItems(app.MapGroup(\"/v2\"));",
+        "private static void MapItems(RouteGroupBuilder group) => group.MapGet(\"/items\", Handler);"
+    )]
+    public void Untraced_route_group_receiver_is_reported_unresolved(string body, string members)
+    {
+        var implementation = $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class GroupedEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    {{body}}
+                }
+
+                {{members}}
+
+                private static IResult Handler() =>
+                    GroupedTasksContract.ListItems.Success(new GroupedTaskDto("1")).ToResult();
+            }
+            """;
+
+        var warnings = RunCheck(GroupedTasksContract, implementation);
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Contains("unresolved route", warning.Actual);
+    }
+
     // ---------------------------------------------------------------
     // A contract field's .Route as the Map* route: resolved to the field's
     // template, then prefixed, normalised and compared like a constant.
@@ -3861,8 +3909,10 @@ public sealed class CoverageCheckerTests
         Assert.Empty(InputMismatches(RunCheck(InputContract, BindingTypes, handler), "Get"));
     }
 
-    // K.4: a method or property the action calls on this (its own type's or a base's) reads
-    // the same Request, so it's followed, transitively and each once.
+    // K.4: a method or property the action calls with source is followed, transitively and
+    // each once: one on this (its own type's or a base's) reads the same Request, an
+    // extension handed this reads it through its receiver, and a static helper handed an
+    // IHttpContextAccessor reads it through the accessor.
     [Theory]
     [InlineData(
         "var id = RouteId();",
@@ -3889,6 +3939,11 @@ public sealed class CoverageCheckerTests
         "private string? Echo(int times) => times == 0 ? Request.RouteValues[\"id\"] as string : Echo(times - 1);"
     )]
     [InlineData("var id = BaseRouteId();", "", "NotesControllerBase")]
+    [InlineData("var id = this.RouteId();", "")]
+    [InlineData(
+        "var id = RouteReader.Id(_accessor);",
+        "private readonly IHttpContextAccessor _accessor = null!;"
+    )]
     public void Handler_reading_the_request_through_its_own_helper_is_not_told_an_input_is_unbound(
         string body,
         string members,
@@ -3916,14 +3971,36 @@ public sealed class CoverageCheckerTests
             baseType: baseType
         );
 
-        Assert.Empty(InputMismatches(RunCheck(InputContract, controllerBase, handler), "Get"));
+        Assert.Empty(
+            InputMismatches(RunCheck(InputContract, controllerBase, RouteReaders, handler), "Get")
+        );
     }
+
+    private const string RouteReaders = """
+        using Microsoft.AspNetCore.Http;
+        using Microsoft.AspNetCore.Mvc;
+
+        namespace Test;
+
+        public static class RouteReader
+        {
+            public static string? RouteId(this ControllerBase controller) =>
+                controller.Request.RouteValues["id"] as string;
+
+            public static string? Id(IHttpContextAccessor accessor) =>
+                accessor.HttpContext!.Request.RouteValues["id"] as string;
+
+            public static int Status(this ControllerBase controller) =>
+                controller.Response.StatusCode;
+        }
+        """;
 
     // A helper on this that never reads the request, or only names itself, still leaves the
     // route value unbound.
     [Theory]
     [InlineData("var id = Spin();", "private string? Spin() => Spin();")]
     [InlineData("var status = Status();", "private int Status() => Response.StatusCode;")]
+    [InlineData("var status = RouteReader.Status(this);", "")]
     public void Handler_helper_that_reads_no_request_is_told_an_input_is_unbound(
         string body,
         string members
@@ -3932,7 +4009,9 @@ public sealed class CoverageCheckerTests
         const string terminal = "NotesContract.Get.Success(new NoteDto(\"1\"))";
         var handler = MvcNotes("Get", "{id}", "", terminal, body: body, members: members);
 
-        var mismatch = Assert.Single(InputMismatches(RunCheck(InputContract, handler), "Get"));
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(InputContract, RouteReaders, handler), "Get")
+        );
 
         Assert.Equal("route value 'id'", mismatch.Expected);
         Assert.Equal("(not bound)", mismatch.Actual);
@@ -4034,7 +4113,7 @@ public sealed class CoverageCheckerTests
                 Assert.Contains("Without [ApiController] inference", unbound.Message);
                 Assert.Contains(
                     mismatches,
-                    warning => warning.Actual == "route, query or form value 'Title'"
+                    warning => warning.Actual == "route, query, or form value 'Title'"
                 );
             }
             else

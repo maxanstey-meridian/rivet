@@ -727,10 +727,12 @@ internal static class OpenApiProvenanceReader
         {
             var hasValue = example.Value.TryGetProperty("value", out var value);
             var externalValue = ReadOptionalString(example.Value, "externalValue");
-            if (hasValue == (externalValue is not null))
+            // OpenAPI makes both optional and only mutually exclusive, so an example with
+            // neither is valid: its summary and description document it.
+            if (hasValue && externalValue is not null)
             {
                 throw OpenApiImporter.InvalidSpec(
-                    $"Component example '{example.Name}' requires exactly one of value or externalValue."
+                    $"Component example '{example.Name}' has both value and externalValue; OpenAPI allows at most one."
                 );
             }
 

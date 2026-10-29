@@ -1,5 +1,4 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Rivet.Tool.Analysis;
 
 namespace Rivet.Tests;
@@ -21,36 +20,6 @@ public sealed class SecurityCoverageTests
         + "\n[assembly: RivetGlobalSecurityScheme(0, \"bearer\", new string[0])]";
 
     private const string Handler = "() => ItemsContract.Get.Success(new ItemDto(\"1\")).ToResult()";
-
-    private static readonly Lazy<MetadataReference[]> _frameworkReferences = new(() =>
-    {
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
-        var aspNetDir = Path.GetDirectoryName(
-            typeof(Microsoft.AspNetCore.Builder.WebApplication).Assembly.Location
-        )!;
-        return
-        [
-            .. Directory
-                .GetFiles(runtimeDir, "*.dll")
-                .Concat(Directory.GetFiles(aspNetDir, "*.dll"))
-                .Where(IsManagedAssembly)
-                .Select(path => MetadataReference.CreateFromFile(path)),
-            MetadataReference.CreateFromFile(typeof(RivetTypeAttribute).Assembly.Location),
-        ];
-
-        static bool IsManagedAssembly(string path)
-        {
-            try
-            {
-                System.Reflection.AssemblyName.GetAssemblyName(path);
-                return true;
-            }
-            catch (BadImageFormatException)
-            {
-                return false;
-            }
-        }
-    });
 
     // ---------------------------------------------------------------
     // Fixtures
@@ -148,26 +117,10 @@ public sealed class SecurityCoverageTests
     private static IReadOnlyList<CoverageWarning> CheckWith(
         OutputKind kind,
         params string[] sources
-    )
-    {
-        var compilation = CSharpCompilation.Create(
-            "SecurityApp",
-            sources.Select(source =>
-                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
-            ),
-            _frameworkReferences.Value,
-            new CSharpCompilationOptions(
-                kind,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+    ) =>
+        CompilationHelper.CheckCoverage(
+            CompilationHelper.CreateFrameworkCompilation(kind, sources)
         );
-        var errors = compilation
-            .GetDiagnostics()
-            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
-            .ToList();
-        Assert.True(errors.Count == 0, string.Join("\n", errors));
-        return CompilationHelper.CheckCoverage(compilation);
-    }
 
     private static List<CoverageWarning> Security(
         IReadOnlyList<CoverageWarning> warnings,
@@ -411,6 +364,145 @@ public sealed class SecurityCoverageTests
         Assert.Single(warnings, warning => warning.Kind == CoverageWarningKind.SecurityMismatch);
     }
 
+    [Fact]
+    public void A_handler_serving_two_contract_fields_is_compared_against_each()
+    {
+        var contract = $$"""
+            using Rivet;
+
+            {{Scheme}}
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<ItemDto> Get =
+                    Define.Get<ItemDto>("/api/items").Anonymous();
+
+                public static readonly RouteDefinition<ItemDto> Other =
+                    Define.Get<ItemDto>("/api/items").Secure("bearer");
+            }
+            """;
+        var controller = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [Route("api")]
+            public sealed class ItemsController : ControllerBase
+            {
+                [HttpGet("items")]
+                public IActionResult Get(bool other) =>
+                    other
+                        ? ItemsContract.Other.Success(new ItemDto("1")).ToActionResult()
+                        : ItemsContract.Get.Success(new ItemDto("1")).ToActionResult();
+            }
+            """;
+
+        var warnings = Check(contract, controller);
+
+        Assert.Empty(Security(warnings));
+        Assert.Contains(Case1, Assert.Single(Security(warnings, "Other")).Message);
+    }
+
+    /// <summary>
+    /// Every operation whose security is declared with attributes is held to it, whatever
+    /// marks it: a [RivetClient] controller's action, an override of an abstract
+    /// [RivetContract] method, and a static [RivetEndpoint] method a minimal API maps.
+    /// </summary>
+    [Theory]
+    [InlineData("client", "", "", Case1)]
+    [InlineData("client", "[Authorize]", "", null)]
+    [InlineData("override", "", "", Case1)]
+    [InlineData("override", "[Authorize]", "", null)]
+    [InlineData("static", "", "", Case1)]
+    [InlineData("static", "", ".RequireAuthorization()", null)]
+    [InlineData("static", "[Authorize]", "", null)]
+    public void Every_attribute_declared_operation_is_compared(
+        string kind,
+        string authorization,
+        string convention,
+        string? expected
+    )
+    {
+        var operation = kind switch
+        {
+            "client" => $$"""
+                [RivetClient]
+                [Route("api/tasks")]
+                public sealed class TasksController : ControllerBase
+                {
+                    [RivetSecure("bearer")]
+                    {{authorization}}
+                    [HttpGet("")]
+                    public TaskDto List() => new("1");
+                }
+                """,
+            "override" => $$"""
+                [RivetContract]
+                [Route("api/tasks")]
+                public abstract class TasksContract : ControllerBase
+                {
+                    [RivetSecure("bearer")]
+                    [HttpGet("")]
+                    public abstract TaskDto List();
+                }
+
+                public sealed class TasksController : TasksContract
+                {
+                    {{authorization}}
+                    public override TaskDto List() => new("1");
+                }
+                """,
+            _ => $$"""
+                public static class Tasks
+                {
+                    public static void Map(WebApplication app) =>
+                        app.MapGet("/api/tasks", List){{convention}};
+
+                    [RivetEndpoint]
+                    [RivetSecure("bearer")]
+                    {{authorization}}
+                    [HttpGet("/api/tasks")]
+                    public static TaskDto List() => new("1");
+                }
+                """,
+        };
+        var source = $$"""
+            using Microsoft.AspNetCore.Authorization;
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            {{Scheme}}
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            {{operation}}
+            """;
+
+        var found = Security(Check(source), "List");
+
+        if (expected is null)
+        {
+            Assert.Empty(found);
+            return;
+        }
+
+        var warning = Assert.Single(found);
+        Assert.Equal(CoverageWarningKind.SecurityMismatch, warning.Kind);
+        Assert.Contains("(GET /api/tasks)", warning.Message);
+        Assert.Contains(expected, warning.Message);
+    }
+
     // ---------------------------------------------------------------
     // casebridge: a global AuthorizeFilter, opted out with [AllowAnonymous]
     // ---------------------------------------------------------------
@@ -498,18 +590,58 @@ public sealed class SecurityCoverageTests
         AssertVerdict(warnings, expected);
     }
 
-    [Fact]
-    public void AllowAnonymous_decides_the_action_even_under_a_conditional_filter()
+    // Past 16 unknowns the cases aren't enumerated, but an [AllowAnonymous] decides anyway.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(17)]
+    public void AllowAnonymous_decides_the_action_even_under_a_conditional_filter(int filters)
     {
+        var conditional = string.Concat(
+            Enumerable.Repeat("if (flag) options.Filters.Add(new AuthorizeFilter()); ", filters)
+        );
         var warnings = Check(
             Contract(".Anonymous()", SecuredDefault),
-            App(
-                "services.AddControllers(options => { if (flag) options.Filters.Add(new AuthorizeFilter()); });"
-            ),
+            App($"services.AddControllers(options => {{ {conditional}}});"),
             Controller("[AllowAnonymous]")
         );
 
         AssertVerdict(warnings, null);
+    }
+
+    /// <summary>
+    /// An MVC filter or a fallback policy set in a helper applies where the helper is called:
+    /// under the call's condition, never when nothing calls it, and wherever the call it's
+    /// handed to as a method group runs.
+    /// </summary>
+    [Theory]
+    [InlineData("AddAppAuthorization(services);", null)]
+    [InlineData("if (flag) AddAppAuthorization(services);", "RIV4009")]
+    [InlineData("if (flag) AddAppAuthorization(services); AddAppAuthorization(services);", null)]
+    [InlineData("", Case1)]
+    [InlineData("services.AddControllers(ConfigureMvc);", null)]
+    [InlineData("if (flag) services.AddControllers(ConfigureMvc);", "RIV4009")]
+    [InlineData("Action<MvcOptions> later = ConfigureMvc;", "RIV4009")]
+    [InlineData("if (flag) AddFallback(services);", "RIV4009")]
+    [InlineData("AddFallback(services);", null)]
+    public void App_wide_setup_in_a_helper_runs_where_the_helper_is_called(
+        string body,
+        string? expected
+    )
+    {
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                body,
+                "private static void AddAppAuthorization(IServiceCollection services) => "
+                    + "services.AddControllers(options => options.Filters.Add(new AuthorizeFilter()));\n"
+                    + "private static void ConfigureMvc(MvcOptions options) => options.Filters.Add(new AuthorizeFilter());\n"
+                    + "private static void AddFallback(IServiceCollection services) => "
+                    + "services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());"
+            ),
+            Controller()
+        );
+
+        AssertVerdict(warnings, expected);
     }
 
     // ---------------------------------------------------------------
@@ -746,6 +878,27 @@ public sealed class SecurityCoverageTests
     }
 
     [Fact]
+    public void A_builder_reached_along_two_paths_is_traced_along_both()
+    {
+        // Secure's group comes from Configure directly and through Wire: the second path
+        // reaches 'api' again, which is the same origin, not an untraceable builder.
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                $"var api = app.MapGroup(\"/api\"); Secure(api); Wire(api); api.MapGet(\"/items\", {Handler});"
+                    + " app.MapGet(\"/api/other\", () => ItemsContract.Other.Success(new ItemDto(\"1\")).ToResult());",
+                "private static void Secure(RouteGroupBuilder group) => group.RequireAuthorization();\n"
+                    + "private static void Wire(RouteGroupBuilder group) => Secure(group);"
+            )
+        );
+
+        AssertVerdict(warnings, null);
+        var other = Assert.Single(Security(warnings, "Other"));
+        Assert.Equal(CoverageWarningKind.SecurityMismatch, other.Kind);
+        Assert.Contains(Case1, other.Message);
+    }
+
+    [Fact]
     public void Untraced_convention_is_unreadable_for_the_hosts_it_could_reach()
     {
         // A lambda's parameter can't be traced to its Map* call, so the RouteHandlerBuilder
@@ -799,6 +952,43 @@ public sealed class SecurityCoverageTests
         ".AllowAnonymous()",
         Case1
     )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().AddFallbackPolicy(\"signed-in\", new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());",
+        "",
+        null
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().AddFallbackPolicy(\"signed-in\", policy => policy.RequireAuthenticatedUser());",
+        "",
+        null
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().AddFallbackPolicy(\"outside\", policyFromOutside);",
+        "",
+        "RIV4009"
+    )]
+    // The default policy requires an authenticated user unless the app sets another.
+    [InlineData("services.AddAuthorization(o => o.FallbackPolicy = o.DefaultPolicy);", "", null)]
+    [InlineData(
+        "services.AddAuthorization(o => { o.DefaultPolicy = policyFromOutside; o.FallbackPolicy = o.DefaultPolicy; });",
+        "",
+        "RIV4009"
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().SetDefaultPolicy(policyFromOutside);",
+        ".RequireAuthorization()",
+        "RIV4009"
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().SetDefaultPolicy(policyFromOutside);",
+        ".RequireAuthorization(\"Staff\")",
+        null
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().AddDefaultPolicy(\"signed-in\", policy => policy.RequireAuthenticatedUser());",
+        ".RequireAuthorization()",
+        null
+    )]
     [InlineData("services.AddAuthorization(o => o.FallbackPolicy = null);", "", Case1)]
     [InlineData(
         "services.AddAuthorization(o => o.FallbackPolicy = policyFromOutside);",
@@ -850,15 +1040,18 @@ public sealed class SecurityCoverageTests
         AssertVerdict(warnings, Case2);
     }
 
-    [Fact]
-    public void Early_return_before_a_requirement_makes_it_conditional()
+    [Theory]
+    [InlineData(
+        $"var endpoint = app.MapGet(\"/api/items\", {Handler}); if (!flag) return; endpoint.RequireAuthorization();"
+    )]
+    // A helper declared above the call: its own early return still counts.
+    [InlineData(
+        "void Secure(RouteHandlerBuilder builder) { if (!flag) return; builder.RequireAuthorization(); }"
+            + $" Secure(app.MapGet(\"/api/items\", {Handler}));"
+    )]
+    public void Early_return_before_a_requirement_makes_it_conditional(string body)
     {
-        var warnings = Check(
-            Contract(assembly: SecuredDefault),
-            App(
-                $"var endpoint = app.MapGet(\"/api/items\", {Handler}); if (!flag) return; endpoint.RequireAuthorization();"
-            )
-        );
+        var warnings = Check(Contract(assembly: SecuredDefault), App(body));
 
         var warning = Assert.Single(Security(warnings));
         Assert.Equal(CoverageWarningKind.AuthorizationUnreadable, warning.Kind);

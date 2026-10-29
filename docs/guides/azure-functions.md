@@ -61,20 +61,20 @@ puts three things there, and the first one carrying the name wins:
 3. the top-level properties of a request body that parses as a JSON object, whatever
    its content type says.
 
-Headers, cookies and form fields never get there. A name nothing carries leaves a
+Headers, cookies, and form fields never get there. A name nothing carries leaves a
 reference type `null`, and fails the call outright for a value type. So in the sample's
 thumbnail function, `format` and `size` come from `images/{format}/thumbnails/{size}`
 and `fit` from `?fit=`, and a parameter called `sz` would be looked up in a query no
 client fills. `--check` compares these names with the contract's inputs, a JSON body's
 top-level properties included (`RIV4006`), so that typo fails the gate rather than every
-request. A parameter for a declared header,
-cookie or form field is reported too; read those from the request instead. Since the
-trigger hands over the whole request, a function is never told it leaves a declared
-input unbound: it may read it by hand.
+request. A parameter for a declared header, cookie, or form field is reported too; read
+those from the request instead. Since the trigger hands over the whole request, a
+function is never told it leaves a declared input unbound: it may read it by hand.
 
 Every value the worker fills goes through its input converters, and none of them turns
-text into an enum except by parsing it as JSON. An integer is JSON; an unquoted member
-name isn't, so `/thumbnails/Large` or `?fit=Contain` fails before the function runs. Bind
+text into an enum except by parsing it as JSON, and only an integer survives that: a
+member name doesn't, quoted or not, so `/thumbnails/Large`, `?fit=Contain`, and
+`?fit="Contain"` all fail before the function runs. Bind
 a route or query enum as a plain enum, integers on the wire as the sample's
 `ThumbnailSize` and `ThumbnailFit` are, or as a `string` you parse yourself. `--check`
 refuses a string enum there (`RIV4005`), whatever its converter.

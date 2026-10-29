@@ -10,21 +10,26 @@ public abstract partial class RouteDefinitionBase<TSelf>
 {
     private TSelf Marker() => Mutate(static state => state);
 
+    // Records nothing, but the status it names is refused like every other status argument.
+    private TSelf Marker(ResponseStatusKey status) => Marker();
+
     public TSelf Returns<TResponse>(int statusCode) =>
-        AddErrorResponse(statusCode, typeof(TResponse));
+        AddErrorResponse(RequireStatus(statusCode, "response status"), typeof(TResponse));
 
     public TSelf Returns<TResponse>(int statusCode, string? description) =>
-        AddErrorResponse(statusCode, typeof(TResponse));
+        AddErrorResponse(RequireStatus(statusCode, "response status"), typeof(TResponse));
 
     public TSelf Returns<TResponse>(string statusKey, string? description = null) =>
-        AddErrorResponse(statusKey, typeof(TResponse));
+        AddErrorResponse(RequireStatus(statusKey, "response status"), typeof(TResponse));
 
-    public TSelf Returns(int statusCode) => AddErrorResponse(statusCode, null);
+    public TSelf Returns(int statusCode) =>
+        AddErrorResponse(RequireStatus(statusCode, "response status"), null);
 
-    public TSelf Returns(int statusCode, string? description) => AddErrorResponse(statusCode, null);
+    public TSelf Returns(int statusCode, string? description) =>
+        AddErrorResponse(RequireStatus(statusCode, "response status"), null);
 
     public TSelf Returns(string statusKey, string? description = null) =>
-        AddErrorResponse(statusKey, null);
+        AddErrorResponse(RequireStatus(statusKey, "response status"), null);
 
     public TSelf Summary(string summary) => Marker();
 
@@ -37,18 +42,11 @@ public abstract partial class RouteDefinitionBase<TSelf>
     /// default), as for <see cref="Returns(string, string?)"/>: generation refuses anything
     /// else as RIV1120.
     /// </summary>
-    public TSelf StatusKey(string statusKey, string? description = null) =>
-        Mutate(state =>
-            state with
-            {
-                SuccessStatusKey = (
-                    ResponseStatusKey.Parse(statusKey)
-                    ?? throw new InvalidOperationException(
-                        $"{Method} {Route}: success status key '{statusKey}' is not an exact status, nXX range, or default."
-                    )
-                ).Key,
-            }
-        );
+    public TSelf StatusKey(string statusKey, string? description = null)
+    {
+        var status = RequireStatus(statusKey, "success status");
+        return Mutate(state => state with { SuccessStatusKey = status.Key });
+    }
 
     /// <summary>
     /// Declares the request body's media type when it is not application/json
@@ -82,7 +80,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string name,
         string? description = null,
         bool required = false
-    ) => AddRequiredHeader(statusCode.ToString(), name, required);
+    ) => AddRequiredHeader(RequireStatus(statusCode, "response status"), name, required);
 
     public TSelf WithResponseHeader<THeader>(
         int statusCode,
@@ -100,14 +98,14 @@ public abstract partial class RouteDefinitionBase<TSelf>
         bool allowReserved = false,
         bool allowEmptyValue = false,
         string? contentType = null
-    ) => AddRequiredHeader(statusCode.ToString(), name, required);
+    ) => AddRequiredHeader(RequireStatus(statusCode, "response status"), name, required);
 
     public TSelf WithResponseHeaderKey(
         string statusKey,
         string name,
         string? description = null,
         bool required = false
-    ) => AddRequiredHeader(statusKey, name, required);
+    ) => AddRequiredHeader(RequireStatus(statusKey, "response status"), name, required);
 
     public TSelf WithResponseHeaderKey<THeader>(
         string statusKey,
@@ -125,7 +123,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         bool allowReserved = false,
         bool allowEmptyValue = false,
         string? contentType = null
-    ) => AddRequiredHeader(statusKey, name, required);
+    ) => AddRequiredHeader(RequireStatus(statusKey, "response status"), name, required);
 
     /// <summary>
     /// Declares a response header on the endpoint's success status.
@@ -179,7 +177,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null,
         string? summary = null,
         string? description = null
-    ) => Marker();
+    ) => Marker(RequireStatus(statusCode, "response status"));
 
     public TSelf ResponseExampleJson(
         string statusKey,
@@ -189,7 +187,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? referencedComponentsJson = null,
         string? summary = null,
         string? description = null
-    ) => Marker();
+    ) => Marker(RequireStatus(statusKey, "response status"));
 
     public TSelf ResponseExampleRef(
         int statusCode,
@@ -198,7 +196,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? name = null,
         string? mediaType = null,
         string? referencedComponentsJson = null
-    ) => Marker();
+    ) => Marker(RequireStatus(statusCode, "response status"));
 
     public TSelf ResponseExampleRef(
         string statusKey,
@@ -207,7 +205,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? name = null,
         string? mediaType = null,
         string? referencedComponentsJson = null
-    ) => Marker();
+    ) => Marker(RequireStatus(statusKey, "response status"));
 
     /// <summary>
     /// No credentials required (<c>security: []</c>). Stands alone: an endpoint that also
@@ -285,7 +283,13 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? schemaType = null,
         string? format = null,
         string? schemaDescription = null
-    ) => AddResponseContent(statusCode.ToString(), mediaType, typeof(T), isBinary: false);
+    ) =>
+        AddResponseContent(
+            RequireStatus(statusCode, "response status"),
+            mediaType,
+            typeof(T),
+            isBinary: false
+        );
 
     public TSelf ResponseContent<T>(
         string statusKey,
@@ -294,5 +298,11 @@ public abstract partial class RouteDefinitionBase<TSelf>
         string? schemaType = null,
         string? format = null,
         string? schemaDescription = null
-    ) => AddResponseContent(statusKey, mediaType, typeof(T), isBinary: false);
+    ) =>
+        AddResponseContent(
+            RequireStatus(statusKey, "response status"),
+            mediaType,
+            typeof(T),
+            isBinary: false
+        );
 }

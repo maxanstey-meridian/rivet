@@ -321,12 +321,20 @@ public sealed class ControllerSecurityTests
     /// declare the same security; otherwise either one would publish the other's.
     /// </summary>
     [Theory]
-    [InlineData("[RivetSecure(\"bearer\")]", true)]
-    [InlineData("[RivetSecure(\"key\")]", false)]
-    [InlineData("", false)]
+    [InlineData("\"bearer\"", "[RivetSecure(\"bearer\")]", null)]
+    [InlineData("\"bearer\"", "[RivetSecure(\"key\")]", "'key'")]
+    [InlineData("\"bearer\"", "", "declares none, so it inherits the document's")]
+    [InlineData("\"bearer\", \"b\", \"a\"", "[RivetSecure(\"bearer\", \"a\", \"b\")]", null)]
+    // A scope is a whole string, never split: "a,b" is one scope, not two.
+    [InlineData(
+        "\"bearer\", \"a\", \"b\"",
+        "[RivetSecure(\"bearer\", \"a,b\")]",
+        "'bearer' with scopes 'a,b'"
+    )]
     public void Merging_a_contract_and_an_action_compares_their_security(
+        string contractSecure,
         string actionAttributes,
-        bool merges
+        string? conflict
     )
     {
         var source = $$"""
@@ -342,7 +350,7 @@ public sealed class ControllerSecurityTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> List =
-                    Define.Get<TaskDto>("/api/tasks").Secure("bearer");
+                    Define.Get<TaskDto>("/api/tasks").Secure({{contractSecure}});
             }
 
             [Route("api/tasks")]
@@ -355,7 +363,7 @@ public sealed class ControllerSecurityTests
             }
             """;
 
-        if (merges)
+        if (conflict is null)
         {
             Assert.Single(CompilationHelper.WalkMerged(source).Endpoints);
             return;
@@ -363,5 +371,7 @@ public sealed class ControllerSecurityTests
 
         var error = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkMerged(source));
         Assert.StartsWith($"error {Diagnostics.ConflictingOperations}:", error.Message);
+        Assert.Contains("agree on everything but security", error.Message);
+        Assert.Contains(conflict, error.Message);
     }
 }

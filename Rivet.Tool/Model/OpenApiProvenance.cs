@@ -58,10 +58,12 @@ public sealed record OpenApiComponentExampleProvenance
         string? externalValue
     )
     {
-        if ((jsonValue is null) == (externalValue is null))
+        // OpenAPI makes both optional and only mutually exclusive: an example with neither
+        // documents through its summary and description alone.
+        if (jsonValue is not null && externalValue is not null)
         {
             throw new ArgumentException(
-                "A component example requires exactly one of JSON value or externalValue."
+                "A component example carries at most one of JSON value and externalValue."
             );
         }
 

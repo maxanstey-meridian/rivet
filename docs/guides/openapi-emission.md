@@ -42,7 +42,21 @@ C# side's `[assembly: RivetGlobalSecurity*]`. It becomes the root `security` and
 over the default `--security` would otherwise supply; `--security` still defines the
 schemes, since contract JSON carries no scheme definitions. `{ "alternatives": [] }` is
 `security: []`. A `routeTemplate` is written as the path key exactly as given, so its
-tokens must be bare (`{id}`): a constraint, `?`, default or catch-all is `RIV2017`, and
+tokens must be bare (`{id}`): a constraint, `?`, default, or catch-all is `RIV2017`, and
 the param's own `type` says what the token holds.
+
+Every response key is one OpenAPI can hold, and one rule decides which: the runtime's. A
+key is a status from 100 to 599, a range like `4XX`, or `default`. Generation stops on
+anything else with `RIV1120`, contract JSON with `RIV2017` (its `statusCode` and
+`statusKey` both), and the runtime turns the same key away when the definition is built,
+on every builder call that takes a status, so a `.WithResponseHeaderKey("abc", ...)` can't
+quietly enforce nothing.
+
+A form body never says anything about fields it doesn't list. ASP.NET's form binders
+neither fill a `[JsonExtensionData]` bag nor turn away a field they don't bind, so an input
+record that's open (or closed) as JSON is neither as a form. Its body is spelled out
+inline, without `additionalProperties`, rather than pointing at the record's component,
+and the record name it pins for import is the importer's `{Name}Request` whenever the
+record's own name already belongs to that component.
 
 See the [CLI Reference](/reference/cli) for the current command set.

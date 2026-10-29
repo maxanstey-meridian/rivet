@@ -57,18 +57,18 @@ internal static class OpenApiStructure
 
     /// <summary>
     /// The header names OpenAPI 3.x ignores: as a header parameter, <c>Accept</c>,
-    /// <c>Content-Type</c> and <c>Authorization</c> (media types and security schemes describe
-    /// them); as a response header, <c>Content-Type</c> ("SHALL be ignored": the response's
-    /// content describes it). Header names are case-insensitive. Emit refuses them (RIV2009);
-    /// import keeps a source's response one verbatim, out of the contract.
+    /// <c>Content-Type</c>, and <c>Authorization</c> (media types and security schemes
+    /// describe them); as a response header, the runtime's rule
+    /// (<see cref="ResponseHeaders.IsIgnoredByOpenApi"/>). Header names are
+    /// case-insensitive. Emit refuses them (RIV2009); import keeps a source's response one
+    /// verbatim, out of the contract.
     /// </summary>
     public static bool IsReservedHeaderName(string name, bool isResponseHeader) =>
-        name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
-        || !isResponseHeader
-            && (
-                name.Equals("Accept", StringComparison.OrdinalIgnoreCase)
-                || name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
-            );
+        isResponseHeader
+            ? ResponseHeaders.IsIgnoredByOpenApi(name)
+            : name.Equals("Accept", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("Authorization", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether an object of this shape is an OpenAPI or JSON Schema object rather than a name map.</summary>
     public static bool IsStructuralObject(OpenApiShape shape) =>

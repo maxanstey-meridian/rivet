@@ -152,10 +152,14 @@ normally, and constructs a contract-owned response:
   the JSON twice. The spec can't describe that object, and clients disagree about which
   value wins. So before writing a JSON body, the adapter walks the payload the way the
   serializer will (through properties, list items, dictionary values, polymorphic
-  variants and objects a bag holds) and throws `RivetContractViolationException` if a
-  bag key equals a declared member's wire name, or the discriminator a variant is written
-  with, naming the type, where it sits (`items[1]`) and the key. A payload whose type
-  can't reach a bag at all is never walked; that's decided once per type.
+  variants, the variant a `[RivetUnion]` is written as, and objects a bag holds) and
+  throws `RivetContractViolationException` if a bag key equals a declared member's wire
+  name, or the discriminator a variant is written with, naming the type, where it sits
+  (`items[1]`), and the key. A payload whose type can't reach a bag at all is never
+  walked; that's decided once per type. The walk goes no deeper than the serializer
+  writes, either: a payload nested past `MaxDepth`, like an entity graph with a parent
+  pointer handed back as-is, is left for System.Text.Json to refuse with its own cycle
+  error, straight away.
 
   Want snake_case, or enums as strings everywhere? Say it on the types:
   `[JsonPropertyName]`, `[JsonIgnore]`, `[JsonConverter(typeof(RivetCamelCaseEnumConverter<T>))]`

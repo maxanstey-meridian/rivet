@@ -1,20 +1,34 @@
 namespace Rivet;
 
 using System.Collections.Immutable;
+using System.Globalization;
 using Microsoft.Net.Http.Headers;
 
-/// <summary>An OpenAPI response key: an exact status, an nXX range (<see cref="RangeClass"/>), or default.</summary>
+/// <summary>
+/// An OpenAPI response key: an exact status, an nXX range (<see cref="RangeClass"/>), or
+/// default. The one rule for which keys a response can have: every status-taking builder
+/// call refuses the rest at startup, and Rivet.Tool refuses the same ones at generation
+/// (RIV1120) and in <c>--from</c> contract JSON (RIV2017).
+/// </summary>
 internal readonly record struct ResponseStatusKey(string Key, int? Exact, int? RangeClass)
 {
-    public static ResponseStatusKey FromStatus(int statusCode) =>
-        new(statusCode.ToString(), statusCode, null);
+    /// <summary>An exact status OpenAPI can key a response by, 100 to 599; null for any other int.</summary>
+    public static ResponseStatusKey? FromStatus(int statusCode) =>
+        statusCode is >= 100 and <= 599
+            ? new(statusCode.ToString(CultureInfo.InvariantCulture), statusCode, null)
+            : null;
 
+    /// <summary>
+    /// A three-digit status from 100 to 599, a range from <c>1XX</c> to <c>5XX</c> (either
+    /// case), or <c>default</c> (any casing; OpenAPI's field is lowercase, which the tool
+    /// writes); null for anything else.
+    /// </summary>
     public static ResponseStatusKey? Parse(string key) =>
         key switch
         {
             [>= '1' and <= '5', >= '0' and <= '9', >= '0' and <= '9'] => new(
                 key,
-                int.Parse(key),
+                int.Parse(key, CultureInfo.InvariantCulture),
                 null
             ),
             [>= '1' and <= '5', 'X' or 'x', 'X' or 'x'] => new(key, null, key[0] - '0'),
@@ -35,6 +49,17 @@ internal sealed record RouteErrorResponse(ResponseStatusKey Status, Type? Respon
 /// response, resolved when the contract is published so a later <c>.Status()</c> still counts.
 /// </summary>
 internal sealed record RouteRequiredHeader(string? StatusKey, string Name);
+
+/// <summary>
+/// The response headers OpenAPI ignores: <c>Content-Type</c>, which "SHALL be ignored" because
+/// the response's content describes it. Header names are case-insensitive. The runtime refuses
+/// one at startup, and Rivet.Tool refuses it at generation (RIV2009).
+/// </summary>
+internal static class ResponseHeaders
+{
+    internal static bool IsIgnoredByOpenApi(string name) =>
+        name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase);
+}
 
 /// <summary>
 /// Everything a route definition's builder methods record. Immutable, so a converted
@@ -328,13 +353,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
     public TSelf Status(int statusCode) =>
         Mutate(state =>
         {
-            if (statusCode is < 100 or > 599)
-            {
-                throw new InvalidOperationException(
-                    $"{Method} {Route}: success status {statusCode} is not a valid HTTP status code."
-                );
-            }
-
+            RequireStatus(statusCode, "success status");
             if (state.StatusSet)
             {
                 throw new InvalidOperationException(
@@ -403,30 +422,32 @@ public abstract partial class RouteDefinitionBase<TSelf>
             };
         });
 
-    private TSelf AddErrorResponse(int statusCode, Type? responseType) =>
-        Mutate(state =>
-        {
-            if (statusCode is < 100 or > 599)
-            {
-                throw new InvalidOperationException(
-                    $"{Method} {Route}: response status {statusCode} is not a valid HTTP status code."
-                );
-            }
-
-            return AddErrorResponse(state, ResponseStatusKey.FromStatus(statusCode), responseType);
-        });
-
-    private TSelf AddErrorResponse(string statusKey, Type? responseType) =>
-        Mutate(state =>
-            AddErrorResponse(
-                state,
-                ResponseStatusKey.Parse(statusKey)
-                    ?? throw new InvalidOperationException(
-                        $"{Method} {Route}: response status key '{statusKey}' is not an exact status, nXX range, or default."
-                    ),
-                responseType
-            )
+    /// <summary>
+    /// The status an int-taking builder call targets, refused unless OpenAPI can key a
+    /// response by it (<see cref="ResponseStatusKey.FromStatus"/>), as generation refuses it.
+    /// </summary>
+    private ResponseStatusKey RequireStatus(int statusCode, string role) =>
+        ResponseStatusKey.FromStatus(statusCode)
+        ?? throw new InvalidOperationException(
+            $"{Method} {Route}: {role} {statusCode} is not a valid HTTP status code."
         );
+
+    /// <summary>
+    /// The status a key-taking builder call targets, refused unless OpenAPI can key a
+    /// response by it (<see cref="ResponseStatusKey.Parse"/>), as generation refuses it.
+    /// </summary>
+    private ResponseStatusKey RequireStatus(string statusKey, string role) =>
+        ResponseStatusKey.Parse(statusKey)
+        ?? throw new InvalidOperationException(
+            $"{Method} {Route}: {role} key '{statusKey}' is not an exact status, nXX range, or default."
+        );
+
+    /// <summary>
+    /// A builder call that records nothing for the runtime but names a status: it refuses
+    /// the keys generation refuses, like every other status-taking call.
+    /// </summary>
+    private TSelf AddErrorResponse(ResponseStatusKey status, Type? responseType) =>
+        Mutate(state => AddErrorResponse(state, status, responseType));
 
     private static RouteState AddErrorResponse(
         RouteState state,
@@ -466,37 +487,62 @@ public abstract partial class RouteDefinitionBase<TSelf>
     }
 
     public TSelf ResponseContent(int statusCode, string mediaType) =>
-        AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: false);
+        AddResponseContent(
+            RequireStatus(statusCode, "response status"),
+            mediaType,
+            null,
+            isBinary: false
+        );
 
     public TSelf ResponseContent(string statusKey, string mediaType) =>
-        AddResponseContent(statusKey, mediaType, null, isBinary: false);
+        AddResponseContent(
+            RequireStatus(statusKey, "response status"),
+            mediaType,
+            null,
+            isBinary: false
+        );
 
     public TSelf ResponseBinaryContent(int statusCode, string mediaType) =>
-        AddResponseContent(statusCode.ToString(), mediaType, null, isBinary: true);
+        AddResponseContent(
+            RequireStatus(statusCode, "response status"),
+            mediaType,
+            null,
+            isBinary: true
+        );
 
     public TSelf ResponseBinaryContent(string statusKey, string mediaType) =>
-        AddResponseContent(statusKey, mediaType, null, isBinary: true);
+        AddResponseContent(
+            RequireStatus(statusKey, "response status"),
+            mediaType,
+            null,
+            isBinary: true
+        );
 
-    private TSelf AddRequiredHeader(string? statusKey, string name, bool required) =>
+    /// <param name="status">The status the header is on; null for the success response.</param>
+    private TSelf AddRequiredHeader(ResponseStatusKey? status, string name, bool required) =>
         Mutate(state =>
+        {
             // OpenAPI ignores a response header named Content-Type, so generation refuses it
             // (RIV2009) and a required one would hold handlers to a header no spec carries.
-            name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
-                ? throw new InvalidOperationException(
+            if (ResponseHeaders.IsIgnoredByOpenApi(name))
+            {
+                throw new InvalidOperationException(
                     $"{Method} {Route}: response header '{name}' is ignored by OpenAPI. A response's media type is its content: declare it with .ProducesContentType(...)."
-                )
-            : required
+                );
+            }
+
+            return required
                 ? state with
                 {
                     RequiredHeaders = state.RequiredHeaders.Add(
-                        new RouteRequiredHeader(statusKey, name)
+                        new RouteRequiredHeader(status?.Key, name)
                     ),
                 }
-            : state
-        );
+                : state;
+        });
 
     private TSelf AddResponseContent(
-        string statusKey,
+        ResponseStatusKey status,
         string mediaType,
         Type? payloadType,
         bool isBinary
@@ -505,7 +551,7 @@ public abstract partial class RouteDefinitionBase<TSelf>
             state with
             {
                 ResponseContents = state.ResponseContents.Add(
-                    new RouteResponseContent(statusKey, mediaType, payloadType, isBinary)
+                    new RouteResponseContent(status.Key, mediaType, payloadType, isBinary)
                 ),
             }
         );

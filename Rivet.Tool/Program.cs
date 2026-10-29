@@ -83,6 +83,7 @@ static async Task<int> Run(string[] args)
         var coverageWarnings = CoverageChecker.Check(
             compilation,
             wkt,
+            discovered,
             contracts,
             security,
             functionsRoutePrefix

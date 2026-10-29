@@ -7,11 +7,13 @@ namespace ContractApi.Auth;
 
 /// <summary>
 /// The sample's stand-in for a real bearer scheme (JwtBearer, say): any non-empty token
-/// authenticates, so the sample runs without an identity provider. It reads the
-/// <c>Authorization: Bearer</c> header, or the <c>token</c> query parameter a
-/// <c>.QueryAuth()</c> endpoint takes for clients that can't set headers. Swap it for a
-/// real handler and nothing else changes: the [Authorize] attributes and the contract's
-/// <c>.Secure("bearer")</c> are what <c>--check</c> compares.
+/// authenticates, so the sample runs without an identity provider, and Program.cs registers
+/// it only in Development. It reads the <c>Authorization: Bearer</c> header, or the
+/// <c>token</c> query parameter a <c>.QueryAuth()</c> endpoint takes for clients that can't
+/// set headers. A real handler has to read that query parameter too: JwtBearer reads only the
+/// header, so give it a <c>JwtBearerEvents.OnMessageReceived</c> that sets
+/// <c>context.Token</c> from <c>token</c>. The [Authorize] attributes and the contract's
+/// <c>.Secure("bearer")</c> stay as they are: they're what <c>--check</c> compares.
 /// </summary>
 public sealed class DemoBearerHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,

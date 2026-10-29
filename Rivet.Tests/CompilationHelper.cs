@@ -14,6 +14,45 @@ public static class CompilationHelper
 {
     private static readonly MetadataReference[] _coreReferences = GetCoreReferences();
 
+    // The second reference profile: the whole .NET and ASP.NET shared frameworks, so a fixture
+    // can be written the way an app's Program.cs is.
+    private static readonly Lazy<MetadataReference[]> _frameworkReferences = new(
+        GetFrameworkReferences
+    );
+
+    /// <summary>
+    /// Compiles sources against the whole .NET and ASP.NET shared frameworks plus
+    /// Rivet.Attributes, nullable enabled, as a library or a console app (for top-level
+    /// statements).
+    /// </summary>
+    public static Compilation CreateFrameworkCompilation(OutputKind kind, params string[] sources)
+    {
+        var compilation = CSharpCompilation.Create(
+            "FrameworkApp",
+            sources.Select(source =>
+                CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
+            ),
+            _frameworkReferences.Value,
+            new CSharpCompilationOptions(
+                kind,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+
+        var errors = compilation
+            .GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        if (errors.Count > 0)
+        {
+            var messages = string.Join("\n", errors.Select(e => e.ToString()));
+            throw new InvalidOperationException($"Test source has compilation errors:\n{messages}");
+        }
+
+        return compilation;
+    }
+
     /// <summary>
     /// Compiles multiple C# source files, each as a separate syntax tree.
     /// Use when sources contain file-scoped namespace declarations.
@@ -145,6 +184,7 @@ public static class CompilationHelper
         return CoverageChecker.Check(
             compilation,
             wkt,
+            discovered,
             contracts,
             SecurityMetadataWalker.Walk(compilation),
             functionsRoutePrefix
@@ -266,40 +306,14 @@ public static class CompilationHelper
     public static Compilation CreateCompilationWithProjectReference(
         string mainSource,
         string domainSource
-    )
-    {
-        var domainTree = CSharpSyntaxTree.ParseText(
-            domainSource,
-            new CSharpParseOptions(LanguageVersion.Latest)
-        );
-        var domainCompilation = CSharpCompilation.Create(
-            "DomainAssembly",
-            [domainTree],
-            _coreReferences,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
-        );
-        ThrowOnErrors(domainCompilation, "Domain test source");
-
-        var mainTree = CSharpSyntaxTree.ParseText(
+    ) =>
+        CompileReferencing(
             mainSource,
-            new CSharpParseOptions(LanguageVersion.Latest)
+            domainSource,
+            "DomainAssembly",
+            "Domain test source",
+            domain => domain.ToMetadataReference()
         );
-        var mainCompilation = CSharpCompilation.Create(
-            "TestAssembly",
-            [mainTree],
-            [.. _coreReferences, domainCompilation.ToMetadataReference()],
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
-        );
-        ThrowOnErrors(mainCompilation, "Main test source");
-
-        return mainCompilation;
-    }
 
     /// <summary>
     /// Creates a compilation where packageSource is a compiled assembly the main source
@@ -312,46 +326,61 @@ public static class CompilationHelper
         byte[] PackageImage
     ) CreateCompilationWithPackageReference(string mainSource, string packageSource)
     {
-        var packageCompilation = CSharpCompilation.Create(
+        byte[] packageImage = [];
+        var compilation = CompileReferencing(
+            mainSource,
+            packageSource,
             "PackageAssembly",
-            [
-                CSharpSyntaxTree.ParseText(
-                    packageSource,
-                    new CSharpParseOptions(LanguageVersion.Latest)
-                ),
-            ],
+            "Package test source",
+            package =>
+            {
+                using var image = new MemoryStream();
+                if (!package.Emit(image).Success)
+                {
+                    throw new InvalidOperationException("Package test source failed to emit.");
+                }
+
+                packageImage = image.ToArray();
+                return MetadataReference.CreateFromImage(packageImage);
+            }
+        );
+        return (compilation, packageImage);
+    }
+
+    /// <summary>
+    /// <paramref name="mainSource"/> compiled against <paramref name="referencedSource"/>,
+    /// compiled first as <paramref name="assemblyName"/> and referenced the way
+    /// <paramref name="reference"/> makes it.
+    /// </summary>
+    private static Compilation CompileReferencing(
+        string mainSource,
+        string referencedSource,
+        string assemblyName,
+        string label,
+        Func<CSharpCompilation, MetadataReference> reference
+    )
+    {
+        var options = new CSharpCompilationOptions(
+            OutputKind.DynamicallyLinkedLibrary,
+            nullableContextOptions: NullableContextOptions.Enable
+        );
+        var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
+        var referenced = CSharpCompilation.Create(
+            assemblyName,
+            [CSharpSyntaxTree.ParseText(referencedSource, parseOptions)],
             _coreReferences,
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            options
         );
-        ThrowOnErrors(packageCompilation, "Package test source");
-        using var image = new MemoryStream();
-        var emitted = packageCompilation.Emit(image);
-        if (!emitted.Success)
-        {
-            throw new InvalidOperationException("Package test source failed to emit.");
-        }
+        ThrowOnErrors(referenced, label);
 
-        var packageImage = image.ToArray();
-        var mainCompilation = CSharpCompilation.Create(
+        var main = CSharpCompilation.Create(
             "TestAssembly",
-            [
-                CSharpSyntaxTree.ParseText(
-                    mainSource,
-                    new CSharpParseOptions(LanguageVersion.Latest)
-                ),
-            ],
-            [.. _coreReferences, MetadataReference.CreateFromImage(packageImage)],
-            new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
-                nullableContextOptions: NullableContextOptions.Enable
-            )
+            [CSharpSyntaxTree.ParseText(mainSource, parseOptions)],
+            [.. _coreReferences, reference(referenced)],
+            options
         );
-        ThrowOnErrors(mainCompilation, "Main test source");
-
-        return (mainCompilation, packageImage);
+        ThrowOnErrors(main, "Main test source");
+        return main;
     }
 
     private static void ThrowOnErrors(Compilation compilation, string label)
@@ -481,6 +510,36 @@ public static class CompilationHelper
     }
 
     // --- Emission helpers ---
+
+    private static MetadataReference[] GetFrameworkReferences()
+    {
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        var aspNetDir = Path.GetDirectoryName(
+            typeof(Microsoft.AspNetCore.Builder.WebApplication).Assembly.Location
+        )!;
+        return
+        [
+            .. Directory
+                .GetFiles(runtimeDir, "*.dll")
+                .Concat(Directory.GetFiles(aspNetDir, "*.dll"))
+                .Where(IsManagedAssembly)
+                .Select(path => MetadataReference.CreateFromFile(path)),
+            MetadataReference.CreateFromFile(typeof(RivetTypeAttribute).Assembly.Location),
+        ];
+
+        static bool IsManagedAssembly(string path)
+        {
+            try
+            {
+                System.Reflection.AssemblyName.GetAssemblyName(path);
+                return true;
+            }
+            catch (BadImageFormatException)
+            {
+                return false;
+            }
+        }
+    }
 
     private static MetadataReference[] GetCoreReferences()
     {

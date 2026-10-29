@@ -142,7 +142,10 @@ public static class ContractWalker
         var isFileEndpoint = root.TargetMethod.Name == "File";
         var httpMethod = isFileEndpoint ? "GET" : root.TargetMethod.Name.ToUpperInvariant();
         var route = RouteParser.StripRouteConstraints(routeTemplate);
-        var routeTokens = RouteParser.ParseRouteTokens(routeTemplate);
+        var routeTokens = RouteConstraints.Tokens(
+            routeTemplate,
+            RouteLabel(httpMethod, route, field)
+        );
 
         var name = Naming.ToCamelCase(field.Name);
         var provenance = OpenApiProvenanceWalker.ReadOperation(compilation, field);
@@ -478,6 +481,32 @@ public static class ContractWalker
 
         // Build return type from TOutput
         TsType? returnType = tOutput is not null ? typeWalker.MapType(tOutput) : null;
+
+        // An OpenAPI path parameter's name is its token's, exactly: a declaration that matches
+        // a token only ignoring case would emit a parameter no template token names.
+        foreach (var declaredParameter in declaredParameters)
+        {
+            if (
+                declaredParameter.Source == ParamSource.Route
+                && !routeTokens.Any(token => token.Name == declaredParameter.Name)
+                && routeTokens.FirstOrDefault(token =>
+                    string.Equals(
+                        token.Name,
+                        declaredParameter.Name,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                    is { } caseOnly
+            )
+            {
+                throw Diagnostics.Error(
+                    Diagnostics.InvalidBuilderArgument,
+                    $"{RouteLabel(httpMethod, route, field)} declares .Parameter<T>(\"{declaredParameter.Name}\", \"path\", ...), "
+                        + $"but the route's token is '{{{caseOnly.Name}}}'. A path parameter's name must equal "
+                        + $"its token exactly; spell it \"{caseOnly.Name}\"."
+                );
+            }
+        }
 
         var declaredRequestBody = ReadDeclaredRequestBody(field, wkt);
         var (builtParameters, inputTypeName, bodyFieldNames) = BuildParams(
@@ -874,8 +903,11 @@ public static class ContractWalker
 
     /// <summary>
     /// Lowers the input type into route, query, header and body params. BodyFieldNames are
-    /// the JSON body's member names as the spec sends them (route-bound and read-only members
-    /// dropped): the fields of the body when it is form-encoded.
+    /// the body's top-level names as the spec sends them (route-bound and read-only members
+    /// dropped), when it has a closed list: a JSON body, lowered from the input or declared
+    /// by <c>.RequestContent&lt;T&gt;()</c>, and a form body left as one <c>body</c> param (a
+    /// <c>[RivetRequestBody]</c> type, or an input that doesn't lower to parts). A form body
+    /// lowered to parts lists them as its params instead.
     /// </summary>
     private static (
         IReadOnlyList<TsEndpointParam> Params,
@@ -1041,19 +1073,38 @@ public static class ContractWalker
                 typeWalker
             );
 
-            // Route params from template — try to match types from TInput properties
+            // A form record (one with files, or a .FormEncoded() one, or one whose declared
+            // request content is a form, as import writes a multipart body with no file in it,
+            // and the runtime binds it; with no declared body type) lowers to parts; a JSON
+            // one to a body param.
+            var formBody =
+                tInput is not null
+                && (
+                    hasFormFileProperty
+                    || (
+                        isFormEncoded
+                        || requestContents.Any(content =>
+                            !content.IsBinary && RequestInputLowering.IsForm(content.MediaType)
+                        )
+                    )
+                        && requestBodyType is null
+                        && typeWalker.IsParamLowerable(tInput)
+                );
+
+            // Route params from template — try to match types from TInput properties: a form
+            // body's from the one member list its parts come from (a package base's included),
+            // a JSON body's from the flattened member surface (incl. inherited).
             var routeMatchedProps = new HashSet<string>(StringComparer.Ordinal);
+            var routeCandidates =
+                tInput is null ? []
+                : formBody ? formBound.Cast<ISymbol>().ToList()
+                : typeWalker.GetEffectiveProperties(tInput).ToList();
             foreach (var paramName in routeParamNames)
             {
-                // Match against the flattened member surface (incl. inherited)
                 var normalized = RouteParser.NormalizeForMatching(paramName);
-                var matchingProp = tInput is null
-                    ? null
-                    : typeWalker
-                        .GetEffectiveProperties(tInput)
-                        .FirstOrDefault(p =>
-                            RouteParser.NormalizeForMatching(p.Name) == normalized
-                        );
+                var matchingProp = routeCandidates.FirstOrDefault(p =>
+                    RouteParser.NormalizeForMatching(p.Name) == normalized
+                );
                 if (matchingProp is null)
                 {
                     parameters.Add(UnboundRouteParam(paramName));
@@ -1073,28 +1124,15 @@ public static class ContractWalker
                 );
             }
 
-            // The parts of a form record (one with files, or a .FormEncoded() one, or one whose
-            // declared request content is a form, as import writes a multipart body with no
-            // file in it, and the runtime binds it; with no declared body type), or null for a
-            // JSON one. Both hosts can serve a contract.
+            // The parts of a form record, or null for a JSON one. Both hosts can serve a
+            // contract.
             IReadOnlyList<FormBinding.FormPart>? FormParts() =>
-                tInput is not null
-                && (
-                    hasFormFileProperty
-                    || (
-                        isFormEncoded
-                        || requestContents.Any(content =>
-                            !content.IsBinary && RequestInputLowering.IsForm(content.MediaType)
-                        )
-                    )
-                        && requestBodyType is null
-                        && typeWalker.IsParamLowerable(tInput)
-                )
+                formBody
                     ? FormBinding.Parts(
                         compilation,
                         wkt,
                         typeWalker,
-                        tInput,
+                        tInput!,
                         routeMatchedProps,
                         FormBinding.FormHosts.Any,
                         where
@@ -1154,25 +1192,7 @@ public static class ContractWalker
                         // Normal body param
                         var tsType = requestBodyType ?? typeWalker.MapType(tInput);
                         parameters.Add(new TsEndpointParam("body", tsType, ParamSource.Body));
-                        // The fields the emitter lowers the body to, by the same rule.
-                        var bodyDefinitionName = (
-                            tsType is TsType.Nullable nullable ? nullable.Inner : tsType
-                        ) switch
-                        {
-                            TsType.TypeRef typeRef => typeRef.Name,
-                            TsType.Generic generic => generic.Name,
-                            _ => null,
-                        };
-                        // Null when the body has no closed list of top-level names.
-                        bodyFieldNames =
-                            bodyDefinitionName is not null
-                            && typeWalker.Definitions.GetValueOrDefault(bodyDefinitionName)
-                                is { Type: null, AdditionalProperties: not true } definition
-                                ? TsEndpointDefinition
-                                    .RequestBodyProperties(parameters, definition.Properties)
-                                    .Select(property => property.Name)
-                                    .ToList()
-                                : null;
+                        bodyFieldNames = ClosedBodyFieldNames(typeWalker, tsType, parameters);
                     }
                 }
             }
@@ -1289,8 +1309,8 @@ public static class ContractWalker
             {
                 // No TInput: the route template declares each placeholder's existence and
                 // transport location; its type comes from a declaration or a type
-                // constraint, or it warns like the missing-property paths above
-                // (acceptance:no-input-route-token-warns).
+                // constraint, or generation stops with RIV1019 like the missing-property
+                // paths above.
                 foreach (var paramName in routeParamNames)
                 {
                     parameters.Add(UnboundRouteParam(paramName));
@@ -1298,7 +1318,64 @@ public static class ContractWalker
             }
         }
 
+        // A JSON body declared only by .RequestContent<T>(json) lowers no param, but its
+        // top-level names are as closed as a lowered body's, so --check holds a Functions
+        // parameter to them the same way.
+        if (
+            !parameters.Any(parameter =>
+                parameter.Source is ParamSource.Body or ParamSource.File or ParamSource.FormField
+            )
+            && requestContents
+                .Where(content =>
+                    !content.IsBinary && !RequestInputLowering.IsForm(content.MediaType)
+                )
+                .ToList()
+                is { Count: > 0 } jsonContents
+        )
+        {
+            var names = jsonContents
+                .Select(content =>
+                    content.Schema is null
+                        ? null
+                        : ClosedBodyFieldNames(typeWalker, content.Schema, parameters)
+                )
+                .ToList();
+            bodyFieldNames = names.Contains(null)
+                ? null
+                : [.. names.SelectMany(list => list!).Distinct(StringComparer.Ordinal)];
+        }
+
         return (parameters, inputTypeName, bodyFieldNames);
+    }
+
+    /// <summary>
+    /// The top-level names a JSON body of <paramref name="bodyType"/> is sent with, as the
+    /// emitter lowers it (route-bound and read-only members dropped), or null when the body
+    /// has no closed list of names (a dictionary, extension data, a non-object).
+    /// </summary>
+    private static IReadOnlyList<string>? ClosedBodyFieldNames(
+        TypeWalker typeWalker,
+        TsType bodyType,
+        IReadOnlyList<TsEndpointParam> parameters
+    )
+    {
+        var definitionName = (
+            bodyType is TsType.Nullable nullable ? nullable.Inner : bodyType
+        ) switch
+        {
+            TsType.TypeRef typeRef => typeRef.Name,
+            TsType.Generic generic => generic.Name,
+            _ => null,
+        };
+        return
+            definitionName is not null
+            && typeWalker.Definitions.GetValueOrDefault(definitionName)
+                is { Type: null, AdditionalProperties: not true } definition
+            ? TsEndpointDefinition
+                .RequestBodyProperties(parameters, definition.Properties)
+                .Select(property => property.Name)
+                .ToList()
+            : null;
     }
 
     /// <summary>
@@ -1338,10 +1415,7 @@ public static class ContractWalker
             yield return part.IsFile
                 ? new TsEndpointParam(
                     name,
-                    IsFormFileType(wkt, property.Type)
-                        ? new TsType.Primitive("File")
-                        // List<IFormFile>/IFormFile[]: a multipart array-of-binary part
-                        : new TsType.Array(new TsType.Primitive("File")),
+                    FormBinding.FilePartType(wkt, property.Type),
                     ParamSource.File,
                     IsOptional: !part.Required && typeWalker.IsOptional(property),
                     BodyPropertyName: propertyName
@@ -1361,9 +1435,9 @@ public static class ContractWalker
         $"{httpMethod} {route} (contract '{field.ContainingType.Name}.{field.Name}')";
 
     /// <summary>
-    /// A route, query, header or form-field param lowered from an input member, carrying the member's
-    /// annotations (description, constraints, default, deprecated, example and format) as
-    /// its schema would if the member were a body property. The leaf already holds
+    /// A route, query, header or form-field param lowered from an input member, carrying what
+    /// the member's schema would if it were a body property (<see cref="TypeWalker.AnnotatedParam"/>:
+    /// annotations, schema refs and generated item metadata included). The leaf already holds
     /// [RivetSchemaType] and the format, so the param doesn't pin SchemaType: the emitter's
     /// pinned-leaf path would drop the inferred format the body keeps.
     /// </summary>
@@ -1374,30 +1448,17 @@ public static class ContractWalker
         ParamSource source,
         bool isOptional,
         string? bodyPropertyName = null
-    )
-    {
-        var type = typeWalker.MapType(TypeWalker.GetMemberType(member));
-        var annotations = typeWalker.ReadMemberAnnotations(member, member.ContainingType, type);
-        return new TsEndpointParam(
-            name,
-            annotations.ApplyLeaf(type),
-            source,
-            IsOptional: isOptional,
-            BodyPropertyName: bodyPropertyName,
-            Description: annotations.Description,
-            IsDeprecated: annotations.IsDeprecated,
-            DefaultValue: annotations.DefaultValue,
-            Constraints: annotations.Constraints,
-            SchemaExamples: SchemaExamples(
-                annotations.Example,
-                $"[RivetExample] on '{member.Name}'"
+    ) =>
+        typeWalker.AnnotatedParam(
+            new TsEndpointParam(
+                name,
+                typeWalker.MapType(TypeWalker.GetMemberType(member)),
+                source,
+                IsOptional: isOptional,
+                BodyPropertyName: bodyPropertyName
             ),
-            Format: annotations is { IsFormatSpecified: true, Format: not "" }
-                ? annotations.Format
-                : null,
-            IsFormatSpecified: annotations.IsFormatSpecified
+            member
         );
-    }
 
     /// <summary>
     /// A member's [RivetExample] as the one-item schema <c>examples</c> array a body

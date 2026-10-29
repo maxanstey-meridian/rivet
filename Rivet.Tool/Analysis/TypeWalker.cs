@@ -102,86 +102,14 @@ public sealed class TypeWalker
             }
         }
 
-        // Scalar type → TsType.Primitive lookup
+        // Scalar type → TsType.Primitive lookup, from the table the importer reads too
         var scalars = ImmutableDictionary.CreateBuilder<INamedTypeSymbol, TsType.Primitive>(
             SymbolEqualityComparer.Default
         );
-        AddScalar(scalars, compilation, "System.Guid", new TsType.Primitive("string", "uuid"));
-        AddScalar(
-            scalars,
-            compilation,
-            "System.DateTime",
-            new TsType.Primitive("string", "date-time")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "System.DateTimeOffset",
-            new TsType.Primitive("string", "date-time", "DateTimeOffset")
-        );
-        AddScalar(scalars, compilation, "System.DateOnly", new TsType.Primitive("string", "date"));
-        AddScalar(scalars, compilation, "System.TimeOnly", new TsType.Primitive("string", "time"));
-        AddScalar(scalars, compilation, "System.Uri", new TsType.Primitive("string", "uri"));
-        // TimeSpan: System.Text.Json writes the invariant "c" format
-        // ([-][d.]hh:mm:ss[.fffffff]) as a JSON string, property names included. No JSON
-        // Schema format names it ("duration" is ISO 8601, which STJ refuses), so the
-        // exact type rides on x-rivet-csharp-type.
-        AddScalar(
-            scalars,
-            compilation,
-            "System.TimeSpan",
-            new TsType.Primitive("string", CSharpType: "TimeSpan")
-        );
-        // Int128/UInt128/Half: System.Text.Json (.NET 8+) writes them as JSON numbers. No
-        // OpenAPI format names them, so the exact type rides on x-rivet-csharp-type.
-        AddScalar(
-            scalars,
-            compilation,
-            "System.Int128",
-            new TsType.Primitive("number", CSharpType: "Int128")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "System.UInt128",
-            new TsType.Primitive("number", CSharpType: "UInt128")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "System.Half",
-            new TsType.Primitive("number", CSharpType: "Half")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "System.Text.Json.JsonElement",
-            new TsType.Primitive("unknown", CSharpType: "JsonElement")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "System.Text.Json.Nodes.JsonNode",
-            new TsType.Primitive("unknown", CSharpType: "JsonNode")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "System.Text.Json.Nodes.JsonValue",
-            new TsType.Primitive("unknown", CSharpType: "JsonValue")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "System.Text.Json.JsonDocument",
-            new TsType.Primitive("unknown", CSharpType: "JsonDocument")
-        );
-        AddScalar(
-            scalars,
-            compilation,
-            "Microsoft.AspNetCore.Http.IFormFile",
-            new TsType.Primitive("File")
-        );
+        foreach (var (metadataName, primitive) in BuiltInScalars.FrameworkTypes)
+        {
+            AddScalar(scalars, compilation, metadataName, primitive);
+        }
         _scalarTypes = scalars.ToImmutable();
 
         _jsonObjectType = compilation.GetTypeByMetadataName("System.Text.Json.Nodes.JsonObject");
@@ -1081,8 +1009,12 @@ public sealed class TypeWalker
         {
             RefuseRequiredOmittableMember(member, attributes, context);
         }
-        var annotations = ReadMemberAnnotations(member, attributes, tsType);
-        var (schemaRef, nestedSchemaRefs) = ReadSchemaRefs(attributes);
+        var (annotatedType, annotations, rootMetadata) = Annotate(
+            member,
+            attributes,
+            tsType,
+            context
+        );
 
         // Accessibility-derived asymmetry becomes readOnly/writeOnly on the shared
         // component schema, alongside any explicit [RivetReadOnly]/[RivetWriteOnly].
@@ -1091,28 +1023,9 @@ public sealed class TypeWalker
         var isWriteOnly =
             annotations.IsWriteOnly || memberSurface == JsonPropertySurface.RequestOnly;
 
-        tsType = annotations.ApplyLeaf(tsType);
-
-        if (schemaRef is not null)
-        {
-            tsType = ApplyGeneratedSchemaRef(tsType, schemaRef, $"Property '{context}'");
-        }
-        foreach (var (refPointer, refName) in nestedSchemaRefs)
-        {
-            tsType = ApplyGeneratedSchemaRefAt(
-                tsType,
-                refPointer,
-                refName,
-                $"Property '{context}' at '{refPointer}'"
-            );
-        }
-
-        var generatedSchemaMetadata = ReadGeneratedSchemaMetadata(member);
-        tsType = ApplyGeneratedSchemaMetadata(tsType, "", generatedSchemaMetadata);
-
         return new TsPropertyDefinition(
             tsName,
-            tsType,
+            annotatedType,
             isOptional,
             annotations.IsDeprecated,
             annotations.Format,
@@ -1122,8 +1035,84 @@ public sealed class TypeWalker
             annotations.Example,
             isReadOnly,
             isWriteOnly,
-            generatedSchemaMetadata.GetValueOrDefault("")
+            rootMetadata
         );
+    }
+
+    /// <summary>
+    /// <paramref name="member"/>'s mapped <paramref name="type"/> as its schema carries it, and
+    /// the annotations beside it: <c>[RivetSchemaType]</c> and the format on its leaf, its
+    /// <c>[RivetSchemaRef]</c>s, and the generated metadata on its items and values. The
+    /// generated metadata at the member's own schema comes back apart, since a property
+    /// definition holds it beside the type. A record property and a param lowered from a
+    /// member (<see cref="AnnotatedParam"/>) both read it here, so the two can't drift.
+    /// </summary>
+    private (TsType Type, MemberAnnotations Annotations, TsScalarMetadata? RootMetadata) Annotate(
+        ISymbol member,
+        ImmutableArray<AttributeData> attributes,
+        TsType type,
+        string context
+    )
+    {
+        var annotations = ReadMemberAnnotations(member, attributes, type);
+        var (schemaRef, nestedSchemaRefs) = ReadSchemaRefs(attributes);
+        type = annotations.ApplyLeaf(type);
+
+        if (schemaRef is not null)
+        {
+            type = ApplyGeneratedSchemaRef(type, schemaRef, $"Property '{context}'");
+        }
+        foreach (var (refPointer, refName) in nestedSchemaRefs)
+        {
+            type = ApplyGeneratedSchemaRefAt(
+                type,
+                refPointer,
+                refName,
+                $"Property '{context}' at '{refPointer}'"
+            );
+        }
+
+        var generatedSchemaMetadata = ReadGeneratedSchemaMetadata(member);
+        type = ApplyGeneratedSchemaMetadata(type, "", generatedSchemaMetadata);
+        return (type, annotations, generatedSchemaMetadata.GetValueOrDefault(""));
+    }
+
+    /// <summary>
+    /// <paramref name="param"/> carrying what <paramref name="member"/> says about its schema,
+    /// as the member's schema would if it were a body property (<see cref="Annotate"/>): its
+    /// annotated type, description, constraints, default, deprecated, example and format.
+    /// <paramref name="member"/> is the input property or field a route, query, header or
+    /// form-field param is lowered from (its positional record parameter's attributes count
+    /// too), or the action or handler parameter itself. A <c>[RivetDefault]</c> wins over
+    /// <paramref name="param"/>'s own default (a C# default value, which is source text).
+    /// </summary>
+    public TsEndpointParam AnnotatedParam(TsEndpointParam param, ISymbol member)
+    {
+        var (attributes, context, site) = member is IParameterSymbol parameter
+            ? (
+                parameter.GetAttributes(),
+                $"{parameter.ContainingSymbol.Name}({parameter.Name})",
+                $"[RivetExample] on parameter '{parameter.Name}'"
+            )
+            : (
+                GetWireMemberAttributes(member, member.ContainingType),
+                $"{member.ContainingType.Name}.{member.Name}",
+                $"[RivetExample] on '{member.Name}'"
+            );
+        var (type, annotations, _) = Annotate(member, attributes, param.Type, context);
+        return param with
+        {
+            Type = type,
+            Description = annotations.Description,
+            IsDeprecated = annotations.IsDeprecated,
+            DefaultValue = annotations.DefaultValue ?? param.DefaultValue,
+            Constraints = annotations.Constraints,
+            SchemaExamples = ContractWalker.SchemaExamples(annotations.Example, site),
+            Format = annotations is { IsFormatSpecified: true, Format: not "" }
+                ? annotations.Format
+                : null,
+            IsFormatSpecified = annotations.IsFormatSpecified,
+        };
     }
 
     /// <summary>
@@ -1203,26 +1192,12 @@ public sealed class TypeWalker
     }
 
     /// <summary>
-    /// The annotations on <paramref name="member"/>, a property or field of
-    /// <paramref name="owner"/> (the type being walked or bound, whose positional record
-    /// parameter's attributes count too), whether or not it is a schema member: a
-    /// <c>[RivetHeader]</c> property has them as well. <paramref name="type"/> is the
-    /// member's mapped type; it decides whether a length constraint is an item count.
+    /// The annotations in <paramref name="attributes"/>, those of <paramref name="member"/>
+    /// (a property or field with its positional record parameter's, or a handler parameter),
+    /// whether or not it is a schema member: a <c>[RivetHeader]</c> property has them as well.
+    /// <paramref name="type"/> is the member's mapped type; it decides whether a length
+    /// constraint is an item count.
     /// </summary>
-    public MemberAnnotations ReadMemberAnnotations(
-        ISymbol member,
-        INamedTypeSymbol owner,
-        TsType type
-    ) => ReadMemberAnnotations(member, GetWireMemberAttributes(member, owner), type);
-
-    /// <summary>
-    /// The annotations on a handler or action <paramref name="parameter"/>
-    /// (<c>[FromQuery]</c>, <c>[FromRoute]</c>, <c>[FromHeader]</c> and the like), read as
-    /// a property's are. <paramref name="type"/> is the parameter's mapped type.
-    /// </summary>
-    public MemberAnnotations ReadMemberAnnotations(IParameterSymbol parameter, TsType type) =>
-        ReadMemberAnnotations(parameter, parameter.GetAttributes(), type);
-
     private MemberAnnotations ReadMemberAnnotations(
         ISymbol member,
         ImmutableArray<AttributeData> attributes,
@@ -1383,18 +1358,21 @@ public sealed class TypeWalker
         return new TsTypeMetadata(componentId, provenance);
     }
 
+    private static readonly JsonSerializerOptions _generatedMetadataOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     /// <summary>
-    /// JSON inside a generated attribute the importer wrote; JSON that doesn't read is stale
+    /// JSON inside a generated attribute the importer wrote (schema metadata here, OpenAPI
+    /// provenance in <see cref="OpenApiProvenanceWalker"/>); JSON that doesn't read is stale
     /// or hand-edited generated code (RIV1122), not a crash.
     /// </summary>
-    private static T? DeserializeGeneratedMetadata<T>(string json, string context)
+    internal static T? DeserializeGeneratedMetadata<T>(string json, string context)
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(
-                json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
-            );
+            return JsonSerializer.Deserialize<T>(json, _generatedMetadataOptions);
         }
         catch (JsonException exception)
         {

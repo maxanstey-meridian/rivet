@@ -1,6 +1,7 @@
 namespace Rivet.Tool.Emit;
 
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Rivet.Tool.Model;
 
 public sealed record ExtractionResult(
@@ -41,8 +42,7 @@ public static class InlineTypeExtractor
                 $"G:{Encode(g.Name)}<{string.Join(",", g.TypeArguments.Select(CanonicalHash))}>",
             TsType.TypeParam tp => $"TP:{Encode(tp.Name)}",
             TsType.Brand b => $"B:{Encode(b.Name)}({CanonicalHash(b.Inner)})",
-            // An open or closed object is another shape than an unstated one; an unstated one
-            // keeps the historical hash, so existing names stay stable.
+            // An open or closed object is another shape than an unstated one.
             TsType.InlineObject obj => "IO:{"
                 + string.Join(
                     ",",
@@ -78,19 +78,30 @@ public static class InlineTypeExtractor
     // Every annotation a property or variant carries (its name or tag, optionality,
     // description, constraints, ...) tells two shapes apart: two variants that differ only in
     // a description are two component schemas, not one. Its type is left out, since
-    // CanonicalHash hashes that on its own (an enum's members in any order, say).
-    private static string AnnotationsHash<TRecord>(TRecord record)
+    // CanonicalHash hashes that on its own (an enum's members in any order, say), so the
+    // serializer never writes that subtree here at all.
+    private static readonly JsonSerializerOptions _annotationsOnly = new()
     {
-        var json = JsonSerializer.SerializeToNode(record)!.AsObject();
-        if (!json.Remove(nameof(TsPropertyDefinition.Type)))
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { LeaveOutType } },
+    };
+
+    private static void LeaveOutType(JsonTypeInfo info)
+    {
+        if (
+            info.Type == typeof(TsPropertyDefinition)
+            || info.Type == typeof(TsType.TaggedUnionVariant)
+        )
         {
-            throw new InvalidOperationException(
-                $"{typeof(TRecord).Name} serializes no '{nameof(TsPropertyDefinition.Type)}' to leave out of its annotations hash."
+            info.Properties.Remove(
+                info.Properties.Single(property =>
+                    property.Name == nameof(TsPropertyDefinition.Type)
+                )
             );
         }
-
-        return Encode(json.ToJsonString());
     }
+
+    private static string AnnotationsHash<TRecord>(TRecord record) =>
+        Encode(JsonSerializer.Serialize(record, _annotationsOnly));
 
     public static List<(TsType.InlineObject Type, string Context)> CollectInlineObjects(
         IReadOnlyList<TsEndpointDefinition> endpoints

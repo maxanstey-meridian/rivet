@@ -222,8 +222,7 @@ public static partial class OpenApiImporter
     /// The records a multipart or urlencoded request body binds, and their bases: an
     /// endpoint's input that is <c>.FormEncoded()</c>, that declares a form request content
     /// (a multipart body with no file in it), or that carries a file (which makes it
-    /// multipart). A <c>[RivetRequestBody]</c> type isn't one: generation keeps that body
-    /// whole.
+    /// multipart).
     /// </summary>
     private static HashSet<string> FormInputRecordNames(
         IReadOnlyList<GeneratedRecord> records,
@@ -238,7 +237,6 @@ public static partial class OpenApiImporter
         {
             if (
                 field.InputType?.TrimEnd('?') is not { } inputType
-                || field.RequestBodyType is not null
                 || !byName.TryGetValue(inputType, out var record)
                 || !field.IsFormEncoded
                     // A multipart body with no file in it is a form input too: the walker and
@@ -254,13 +252,14 @@ public static partial class OpenApiImporter
                 continue;
             }
 
-            for (
-                GeneratedRecord? current = record;
-                current is not null && names.Add(current.Name);
+            // The record and every base it derives from bind as form parts.
+            var current = record;
+            while (current is not null && names.Add(current.Name))
+            {
                 current = current.BaseTypeName is { } baseName
-                        ? byName.GetValueOrDefault(baseName)
-                        : null
-            ) { }
+                    ? byName.GetValueOrDefault(baseName)
+                    : null;
+            }
         }
 
         return names;
@@ -451,7 +450,7 @@ public static partial class OpenApiImporter
             }
         );
 
-    private static bool IsSwagger2(JsonObject root) =>
+    internal static bool IsSwagger2(JsonObject root) =>
         StringValue(root["swagger"])?.StartsWith("2.", StringComparison.Ordinal) == true;
 
     /// <summary>
@@ -998,6 +997,18 @@ public static partial class OpenApiImporter
             }
         }
     }
+
+    /// <summary>
+    /// The response the import builds the contract from for <paramref name="response"/>, as
+    /// <see cref="NormalizeLocalPathReferences"/> inlines it: the response itself, a reference
+    /// to anything but a response component resolved, or null for a reference it keeps (a
+    /// response component's fields are its own, kept as raw provenance).
+    /// </summary>
+    internal static JsonObject? InlinedResponse(JsonObject response, JsonObject root) =>
+        !response.ContainsKey("$ref") ? response
+        : ShouldNormalizeReference(response, ComponentResponsesPrefix)
+            ? ResolveReferenceObject(response, root, "response")
+        : null;
 
     private static bool ShouldNormalizeReference(JsonObject value, string componentPrefix) =>
         GetLocalReference(value) is { } reference

@@ -58,13 +58,18 @@ internal static class TsTypeLeaf
         var (marker, kind, removal) = fromBuilderArgument
             ? ($"schemaType: \"{schemaType}\"", "argument", "drop schemaType:")
             : ($"[RivetSchemaType(\"{schemaType}\")]", "attribute", "remove [RivetSchemaType]");
+        // A brand is already a scalar: its wire type is its Value's, so that's what to change.
+        var advice = (type is TsType.Nullable nullable ? nullable.Inner : type)
+            is TsType.Brand brand
+            ? $"To re-type it, change the type of the Value property on '{brand.Name}' (a "
+                + $"[RivetFormat] on '{brand.Name}' sets its format); otherwise {removal}."
+            : "If the type is a string (or another scalar) on the wire, mark it [RivetScalar] with a "
+                + $"single Value property; otherwise {removal}.";
         throw Diagnostics.Error(
             Diagnostics.SchemaTypeOnNonPrimitive,
             $"{marker} on {subject} has no primitive to re-type: "
                 + $"the member maps to {Describe(type)}, not a primitive or a nullable primitive, so "
-                + $"the {kind} would be dropped from the schema. If the type is a string (or another "
-                + $"scalar) on the wire, mark it [RivetScalar] with a single Value property; otherwise "
-                + $"{removal}."
+                + $"the {kind} would be dropped from the schema. {advice}"
         );
     }
 

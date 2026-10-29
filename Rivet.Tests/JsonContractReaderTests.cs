@@ -1134,9 +1134,7 @@ public sealed class JsonContractReaderTests
             }
             """;
 
-        var (_, _, _, brands) = JsonContractReader.Read(json);
-
-        Assert.Equal("Tag", Assert.Single(brands).Key);
+        Assert.Equal("Tag", Assert.Single(JsonContractReader.Read(json).Brands).Key);
     }
 
     [Theory]
@@ -1233,11 +1231,9 @@ public sealed class JsonContractReaderTests
             }
             """;
 
-        var message = Assert
-            .Throws<RivetUserException>(() => JsonContractReader.Read(json))
-            .Message;
+        // The CLI words it as RIV2017 (Cli_Refuses_Malformed_Contract_Json).
+        var message = Assert.Throws<JsonException>(() => JsonContractReader.Read(json)).Message;
 
-        Assert.StartsWith("error RIV2017:", message);
         Assert.Contains("tagged-union variant 'a' (discriminator 'kind')", message);
         Assert.Contains(expected, message);
     }
@@ -1261,13 +1257,30 @@ public sealed class JsonContractReaderTests
               "params": [], "responses": [{ "statusCode": 200 }] }] }
             """;
 
-        var message = Assert
-            .Throws<RivetUserException>(() => JsonContractReader.Read(json))
-            .Message;
+        // The CLI words it as RIV2017 (Cli_Refuses_Malformed_Contract_Json).
+        var message = Assert.Throws<JsonException>(() => JsonContractReader.Read(json)).Message;
 
-        Assert.StartsWith("error RIV2017:", message);
         Assert.Contains($"endpoint 'things.get' (GET {routeTemplate})", message);
         Assert.Contains(expected, message);
+    }
+
+    [Theory]
+    [InlineData("/things/{a}{b}")]
+    [InlineData("/things/{id")]
+    public void A_Route_Template_Routing_Cannot_Read_Fails_With_RIV2017(string routeTemplate)
+    {
+        // Routing's own parser reads the template, so one it refuses is malformed contract
+        // JSON rather than an unmapped RoutePatternException.
+        var json = $$"""
+            { "types": [], "enums": [], "endpoints": [{
+              "name": "get", "httpMethod": "GET", "routeTemplate": "{{routeTemplate}}", "controllerName": "things",
+              "params": [], "responses": [{ "statusCode": 200 }] }] }
+            """;
+
+        var message = Assert.Throws<JsonException>(() => JsonContractReader.Read(json)).Message;
+
+        Assert.Contains($"endpoint 'things.get' (GET {routeTemplate})", message);
+        Assert.Contains("has a routeTemplate routing can't read", message);
     }
 
     [Fact]
@@ -1351,6 +1364,23 @@ public sealed class JsonContractReaderTests
     [InlineData(
         $$"""{ {{GetEndpoint}}, "responses": [{ "statusKey": "ok" }] }""",
         "endpoint 'things.get' has a response with statusKey 'ok'"
+    )]
+    // .NET's $ also matches before a trailing newline; the runtime's rule doesn't.
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "statusKey": "404\n" }] }""",
+        "endpoint 'things.get' has a response with statusKey '404\n'"
+    )]
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "statusKey": "DEFAULT" }] }""",
+        "endpoint 'things.get' has a response with statusKey 'DEFAULT'"
+    )]
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "statusCode": 999 }] }""",
+        "endpoint 'things.get' has a response with statusCode 999"
+    )]
+    [InlineData(
+        $$"""{ {{GetEndpoint}}, "responses": [{ "statusCode": -5 }] }""",
+        "endpoint 'things.get' has a response with statusCode -5"
     )]
     [InlineData(
         """{ "name": "get", "httpMethod": "GET", "routeTemplate": "/api/things", "params": [null], "controllerName": "things", "responses": [{ "statusCode": 200 }] }""",
@@ -1607,6 +1637,16 @@ public sealed class JsonContractReaderTests
     [InlineData("RIV2008", BrandConflictTypes, "[]")]
     [InlineData("RIV2017", UnplaceableVariantTypes, "[]")]
     [InlineData(
+        "RIV2017",
+        "[]",
+        """[{ "name": "get", "httpMethod": "GET", "routeTemplate": "/api/things/{id:int}", "params": [], "controllerName": "things", "responses": [{ "statusCode": 200 }] }]"""
+    )]
+    [InlineData(
+        "RIV2017",
+        "[]",
+        $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 42 }] }]"""
+    )]
+    [InlineData(
         "RIV2010",
         "[]",
         $$"""[{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }, { "statusCode": 200 }] }]"""
@@ -1666,6 +1706,38 @@ public sealed class JsonContractReaderTests
         Assert.Contains("security scheme 'oauth' more than once", stderr);
         Assert.DoesNotContain("ArgumentException", stderr);
         Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
+    }
+
+    [Fact]
+    public void Two_Operations_That_Differ_Only_In_Security_Say_So_At_Emit()
+    {
+        // Contract JSON skips the merge, so the emitter's own RIV2012 guard meets the pair,
+        // and it words a security difference as the merge does.
+        var json = $$"""
+            { "types": [], "enums": [], "endpoints": [
+              { {{GetEndpoint}}, "responses": [{ "statusCode": 200 }] },
+              { "name": "getAnonymously", "httpMethod": "GET", "routeTemplate": "/api/things", "params": [],
+                "controllerName": "things", "responses": [{ "statusCode": 200 }],
+                "security": { "alternatives": [] } }] }
+            """;
+        var contract = JsonContractReader.Read(json);
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            OpenApiEmitter.Emit(
+                contract.Endpoints,
+                new Dictionary<string, TsTypeDefinition>(),
+                new Dictionary<string, TsType.Brand>(),
+                new Dictionary<string, TsType>(),
+                security: null
+            )
+        );
+
+        Assert.StartsWith($"error {Diagnostics.ConflictingOperations}:", exception.Message);
+        Assert.Contains("agree on everything but security", exception.Message);
+        Assert.Contains(
+            "'things.get' declares none, so it inherits the document's, and 'things.getAnonymously' is anonymous",
+            exception.Message
+        );
     }
 
     [Fact]

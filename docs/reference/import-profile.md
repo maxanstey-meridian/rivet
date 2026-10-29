@@ -110,7 +110,11 @@ honest degradation, not full support.
   `camelCase(member)` is not the original key (snake_case keys,
   already-PascalCase keys), the original is pinned with
   `[JsonPropertyName("original_key")]` so neither the runtime serializer nor
-  the re-emitted spec drift. Keys that PascalCase into reserved record
+  the re-emitted spec drift. A form part (a multipart or urlencoded body's
+  property) also gets `[DataMember(Name = "original_key")]` and
+  `[FromForm(Name = "original_key")]`, because neither of ASP.NET's form binders
+  reads `[JsonPropertyName]`: the minimal-API form mapper reads the first, MVC the
+  second. Keys that PascalCase into reserved record
   machinery (`Equals`, `ToString`, `GetHashCode`, `GetType`, `Deconstruct`,
   `EqualityContract`) are renamed with a `Value` suffix — the pin keeps the
   wire name intact. Schema names that collide case-insensitively after
@@ -239,14 +243,20 @@ honest degradation, not full support.
   never becomes a `.WithResponseHeader(...)` (generation would refuse it with
   `RIV2009`, and a required one would have the adapters demand it), and comes back
   verbatim as a preserved field instead, so the re-emitted spec still says what the
-  source said. A response component keeps its own as raw provenance.
+  source said (a Swagger 2 header in OpenAPI 3 shape, its `type` and friends under
+  `schema`, since that's what the emit writes). A response component keeps its own
+  as raw provenance.
 - **Validation metadata on schema properties**: min/max length, pattern,
   ranges, item counts → DataAnnotations / Rivet constraint attributes;
   defaults, formats, descriptions, examples, readOnly/writeOnly. Records
   whose properties carry a `ValidationAttribute` are scaffolded as
   non-positional `required`/`init` records — the MVC-safe placement (see the
   [positional-record gotcha](/guides/runtime-validation#the-positional-record-gotcha));
-  unconstrained records stay positional.
+  unconstrained records stay positional. Form input records are the exception: every
+  record a multipart or urlencoded body binds (a multipart body with no file in it
+  included) is written in the `{ get; init; }` form, constrained or not, because the
+  minimal-API form mapper refuses a request missing any positional constructor
+  argument, nullable or not.
 - **Document provenance**: info/contact/licence, tags and external docs, root and
   scoped servers (including variables), Swagger 2 host/basePath/schemes,
   component examples, operation identity, and request-body descriptions persist
@@ -276,6 +286,22 @@ honest degradation, not full support.
 | `header name=… status=… reason=duplicate-name` | A second spelling of a header already declared on that status (`X-Rate` and `x-rate`); HTTP header names ignore case, so the first wins and this one was dropped. |
 | `header name= status=… reason=empty-name` | Response header with an empty name; it can never be sent, so it was dropped. |
 | `param name=… in=… reason=reserved-member-renamed` | The parameter name maps to reserved C# record machinery and cannot bind under the generated member name; the rename is explicit. |
+
+### The one error: an invalid document (`RIV3032`)
+
+Everything else on this page degrades and says so. An invalid document doesn't:
+import stops with `error RIV3032: invalid OpenAPI document: …` before writing a
+single file, and the message names what's wrong and where. Guessing at what the
+source meant would only move the failure into generation, where it's harder to
+trace. It fires on a document that isn't a JSON object or that the OpenAPI reader
+refuses; a security scheme with no `type` (or missing a field its type needs), or a
+requirement naming no scheme; a component example with both `value` and
+`externalValue` (one or neither is fine); a local reference that targets nothing or
+loops; a required field that's missing or isn't a string; and two path-parameter
+cases. A path template token that no path parameter declares is refused rather
+than typed as a string, since that string is exactly the guess generation's
+`RIV1019` exists to refuse. So is a path parameter with neither a `schema` nor
+`content`, which declares its token in name only. Fix the source document.
 
 ### Warnings (stderr / `ImportResult.Warnings`)
 

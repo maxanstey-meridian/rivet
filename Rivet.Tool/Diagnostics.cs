@@ -88,8 +88,7 @@ public static class Diagnostics
     public const string UnreadableFunctionsHostJson = "RIV1124";
     public const string RouteConstraintContradictsType = "RIV1125";
 
-    // RIV1024-RIV1099 are reserved for extraction diagnostics emitted by the
-    // rivet/php sibling runtime. Native Rivet diagnostics must not use them.
+    // RIV1024-RIV1099 were once reserved for the dropped rivet/php runtime; never reused.
 
     // ----- RIV2xxx: emission -----
     public const string TaggedUnionComponentCollision = "RIV2001";
@@ -516,7 +515,7 @@ public static class Diagnostics
         ),
         [InvalidOpenApiDocument] = new(
             Severity.Error,
-            "The --from-openapi document is invalid: not a JSON object, one the OpenAPI reader refuses, a security scheme missing its type or a field its type needs, a security requirement naming no scheme, a component example with both or neither of value and externalValue, a local reference that targets nothing or loops, a required field missing or mistyped, or an operation whose path template has a token no path parameter declares — import fails before writing anything."
+            "The --from-openapi document is invalid: not a JSON object, one the OpenAPI reader refuses, a security scheme missing its type or a field its type needs, a security requirement naming no scheme, a component example with both value and externalValue, a local reference that targets nothing or loops, a required field missing or mistyped, a path parameter with neither a schema nor content, or an operation whose path template has a token no path parameter declares — import fails before writing anything."
         ),
         [CoverageMissingImplementation] = new(
             Severity.Warning,
@@ -577,11 +576,8 @@ public static class Diagnostics
     /// <c>throw Diagnostics.Error(Diagnostics.X, "...")</c>. Throws
     /// <see cref="InvalidOperationException"/> on a warning ID.
     /// </summary>
-    internal static RivetUserException Error(string id, string message)
-    {
-        Require(id, Severity.Error);
-        return new RivetUserException(Format(id, message));
-    }
+    internal static RivetUserException Error(string id, string message) =>
+        RivetUserException.ForError(id, message);
 
     /// <summary>
     /// Prefixes a collected warning string (e.g. ImportResult.Warnings) with its ID:
@@ -600,7 +596,7 @@ public static class Diagnostics
             ? entry
             : throw new InvalidOperationException($"{id} is not a registered diagnostic ID.");
 
-    private static void Require(string id, Severity severity)
+    internal static void Require(string id, Severity severity)
     {
         var registered = Lookup(id).Severity;
         if (registered != severity)

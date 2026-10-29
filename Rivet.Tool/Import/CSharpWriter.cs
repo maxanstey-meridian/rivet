@@ -892,14 +892,6 @@ internal static class CSharpWriter
             }
         }
 
-        if (field.RequestBodyType is not null)
-        {
-            var requiredArgument = field.RequestBodyRequired is false ? ", false" : "";
-            sb.AppendLine(
-                $"    [RivetRequestBody(typeof({field.RequestBodyType}){requiredArgument})]"
-            );
-        }
-
         // Field type: RouteDefinition<TIn, TOut>, RouteDefinition<TOut>, FileRouteDefinition, etc.
         var fieldType = BuildFieldType(field.InputType, field.OutputType, field.IsFileEndpoint);
         sb.Append($"    public static readonly {fieldType} {field.FieldName} =");

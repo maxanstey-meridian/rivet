@@ -17,9 +17,14 @@ every endpoint needs a token except `Health`, which says `.Anonymous()`, and gen
 `--check` read the same default with no `--security` on either command line. The controller actions carry `[Authorize]`, and the health check is a minimal
 API nobody guards. `Auth/DemoBearerHandler.cs` is the scheme behind it: it lets any non-empty
 token through, from the `Authorization: Bearer` header or, for the `.QueryAuth()` avatar
-endpoint, the `?token=` query parameter a media player can manage. A real app registers
-JwtBearer under the same name and changes nothing else. `--check` compares the two sides, so
-an `[Authorize]` that goes missing is `RIV4008`, not a surprise in production.
+endpoint, the `?token=` query parameter a media player can manage. It runs only in
+Development, so a copied `Program.cs` refuses to start anywhere else rather than let every
+token through. A real app registers its own scheme under the same name, and that scheme
+has to read the query token for `.QueryAuth()` endpoints too: JwtBearer only reads the
+`Authorization` header, so it needs a `JwtBearerEvents.OnMessageReceived` that sets
+`context.Token` from `?token=`, or the avatar endpoint answers every player with a 401.
+`--check` compares the two sides, so an `[Authorize]` that goes missing is `RIV4008`, not a
+surprise in production.
 
 ## Run
 
@@ -36,6 +41,9 @@ dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csp
 
 # Drift gate: exit 1 if the written spec no longer matches the compiled C#
 dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract --verify
+
+# Boot the API itself; Properties/launchSettings.json makes it Development, the only place it runs
+dotnet run --project samples/ContractApi
 ```
 
 All commands should be run from the repository root.

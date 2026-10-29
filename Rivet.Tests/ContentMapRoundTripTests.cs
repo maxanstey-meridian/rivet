@@ -231,7 +231,7 @@ public sealed class ContentMapRoundTripTests
             walker.Enums.ToDictionary(),
             walked
         );
-        var (types, enums, endpoints, brands) = JsonContractReader.Read(contractJson);
+        var (types, enums, endpoints, brands, _) = JsonContractReader.Read(contractJson);
         var openApi = OpenApiEmitter.Emit(
             endpoints,
             types.ToDictionary(type => type.Name),
@@ -937,7 +937,7 @@ public sealed class ContentMapRoundTripTests
             walker.Enums.ToDictionary(),
             walked
         );
-        var (types, enums, endpoints, brands) = JsonContractReader.Read(contractJson);
+        var (types, enums, endpoints, brands, _) = JsonContractReader.Read(contractJson);
         var openApi = OpenApiEmitter.Emit(
             endpoints,
             types.ToDictionary(type => type.Name),

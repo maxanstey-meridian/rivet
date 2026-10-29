@@ -21,16 +21,33 @@ record behind `.FormEncoded()` is a form too, just without the files. Either way
 properties count, and which become parts, is one list, read the way ASP.NET's form binders
 read it, so a file that makes the body multipart is always one of its parts:
 
-- the public instance properties, along the whole base chain, a base class from a NuGet
-  package included;
+- the instance properties with a public getter, along the whole base chain, a base class
+  from a NuGet package included (both binders list members through their getters, so a
+  `{ private get; set; }` property is invisible to them);
 - a derived property hides its base's of the same name, whatever its accessibility, so an
   `internal new string File` takes the base's `IFormFile File` out of the form, as it
   does at runtime;
 - `[JsonIgnore]` doesn't count, because the form binders never read it: an ignored
   `IFormFile` is still a part, and so is an ignored text field;
 - route-bound and `[RivetHeader]` properties are left to the route and the headers, a
-  `[RivetReadOnly]` field is never sent, and a `[JsonExtensionData]` bag or a property
-  nothing can set (a computed `=> ...`, a private setter) sends no part at all.
+  `[RivetReadOnly]` field is never sent, and a `[JsonExtensionData]` bag or a field nothing
+  can set (a computed `=> ...`, a private setter) sends no part at all;
+- a file nothing can set is refused (`RIV1100`) rather than left out, since it would still
+  make the body multipart for a part no binder reads. Give it a public setter or an `init`.
+
+Which members a binder sets depends on how it creates the type, and the two don't agree:
+
+- **MVC** calls a record's one public constructor when every parameter matches a property
+  by its exact name and type, and otherwise needs a public parameterless constructor. A
+  class whose only constructor takes parameters fails every request.
+- **The form mapper** calls a type's one public constructor, whatever it is. Give it two
+  and it binds nothing at all.
+- MVC skips a `[BindNever]` member; the form mapper skips an `[IgnoreDataMember]` one.
+  Each ignores the other's attribute.
+
+So a form input a host can't create stops generation with `RIV1100`, and on a contract so
+does a member only one host skips. Skip a member for both, with both attributes, and it's
+simply no part.
 
 The body `$ref`s the input's component when the component lists exactly those parts under
 the same names, and is spelled out inline when it doesn't (a file on a package base the
@@ -38,10 +55,12 @@ type walk stops at, an ignored member, a property bound to the route, a part who
 isn't its JSON name). Inline, each part still carries its property's schema and
 annotations (description, bounds, default, example) as it would in a JSON body.
 
-On a controller, a `[FromForm]` record parameter goes the same way: its members become the
-parts, so a record with an `IFormFile` in it makes the body multipart instead of a
-urlencoded body that can't carry a file. A `Name =` on the parameter is a prefix MVC then
-reads every part under (`[FromForm(Name = "p")] UploadForm form` wants `p.Title`).
+On a `[RivetEndpoint]` method, a `[FromForm]` record parameter goes the same way: its members
+become the parts, so a record with an `IFormFile` in it makes the body multipart instead of a
+urlencoded body that can't carry a file. An instance method is an MVC action, and a `Name =`
+on the parameter is a prefix MVC then reads every part under
+(`[FromForm(Name = "p")] UploadForm form` wants `p.Title`). A static method is a minimal-API
+handler, whose form mapper never prefixes: it wants `Title` either way.
 
 ### Part names
 
@@ -76,8 +95,9 @@ A rename only one binder reads would leave the other host binding nothing, and n
 part name in the spec can be right for both, so generation stops with `RIV1100` instead of
 picking one. So does a form member with a `[FromQuery]`, `[FromRoute]`, `[FromHeader]` or
 `[FromBody]` of its own: MVC would read it from there, the form mapper from the form. A
-`[RivetEndpoint]` action only ever runs on MVC, so there a `[FromForm(Name = ...)]` alone is
-enough, and a `[DataMember]` is ignored, as MVC ignores it.
+`[RivetEndpoint]` method has one host, so it needs one host's rename: an instance method
+runs on MVC, where a `[FromForm(Name = ...)]` alone is enough and a `[DataMember]` is
+ignored; a static one runs on the minimal-API form mapper, where it's the other way round.
 
 `--from-openapi` writes exactly that pair for a form part whose name isn't its property's
 (`file_name`, `x-meta`), beside the `[JsonPropertyName]`, and writes form inputs in the
@@ -89,7 +109,8 @@ constructor-bound part as `required`, `[RivetOptional]` or nullable as it may be
 that's the only request both hosts accept: MVC would bind a missing one as `null`, the form
 mapper answers `400`. The record's component still calls the member optional (a JSON body
 really can leave it out), so such a body is spelled out inline rather than `$ref`'d. A
-`[RivetEndpoint]` action only runs on MVC and keeps the member's own optionality. If a part
+static `[RivetEndpoint]` method runs on the form mapper alone and lists them as required
+too; an instance one runs on MVC alone and keeps the member's own optionality. If a part
 should genuinely be optional on the wire, make it an `init` property instead of a
 constructor parameter.
 

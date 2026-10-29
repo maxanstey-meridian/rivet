@@ -35,10 +35,11 @@ Verified limits of the current tool, so you don't discover them in production.
   oversight. Moving the check into an `OnStarting` callback of Rivet's own doesn't
   help: the callbacks run last-registered-first, and the handler registers after the
   middleware, so Rivet's would run before the middleware's and still see no header.
-  The only real fix is a `UseRivet()` middleware registered first in every host, whose
-  callback would then run last. That's a new pipeline requirement for every app, for
-  a header style that's rare in practice, so it stays refused: set the header in the
-  handler, or in middleware before the handler returns, and it counts.
+  The only real fix would be a new middleware of Rivet's (call it `UseRivet()`; it
+  doesn't exist) that every host registered first, so its callback ran last. That's a
+  new pipeline requirement for every app, for a header style that's rare in practice,
+  so it stays refused: set the header in the handler, or in middleware before the
+  handler returns, and it counts.
 - Host effects such as authentication challenges, sign-out cookies, and dynamic
   response headers happen through ordinary ASP.NET APIs before returning a
   matching bodyless terminal. Rivet preserves an already-started matching
@@ -69,17 +70,23 @@ Verified limits of the current tool, so you don't discover them in production.
   middleware are invisible to it.
 - Route constraints are read from the template: the built-in ones type a path
   parameter and bound it, and one that contradicts its member stops generation
-  (`RIV1125`). Custom route constraints you register in code, and `required`, add
-  nothing to the spec; Rivet reads the built-in ones only. A `regex(...)` constraint's
-  pattern is copied in .NET syntax with its letters case-folded (routing matches it
-  ignoring case, and a JSON Schema pattern has no flags); .NET-only constructs (class
-  subtraction, inline options) pass through as written.
-- A form part's name is what both of ASP.NET's form binders read: the C# name, or a
-  rename both are given (`[DataMember(Name)]` for the minimal-API form mapper,
-  `[FromForm(Name)]` for MVC). `[JsonPropertyName]` doesn't name a form part, and a
-  rename only one binder reads is refused (`RIV1100`), because a contract can be served
-  by either host. Only top-level parts are named this way; a nested complex member
-  keeps `Inner.Value`.
+  (`RIV1125`). Custom route constraints you register in code add nothing to the spec,
+  and neither do three built-in ones: `required` (every path parameter already is),
+  and `file` and `nonfile`, which test for a file-name shape no schema keyword can
+  say. A `regex(...)` constraint's pattern is copied in .NET syntax with its letters
+  case-folded (routing matches it ignoring case, and a JSON Schema pattern has no
+  flags); .NET-only constructs (class subtraction, inline options) pass through as
+  written. Only ASCII letters written as themselves fold, so an escaped letter
+  (`\x4a`) or a non-ASCII one matches one case in the spec and both at runtime.
+- A form part's name is what the form binders that can serve the endpoint read: the C#
+  name, or a rename each is given (`[DataMember(Name)]` for the minimal-API form mapper,
+  `[FromForm(Name)]` for MVC). `[JsonPropertyName]` doesn't name a form part. A contract
+  can be served by either host, so a rename only one binder reads is refused
+  (`RIV1100`), and so is a member only one of them skips (`[BindNever]` or
+  `[IgnoreDataMember]`) or a type only one of them can create. A `[RivetEndpoint]`
+  method has one host: an instance method is an MVC action and a static one a
+  minimal-API handler, and its parts are named as that host reads them. Only top-level
+  parts are named this way; a nested complex member keeps `Inner.Value`.
 - The spec reflects *declared* C# types and the default System.Text.Json
   conventions. `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies emit as
   `oneOf` + `discriminator`, and polymorphism that skips them doesn't get past the
@@ -128,11 +135,12 @@ Rather than publish a spec whose own values get refused, Rivet refuses the
 combination:
 
 - **`RIV4005`** (`--check`): a handler implementing a contract binds an enum from the
-  route, query, header or form, and not every wire value will bind on that host.
+  route, query, header, or form, and not every wire value will bind on that host.
   Minimal APIs need each value to equal its member name exactly; MVC needs it to
   equal ignoring case. An Azure Functions handler takes no name at all: the worker
-  fills an enum parameter from the route or the query by parsing the raw text as JSON, and an
-  unquoted name isn't JSON, so only a plain enum (or a `string`) binds there.
+  fills an enum parameter from the route or the query by parsing the raw text as JSON, and
+  only an integer survives that, never a member name, quoted or not. So only a plain enum
+  (or a `string`) binds there.
 
   A parameter the host reads as a JSON body is left alone, and so are `[FromServices]`
   and, on MVC, a parameter or enum with an explicit `[ModelBinder]`. On a minimal API an

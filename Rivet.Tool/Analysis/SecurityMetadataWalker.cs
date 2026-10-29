@@ -171,13 +171,19 @@ internal static class SecurityMetadataWalker
     private static IReadOnlyList<string> ReadStrings(TypedConstant argument) =>
         argument.Values.Select(value => value.Value as string ?? "").ToList();
 
+    // By name only, as ParseFlowType reads flows: Enum.TryParse would also take a number
+    // ("1" is header) and a comma-joined list, and the spec would say "in": "7".
     private static SecurityApiKeyLocation ParseLocation(string value, string schemeName) =>
-        Enum.TryParse<SecurityApiKeyLocation>(value, ignoreCase: true, out var location)
-            ? location
-            : throw Diagnostics.Error(
+        value.ToLowerInvariant() switch
+        {
+            "query" => SecurityApiKeyLocation.Query,
+            "header" => SecurityApiKeyLocation.Header,
+            "cookie" => SecurityApiKeyLocation.Cookie,
+            _ => throw Diagnostics.Error(
                 Diagnostics.InvalidSecuritySchemeMetadata,
                 $"Rivet apiKey security scheme '{schemeName}' has unsupported location '{value}'."
-            );
+            ),
+        };
 
     private static OAuth2FlowType ParseFlowType(string value, string schemeName) =>
         value switch

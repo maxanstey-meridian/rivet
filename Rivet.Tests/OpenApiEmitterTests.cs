@@ -2651,6 +2651,43 @@ public sealed class OpenApiEmitterTests
         Assert.Contains("endpoint 'things.edited'", exception.Message);
     }
 
+    [Theory]
+    [InlineData("https://example.com/thing.json", "an externalValue where this one has a value")]
+    [InlineData(null, "no value where this one has one")]
+    public void An_Endpoint_Example_Valuing_An_Authored_Component_With_No_Value_Fails_With_RIV2015(
+        string? externalValue,
+        string expected
+    )
+    {
+        // OpenAPI makes value and externalValue both optional, so an authored component can
+        // hold either or neither; the conflict says which.
+        var provenance = new OpenApiDocumentProvenance(
+            new OpenApiInfoProvenance("Examples", "1.0.0"),
+            [],
+            null,
+            [],
+            [
+                new OpenApiComponentExampleProvenance(
+                    "thing",
+                    "Documented",
+                    null,
+                    null,
+                    externalValue
+                ),
+            ]
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitEndpoints(
+                [EndpointWithComponentExample("valued", ComponentExample("1"))],
+                provenance
+            )
+        );
+
+        Assert.StartsWith("error RIV2015:", exception.Message);
+        Assert.Contains($"with {expected}", exception.Message);
+    }
+
     [Fact]
     public void Embedded_Component_Examples_With_Different_Values_Fail_With_RIV2015()
     {
@@ -3261,6 +3298,163 @@ public sealed class OpenApiEmitterTests
         );
 
         Assert.Contains("duplicate --security scheme name 'admin'", exception.Message);
+    }
+
+    /// <summary>
+    /// A form binder neither fills a [JsonExtensionData] bag nor refuses a field it doesn't
+    /// bind, so a form body states no additionalProperties: an input whose JSON is open or
+    /// closed is spelled out inline rather than referencing its component, whose parts it
+    /// otherwise matches.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "[JsonExtensionData] public Dictionary<string, JsonElement> Extra { get; init; } = [];",
+        ""
+    )]
+    [InlineData("", "[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]")]
+    public void A_Form_Body_States_No_AdditionalProperties(string bag, string typeAttribute)
+    {
+        var source = $$"""
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            {{typeAttribute}}
+            public sealed class LoginForm
+            {
+                public string Email { get; init; } = "";
+                {{bag}}
+            }
+
+            [RivetType]
+            public sealed record LoginResult(string Token);
+
+            [RivetContract]
+            public static class AuthContract
+            {
+                public static readonly RouteDefinition<LoginForm, LoginResult> Login =
+                    Define.Post<LoginForm, LoginResult>("/api/login").FormEncoded();
+            }
+            """;
+
+        using var document = CompilationHelper.EmitOpenApi(source);
+        var schema = document
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/login")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded")
+            .GetProperty("schema");
+
+        Assert.False(schema.TryGetProperty("$ref", out _));
+        Assert.False(schema.TryGetProperty("additionalProperties", out _));
+        Assert.Equal(
+            ["email"],
+            schema.GetProperty("properties").EnumerateObject().Select(property => property.Name)
+        );
+        // The component keeps its JSON stance.
+        Assert.True(
+            document
+                .RootElement.GetProperty("components")
+                .GetProperty("schemas")
+                .GetProperty("LoginForm")
+                .TryGetProperty("additionalProperties", out _)
+        );
+    }
+
+    /// <summary>
+    /// G.12: a generic only a brand's inner type or a preserved request-body component uses is
+    /// still named and built. A miss throws (no fallback name), so each root is pinned.
+    /// </summary>
+    [Theory]
+    [InlineData("brand")]
+    [InlineData("requestBody")]
+    public void A_Generic_Only_A_Brand_Or_A_RequestBody_Component_Uses_Is_Built(string root)
+    {
+        var box = new TsType.Generic("Box", [new TsType.Primitive("string")]);
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Box"] = new(
+                "Box",
+                ["T"],
+                [new TsPropertyDefinition("value", new TsType.TypeParam("T"), false)]
+            ),
+        };
+        var brands = new Dictionary<string, TsType.Brand>();
+        OpenApiDocumentInfo? documentInfo = null;
+        if (root == "brand")
+        {
+            brands["BoxedName"] = new TsType.Brand("BoxedName", box);
+        }
+        else
+        {
+            documentInfo = new OpenApiDocumentInfo(
+                Provenance: new OpenApiDocumentProvenance(
+                    new OpenApiInfoProvenance("API", "1"),
+                    [],
+                    null,
+                    [],
+                    [],
+                    ComponentRequestBodies:
+                    [
+                        new OpenApiComponentRequestBodyProvenance(
+                            "BoxBody",
+                            null,
+                            true,
+                            [new OpenApiRequestBodyContentProvenance("application/json", null, box)]
+                        ),
+                    ]
+                )
+            );
+        }
+
+        using var doc = EmitOpenApiFromModel(
+            [
+                new TsEndpointDefinition(
+                    "ping",
+                    "GET",
+                    "/ping",
+                    [],
+                    null,
+                    "ping",
+                    [new TsResponseType(204, null)]
+                ),
+            ],
+            definitions,
+            brands,
+            new Dictionary<string, TsType>(),
+            documentInfo: documentInfo
+        );
+
+        var components = doc.RootElement.GetProperty("components");
+        var reference = (
+            root == "brand"
+                ? components.GetProperty("schemas").GetProperty("BoxedName")
+                : components
+                    .GetProperty("requestBodies")
+                    .GetProperty("BoxBody")
+                    .GetProperty("content")
+                    .GetProperty("application/json")
+                    .GetProperty("schema")
+        )
+            .GetProperty("$ref")
+            .GetString()!;
+        var name = reference["#/components/schemas/".Length..];
+        Assert.Equal(
+            "string",
+            components
+                .GetProperty("schemas")
+                .GetProperty(name)
+                .GetProperty("properties")
+                .GetProperty("value")
+                .GetProperty("type")
+                .GetString()
+        );
     }
 
     [Fact]

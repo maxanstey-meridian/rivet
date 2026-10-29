@@ -164,7 +164,6 @@ internal sealed record GeneratedEndpointField(
     string? BinaryRequestContentType = null,
     string? RequestContentType = null,
     string? ResponseContentType = null,
-    string? RequestBodyType = null,
     bool? RequestBodyRequired = null,
     bool RequestBodyPresent = false,
     IReadOnlyList<GeneratedMediaTypeContent>? RequestContents = null,
