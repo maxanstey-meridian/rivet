@@ -352,7 +352,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
-                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments");
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId:guid}/comments");
             }
             """;
 
@@ -389,7 +389,7 @@ public sealed class ContractEndpointTests
             public static class TestContract
             {
                 public static readonly InputRouteDefinition<ItemRequest> AddItem = Define
-                    .Post("/api/collections/{id}/items")
+                    .Post("/api/collections/{id:guid}/items")
                     .Accepts<ItemRequest>()
                     .Status(204);
             }
@@ -428,7 +428,7 @@ public sealed class ContractEndpointTests
             public static class TestContract
             {
                 public static readonly InputRouteDefinition<ItemRequest> RemoveItem = Define
-                    .Delete("/api/collections/{id}/items")
+                    .Delete("/api/collections/{id:guid}/items")
                     .Accepts<ItemRequest>();
             }
             """;
@@ -468,7 +468,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
-                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId:guid}/comments")
                         .RequestExampleJson("{\"text\":\"hello\"}");
             }
             """;
@@ -502,7 +502,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem");
             }
@@ -538,7 +538,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem")
                         .Returns<ValidationProblemDto>(422);
             }
@@ -568,7 +568,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem");
             }
             """;
@@ -635,7 +635,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .ResponseContent<Problem>(404, "application/problem+json")
                         .ResponseExampleJson(404, "{\"title\":\"Not found\"}"{{mediaTypeArgument}})
                         .WithResponseHeader(404, "X-Trace-Id");
@@ -714,7 +714,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .ResponseContent<Problem>(404, "application/problem+json")
                         {{extraContent}}
                         .ResponseExampleJson(404, "{\"title\":\"Not found\"}"{{mediaTypeArgument}});
@@ -746,7 +746,7 @@ public sealed class ContractEndpointTests
             [RivetContract]
             {{classDeclaration}} TasksContract
             {
-                {{fieldDeclaration}} GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+                {{fieldDeclaration}} GetTask = Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -777,7 +777,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleJson(422, "{\"message\":\"Validation failed\"}", name: "validationProblem")
                         .ResponseExampleJson(422, "{\"message\":\"Already archived\"}", name: "archivedProblem");
@@ -814,7 +814,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleJson(
                             422,
@@ -852,7 +852,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleRef(
                             422,
@@ -892,7 +892,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<ProblemDto>(422)
                         .ResponseExampleRef(
                             422,
@@ -933,7 +933,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
-                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId:guid}/comments")
                         .RequestExampleRef(
                             "create-comment",
                             "{\"text\":\"hello\"}",
@@ -1034,7 +1034,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
-                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId:guid}/comments")
                         .RequestExampleJson("{\"text\":\"hello\"}", name: "inline")
                         .RequestExampleRef("create-comment", "{\"text\":\"bonjour\"}", name: "refBacked");
             }
@@ -1077,7 +1077,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
-                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId:guid}/comments")
                         .RequestExampleJson(
                             "{\"text\":\"hello\"}",
                             name: "commentExample",
@@ -1112,7 +1112,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
-                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId:guid}/comments")
                         .RequestExampleRef(
                             "create-comment",
                             "{\"text\":\"hello\"}",
@@ -1478,7 +1478,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<CreateCommentInput, CommentDto> CreateComment =
-                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId}/comments")
+                    Define.Post<CreateCommentInput, CommentDto>("/api/tasks/{taskId:guid}/comments")
                         .RequestExampleRef("create-comment")
                         .Returns<ValidationProblemDto>(422)
                         .ResponseExampleRef(422, "validation-problem");
@@ -1505,7 +1505,7 @@ public sealed class ContractEndpointTests
             public static class DocumentsContract
             {
                 public static readonly RouteDefinition Download =
-                    Define.Get("/api/documents/{id}")
+                    Define.Get("/api/documents/{id:guid}")
                         .ProducesFile("application/pdf")
                         .ResponseExampleRef(200, "document-example", "{\"href\":\"/api/documents/123\"}", name: "document");
             }
@@ -1539,7 +1539,7 @@ public sealed class ContractEndpointTests
             public static class DocumentsContract
             {
                 public static readonly RouteDefinition Download =
-                    Define.Get("/api/documents/{id}")
+                    Define.Get("/api/documents/{id:guid}")
                         .ProducesFile("application/pdf")
                         .Returns<JobDto>(202)
                         .ResponseExampleJson(202, "{\"id\":\"job-1\"}", name: "job");
@@ -1570,7 +1570,7 @@ public sealed class ContractEndpointTests
             public static class DocumentsContract
             {
                 public static readonly RouteDefinition Download =
-                    Define.Get("/api/documents/{id}")
+                    Define.Get("/api/documents/{id:guid}")
                         .ProducesFile("application/pdf")
                         .Returns<ProblemDto>(422)
                         .ResponseExampleJson(422, "{\"title\":\"Bad request\"}", name: "problem");
@@ -1631,7 +1631,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition DeleteTask =
-                    Define.Delete("/api/tasks/{id}");
+                    Define.Delete("/api/tasks/{id:guid}");
             }
             """;
 
@@ -1669,7 +1669,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<NotFoundDto>(404);
             }
             """;
@@ -1743,7 +1743,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<NotFoundDto>(404)
                         .Returns<ConflictDto>(409);
             }
@@ -1857,7 +1857,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -1915,7 +1915,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Description("Retrieve a single task by ID");
             }
             """;
@@ -1942,7 +1942,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -1971,7 +1971,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
             """;
@@ -2009,7 +2009,7 @@ public sealed class ContractEndpointTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Description("Retrieve a task")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
@@ -2390,7 +2390,7 @@ public sealed class ContractEndpointTests
             public static class UsersContract
             {
                 public static readonly RouteDefinition<AvatarResult> UploadAvatar =
-                    Define.Post<AvatarResult>("/api/users/{id}/avatar")
+                    Define.Post<AvatarResult>("/api/users/{id:guid}/avatar")
                         .AcceptsFile()
                         .Description("Upload a profile picture");
             }
@@ -2424,7 +2424,7 @@ public sealed class ContractEndpointTests
             public static class DocumentsContract
             {
                 public static readonly RouteDefinition GetDocument =
-                    Define.Get("/api/documents/{id}")
+                    Define.Get("/api/documents/{id:guid}")
                         .Description("Download a document")
                         .ProducesFile("application/octet-stream")
                         .Returns<ErrorDto>(404, "Document not found");
@@ -2456,7 +2456,7 @@ public sealed class ContractEndpointTests
             public static class FilesContract
             {
                 public static readonly RouteDefinition Download =
-                    Define.Get("/api/files/{id}")
+                    Define.Get("/api/files/{id:guid}")
                         .ProducesFile();
             }
             """;
@@ -2482,7 +2482,7 @@ public sealed class ContractEndpointTests
             public static class DocumentsContract
             {
                 public static readonly RouteDefinition GetDocument =
-                    Define.Get("/api/documents/{id}")
+                    Define.Get("/api/documents/{id:guid}")
                         .ProducesFile("application/pdf")
                         .Returns<ErrorDto>(404, "Not found");
             }
@@ -2521,7 +2521,7 @@ public sealed class ContractEndpointTests
             public static class FilesContract
             {
                 public static readonly RouteDefinition<byte[]> Download =
-                    Define.Get<byte[]>("/api/files/{id}")
+                    Define.Get<byte[]>("/api/files/{id:guid}")
                         .Description("Download a file")
                         .Returns<ErrorDto>(404, "Not found");
             }
@@ -2556,7 +2556,7 @@ public sealed class ContractEndpointTests
             public static class FilesContract
             {
                 public static readonly RouteDefinition<byte[]> Download =
-                    Define.Get<byte[]>("/api/files/{id}")
+                    Define.Get<byte[]>("/api/files/{id:guid}")
                         .ProducesFile("application/pdf");
             }
             """;
@@ -2580,7 +2580,7 @@ public sealed class ContractEndpointTests
             public static class FilesContract
             {
                 public static readonly RouteDefinition<byte[]> Download =
-                    Define.Get<byte[]>("/api/files/{id}");
+                    Define.Get<byte[]>("/api/files/{id:guid}");
             }
             """;
 
@@ -2617,7 +2617,7 @@ public sealed class ContractEndpointTests
             {
                 [ProducesFile]
                 public static readonly RouteDefinition<(byte[] Content, string FileName)> Download =
-                    Define.Get<(byte[] Content, string FileName)>("/api/files/{id}")
+                    Define.Get<(byte[] Content, string FileName)>("/api/files/{id:guid}")
                         .Description("Download a file");
             }
             """;
@@ -2644,7 +2644,7 @@ public sealed class ContractEndpointTests
             {
                 [ProducesFile]
                 public static readonly RouteDefinition<(byte[] Content, string FileName)> Download =
-                    Define.Get<(byte[] Content, string FileName)>("/api/files/{id}");
+                    Define.Get<(byte[] Content, string FileName)>("/api/files/{id:guid}");
             }
             """;
 
@@ -2677,7 +2677,7 @@ public sealed class ContractEndpointTests
             {
                 [ProducesFile]
                 public static readonly RouteDefinition<byte[]> Download =
-                    Define.Get<byte[]>("/api/files/{id}");
+                    Define.Get<byte[]>("/api/files/{id:guid}");
             }
             """;
 
@@ -2841,7 +2841,7 @@ public sealed class ContractEndpointTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto, ItemDto> Update =
-                    Define.Put<ItemDto, ItemDto>("/api/items/{id}")
+                    Define.Put<ItemDto, ItemDto>("/api/items/{id:guid}")
                         .Returns(404, "Not found")
                         .Returns(409);
             }
@@ -2877,7 +2877,7 @@ public sealed class ContractEndpointTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto, ItemDto> Update =
-                    Define.Put<ItemDto, ItemDto>("/api/items/{id}")
+                    Define.Put<ItemDto, ItemDto>("/api/items/{id:guid}")
                         .Returns(404);
             }
             """;
@@ -2935,7 +2935,7 @@ public sealed class ContractEndpointTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/items/{id}");
+                    Define.Get<ItemDto>("/api/items/{id:guid}");
             }
             """;
 
@@ -2972,7 +2972,7 @@ public sealed class ContractEndpointTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition DeleteItem =
-                    Define.Delete("/api/items/{id}");
+                    Define.Delete("/api/items/{id:guid}");
             }
             """;
 
@@ -2995,7 +2995,7 @@ public sealed class ContractEndpointTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<DeletedDto> DeleteItem =
-                    Define.Delete<DeletedDto>("/api/items/{id}");
+                    Define.Delete<DeletedDto>("/api/items/{id:guid}");
             }
             """;
 
@@ -3060,10 +3060,12 @@ public sealed class ContractEndpointTests
         var ep = Assert.Single(endpoints);
         Assert.True(ep.IsFormEncoded);
         // .FormEncoded() declares the body, so even a DELETE's input is the form, not the
-        // query (RequestInputLowering; the runtime binds it the same way).
-        var body = Assert.Single(ep.Params);
-        Assert.Equal(ParamSource.Body, body.Source);
-        Assert.Equal(["email", "password"], ep.FormFieldNames);
+        // query (RequestInputLowering; the runtime binds it the same way). Its fields are
+        // the members the form binders bind.
+        Assert.Equal(
+            [("email", ParamSource.FormField), ("password", ParamSource.FormField)],
+            ep.Params.Select(param => (param.Name, param.Source))
+        );
     }
 
     [Fact]
@@ -3105,7 +3107,7 @@ public sealed class ContractEndpointTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/items/{id}")
+                    Define.Get<ItemDto>("/api/items/{id:guid}")
                         .Summary("Get an item")
                         .Description("Retrieves a single item by its unique identifier");
             }
@@ -3133,7 +3135,7 @@ public sealed class ContractEndpointTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/items/{id}")
+                    Define.Get<ItemDto>("/api/items/{id:guid}")
                         .Summary("Get an item")
                         .Description("Retrieves a single item by its unique identifier");
             }

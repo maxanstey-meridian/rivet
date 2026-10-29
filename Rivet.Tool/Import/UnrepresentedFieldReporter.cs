@@ -168,7 +168,44 @@ internal static class UnrepresentedFieldReporter
                 var responsePointer = $"{operationPointer}/responses/{JsonPointer.Escape(status)}";
                 Preserve(preserved, response, responsePointer, "links");
                 PreserveMediaEncodings(response, responsePointer, preserved);
+                PreserveIgnoredResponseHeaders(response, responsePointer, preserved);
             }
+        }
+    }
+
+    /// <summary>
+    /// A response header named <c>Content-Type</c> is one OpenAPI says to ignore, so the
+    /// contract leaves it out and it comes back verbatim: under the emitted headers when the
+    /// response keeps others, or as the response's whole <c>headers</c> when it was the only one.
+    /// </summary>
+    private static void PreserveIgnoredResponseHeaders(
+        JsonObject response,
+        string responsePointer,
+        List<OpenApiPreservedFieldProvenance> preserved
+    )
+    {
+        if (response["headers"] is not JsonObject headers)
+        {
+            return;
+        }
+        var ignored = headers
+            .Where(header =>
+                OpenApiStructure.IsReservedHeaderName(header.Key, isResponseHeader: true)
+            )
+            .Select(header => header.Key)
+            .ToList();
+        if (ignored.Count == 0)
+        {
+            return;
+        }
+        if (ignored.Count == headers.Count)
+        {
+            Preserve(preserved, response, responsePointer, "headers");
+            return;
+        }
+        foreach (var name in ignored)
+        {
+            Preserve(preserved, headers, $"{responsePointer}/headers", name);
         }
     }
 

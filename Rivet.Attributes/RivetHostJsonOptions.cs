@@ -201,7 +201,7 @@ internal static class RivetHostJsonOptions
     /// off the type info; .NET 8 doesn't expose them there, so it reflects on the
     /// <c>IEnumerable&lt;T&gt;</c> the type implements.
     /// </summary>
-    private static Type[] ItemTypes(JsonTypeInfo info)
+    internal static Type[] ItemTypes(JsonTypeInfo info)
     {
 #if NET9_0_OR_GREATER
         return [.. new[] { info.KeyType, info.ElementType }.OfType<Type>()];
@@ -377,7 +377,7 @@ internal static class RivetHostJsonOptions
         };
 
     /// <summary>A type as C# spells it, without namespaces: <c>Dictionary&lt;string, Shape?&gt;</c>.</summary>
-    private static string Name(Type type)
+    internal static string Name(Type type)
     {
         if (type.IsArray)
         {

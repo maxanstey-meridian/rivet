@@ -57,8 +57,10 @@ internal static class FunctionsHostConfiguration
                         or UnauthorizedAccessException
             )
         {
-            throw new RivetUserException(
-                $"Cannot read Functions route prefix from {path}: {exception.Message}"
+            throw Diagnostics.Error(
+                Diagnostics.UnreadableFunctionsHostJson,
+                $"cannot read the Functions route prefix from {path}: {exception.Message} "
+                    + "Fix host.json, so --check compares routes under the prefix the host really uses."
             );
         }
     }

@@ -392,6 +392,14 @@ internal static class SchemaClassifier
 
     // --- Extension readers ---
 
+    /// <summary>
+    /// Whether <paramref name="schema"/> writes <c>additionalProperties</c> as <c>{}</c> or a
+    /// schema. Left out (or <c>true</c>, which the reader doesn't tell apart) admits extras the
+    /// same way but says nothing.
+    /// </summary>
+    internal static bool DeclaresAdditionalProperties(IOpenApiSchema schema) =>
+        schema.AdditionalPropertiesAllowed && schema.AdditionalProperties is not null;
+
     internal static bool HasExtension(IOpenApiSchema schema, string key)
     {
         return schema.Extensions is not null && schema.Extensions.ContainsKey(key);

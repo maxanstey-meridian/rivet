@@ -58,6 +58,14 @@
       }
     },
     "/api/users/{userId}": {
+      "parameters": [
+        {
+          "name": "userId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
       "get": {
         "operationId": "users_getById",
         "tags": ["Users"],
@@ -146,6 +154,14 @@
       }
     },
     "/api/users/{userId}/avatar": {
+      "parameters": [
+        {
+          "name": "userId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
       "post": {
         "operationId": "users_uploadAvatar",
         "tags": ["Users"],
@@ -171,6 +187,26 @@
       }
     },
     "/api/orgs/{orgId}/projects/{projectId}/tasks/{taskId}": {
+      "parameters": [
+        {
+          "name": "orgId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        },
+        {
+          "name": "projectId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        },
+        {
+          "name": "taskId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
       "get": {
         "operationId": "organizations_getTask",
         "tags": ["Organizations"],
@@ -188,6 +224,20 @@
       }
     },
     "/api/{tenantId}/users/{userId}": {
+      "parameters": [
+        {
+          "name": "tenantId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        },
+        {
+          "name": "userId",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
       "get": {
         "operationId": "tenants_getUser",
         "tags": ["Tenants"],

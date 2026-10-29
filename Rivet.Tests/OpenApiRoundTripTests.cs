@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
@@ -147,7 +146,7 @@ public sealed class OpenApiRoundTripTests
                     Define.Put<UpdateTaskRequest, TaskDto>("/api/tasks/{id}");
 
                 public static readonly RouteDefinition DeleteTask =
-                    Define.Delete("/api/tasks/{id}")
+                    Define.Delete("/api/tasks/{id:guid}")
                         .Status(204);
             }
             """;
@@ -231,7 +230,7 @@ public sealed class OpenApiRoundTripTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -286,7 +285,7 @@ public sealed class OpenApiRoundTripTests
             public static class PeopleContract
             {
                 public static readonly RouteDefinition<PersonDto> GetPerson =
-                    Define.Get<PersonDto>("/api/people/{id}");
+                    Define.Get<PersonDto>("/api/people/{id:guid}");
             }
             """;
 
@@ -333,7 +332,7 @@ public sealed class OpenApiRoundTripTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -456,7 +455,7 @@ public sealed class OpenApiRoundTripTests
             public static class GradesContract
             {
                 public static readonly RouteDefinition<GradeDto> Get =
-                    Define.Get<GradeDto>("/api/grades/{id}");
+                    Define.Get<GradeDto>("/api/grades/{id:guid}");
             }
             """;
 
@@ -503,7 +502,7 @@ public sealed class OpenApiRoundTripTests
             public static class EnvelopesContract
             {
                 public static readonly RouteDefinition<EnvelopeDto> Get =
-                    Define.Get<EnvelopeDto>("/api/envelopes/{id}");
+                    Define.Get<EnvelopeDto>("/api/envelopes/{id:guid}");
             }
             """;
 
@@ -593,7 +592,7 @@ public sealed class OpenApiRoundTripTests
             public static class ShapesContract
             {
                 public static readonly RouteDefinition<Shape> GetShape =
-                    Define.Get<Shape>("/api/shapes/{id}");
+                    Define.Get<Shape>("/api/shapes/{id:guid}");
             }
             """;
 
@@ -625,11 +624,11 @@ public sealed class OpenApiRoundTripTests
         Assert.Equal(["circle", "square"], union.Variants.Select(v => v.Tag));
 
         var circleVariant = Assert.IsType<TsType.InlineObject>(union.Variants[0].Type);
-        Assert.Equal("kind", circleVariant.Fields[0].Name);
-        var tag = Assert.IsType<TsType.StringUnion>(circleVariant.Fields[0].Type);
+        Assert.Equal("kind", circleVariant.Properties[0].Name);
+        var tag = Assert.IsType<TsType.StringUnion>(circleVariant.Properties[0].Type);
         Assert.Equal(["circle"], tag.Members);
-        Assert.Contains(circleVariant.Fields, f => f.Name == "id");
-        Assert.Contains(circleVariant.Fields, f => f.Name == "radius");
+        Assert.Contains(circleVariant.Properties, f => f.Name == "id");
+        Assert.Contains(circleVariant.Properties, f => f.Name == "radius");
 
         var getShape = reEndpoints.First(e => e.HttpMethod == "GET");
         Assert.True(
@@ -652,6 +651,100 @@ public sealed class OpenApiRoundTripTests
             Assert.True(
                 JsonNode.DeepEquals(schemas0[component], schemas1[component]),
                 $"'{component}' drifted across the round-trip.\n--- first ---\n{schemas0[component]}\n--- second ---\n{schemas1[component]}"
+            );
+        }
+    }
+
+    // G.3: an open record (a bag) stays open through import, the empty one included: its
+    // additionalProperties: {} beside Rivet's empty-record marker is still a record, not a
+    // dictionary.
+    [Fact]
+    public void Open_Records_Survive_RoundTrip()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Meta
+            {
+                [JsonExtensionData]
+                public Dictionary<string, JsonElement> Extra { get; init; } = [];
+            }
+
+            [RivetType]
+            public sealed record Tagged(string Id, Meta Meta)
+            {
+                [JsonExtensionData]
+                public Dictionary<string, object> Extra { get; init; } = [];
+            }
+
+            [RivetContract]
+            public static class MetaContract
+            {
+                public static readonly RouteDefinition<Tagged> Get = Define.Get<Tagged>("/api/tagged");
+            }
+            """;
+
+        var (_, rewalker) = RoundTrip(source);
+
+        var meta = rewalker.Definitions["Meta"];
+        Assert.Null(meta.Type);
+        Assert.Empty(meta.Properties);
+        Assert.True(meta.AdditionalProperties);
+        Assert.True(rewalker.Definitions["Tagged"].AdditionalProperties);
+    }
+
+    // An imported record's bag carries whatever its source admits, so the source's word wins:
+    // one that leaves additionalProperties out comes back without it, one that writes {}
+    // comes back with it, as written.
+    [Fact]
+    public void Imported_Open_Records_Keep_What_The_Source_Wrote()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Unstated": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            },
+            "Declared": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"],
+                "additionalProperties": {}
+            }
+            """,
+            paths: """
+            "/unstated": { "get": { "operationId": "getUnstated", "responses": { "200": { "description": "OK",
+                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Unstated" } } } } } } },
+            "/declared": { "get": { "operationId": "getDeclared", "responses": { "200": { "description": "OK",
+                "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Declared" } } } } } } }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec);
+        Assert.Contains("[JsonExtensionData]", CompilationHelper.FindFile(imported, "Unstated.cs"));
+        Assert.Contains(
+            "DeclaresAdditionalProperties = true",
+            CompilationHelper.FindFile(imported, "Declared.cs")
+        );
+
+        using var emitted = CompilationHelper.EmitImported(imported);
+        var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
+        var sources = JsonNode.Parse(spec)!["components"]!["schemas"]!;
+        foreach (var name in new[] { "Unstated", "Declared" })
+        {
+            Assert.True(
+                JsonNode.DeepEquals(
+                    sources[name],
+                    JsonNode.Parse(schemas.GetProperty(name).GetRawText())
+                ),
+                $"{name} came back as {schemas.GetProperty(name).GetRawText()}"
             );
         }
     }
@@ -774,7 +867,7 @@ public sealed class OpenApiRoundTripTests
                         .ResponseExampleJson(201, "{\"id\":\"ord_123\"}", name: "created");
 
                 public static readonly RouteDefinition DeleteOrder =
-                    Define.Delete("/api/orders/{id}")
+                    Define.Delete("/api/orders/{id:guid}")
                         .Returns<NotFoundDto>(404, "Not found")
                         .ResponseExampleJson(404, "{\"message\":\"gone\"}", name: "gone");
             }
@@ -1013,7 +1106,7 @@ public sealed class OpenApiRoundTripTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<NotFoundDto>(404, "Not found")
                         .Returns<ValidationErrorDto>(422, "Validation failed");
             }
@@ -1070,7 +1163,7 @@ public sealed class OpenApiRoundTripTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
 
             [RivetContract]
@@ -1153,7 +1246,7 @@ public sealed class OpenApiRoundTripTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Description("Retrieve a task by ID");
             }
             """;
@@ -1176,7 +1269,7 @@ public sealed class OpenApiRoundTripTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition DeleteTask =
-                    Define.Delete("/api/tasks/{id}")
+                    Define.Delete("/api/tasks/{id:guid}")
                         .Status(204);
             }
             """;
@@ -1397,7 +1490,7 @@ public sealed class OpenApiRoundTripTests
             public static class UsersContract
             {
                 public static readonly RouteDefinition<UserDto> GetUser =
-                    Define.Get<UserDto>("/api/users/{id}");
+                    Define.Get<UserDto>("/api/users/{id:guid}");
             }
             """;
 
@@ -1445,20 +1538,16 @@ public sealed class OpenApiRoundTripTests
         var compilation = CompilationHelper.CreateCompilation(source);
         var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
-        string? openApiJson = null;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            openApiJson = OpenApiEmitter.Emit(
-                endpoints,
-                walker.Definitions,
-                walker.Brands,
-                walker.Enums,
-                null
-            )
+        var openApiJson = OpenApiEmitter.Emit(
+            endpoints,
+            walker.Definitions,
+            walker.Brands,
+            walker.Enums,
+            null
         );
-        Assert.DoesNotContain(Diagnostics.MultipartInputTypeMissing, stderr);
 
         // Verify the multipart schema uses $ref to the named input type
-        var jsonDoc = System.Text.Json.JsonDocument.Parse(openApiJson!);
+        var jsonDoc = System.Text.Json.JsonDocument.Parse(openApiJson);
         var multipartSchema = jsonDoc
             .RootElement.GetProperty("paths")
             .GetProperty("/api/files")
@@ -1473,7 +1562,7 @@ public sealed class OpenApiRoundTripTests
         );
 
         // Reverse: OpenAPI → import → compile → walk
-        var importResult = OpenApiImporter.Import(openApiJson!, new ImportOptions("RoundTrip"));
+        var importResult = OpenApiImporter.Import(openApiJson, new ImportOptions("RoundTrip"));
 
         // The input type name should be "UploadInput" (not "UploadRequest")
         var contractFile = importResult.Files.First(f => f.FileName.Contains("Contract"));
@@ -1619,7 +1708,7 @@ public sealed class OpenApiRoundTripTests
             public static class EventsContract
             {
                 public static readonly RouteDefinition<EventDto> GetEvent =
-                    Define.Get<EventDto>("/api/events/{id}");
+                    Define.Get<EventDto>("/api/events/{id:guid}");
             }
             """;
 
@@ -1695,7 +1784,7 @@ public sealed class OpenApiRoundTripTests
             public static class SensorsContract
             {
                 public static readonly RouteDefinition<SensorDto> GetSensor =
-                    Define.Get<SensorDto>("/api/sensors/{id}");
+                    Define.Get<SensorDto>("/api/sensors/{id:guid}");
             }
             """;
 
@@ -2475,11 +2564,11 @@ public sealed class OpenApiRoundTripTests
         var inlineType = new TsType.InlineObject([
             new("requiredNonNullable", new TsType.Primitive("string")),
             new("requiredNullable", new TsType.Nullable(new TsType.Primitive("string"))),
-            new("optionalNonNullable", new TsType.Primitive("string"), Optional: true),
+            new("optionalNonNullable", new TsType.Primitive("string"), IsOptional: true),
             new(
                 "optionalNullable",
                 new TsType.Nullable(new TsType.Primitive("string")),
-                Optional: true
+                IsOptional: true
             ),
         ]);
 
@@ -2714,7 +2803,7 @@ public sealed class OpenApiRoundTripTests
             public static class PeopleContract
             {
                 public static readonly RouteDefinition<PersonDto> Get =
-                    Define.Get<PersonDto>("/api/people/{id}");
+                    Define.Get<PersonDto>("/api/people/{id:guid}");
             }
             """;
 
@@ -2845,7 +2934,7 @@ public sealed class OpenApiRoundTripTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto, ItemDto> Update =
-                    Define.Put<ItemDto, ItemDto>("/api/items/{id}")
+                    Define.Put<ItemDto, ItemDto>("/api/items/{id:guid}")
                         .Returns(404, "Not found")
                         .Returns(409);
             }
@@ -3074,7 +3163,7 @@ public sealed class OpenApiRoundTripTests
             public static class Legacy_ItemsContract
             {
                 public static readonly RouteDefinition<ItemDto> by_id =
-                    Define.Get<ItemDto>("/api/legacy-items/{id}");
+                    Define.Get<ItemDto>("/api/legacy-items/{id:guid}");
             }
             """;
 
@@ -3328,7 +3417,7 @@ public sealed class OpenApiRoundTripTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -3397,7 +3486,7 @@ public sealed class OpenApiRoundTripTests
             public static class ItemsContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/items/{id}");
+                    Define.Get<ItemDto>("/api/items/{id:guid}");
             }
             """;
 

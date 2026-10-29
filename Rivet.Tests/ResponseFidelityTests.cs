@@ -838,7 +838,7 @@ public sealed class ResponseFidelityTests
             public static class BlobContract
             {
                 public static readonly RouteDefinition<byte[]> GetBlob =
-                    Define.Get<byte[]>("/api/blobs/{id}");
+                    Define.Get<byte[]>("/api/blobs/{id:guid}");
             }
             """;
 
@@ -881,11 +881,11 @@ public sealed class ResponseFidelityTests
             public static class FilesContract
             {
                 public static readonly RouteDefinition Download =
-                    Define.Get("/api/files/{id}")
+                    Define.Get("/api/files/{id:guid}")
                         .ProducesFile("image/png");
 
                 public static readonly FileRouteDefinition Raw =
-                    Define.File("/api/raw/{id}");
+                    Define.File("/api/raw/{id:guid}");
             }
             """;
 

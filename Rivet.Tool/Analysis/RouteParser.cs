@@ -66,7 +66,93 @@ public static class RouteParser
         return builder.ToString();
     }
 
-    private readonly record struct RouteParamToken(string Name, int Start, int Length);
+    /// <summary>
+    /// The route parameters of a template with what ASP.NET routing reads from each token:
+    /// its inline constraints in order (<c>{id:int:min(1)}</c>), the optional marker
+    /// (<c>{id?}</c>), a default value (<c>{page=1}</c>) and the catch-all prefix. Doubled
+    /// braces in a constraint argument (<c>regex(^\d{{4}}$)</c>, the template's escape)
+    /// come back single.
+    /// </summary>
+    public static IReadOnlyList<RouteToken> ParseRouteTokens(string template) =>
+        [.. ScanRouteParams(template).Select(token => ParseToken(token.Name, token.Body))];
+
+    private readonly record struct RouteParamToken(string Name, string Body, int Start, int Length);
+
+    /// <summary>
+    /// Reads a token body after its name the way ASP.NET's inline parameter parser does:
+    /// <c>:constraint</c> or <c>:constraint(argument)</c> repeated, then <c>=default</c> or a
+    /// trailing <c>?</c>. An argument ends at the first <c>)</c> followed by another
+    /// constraint, a default, the optional marker or the end, so a regex may hold
+    /// parentheses and colons of its own.
+    /// </summary>
+    private static RouteToken ParseToken(string name, string body)
+    {
+        var isCatchAll = body.StartsWith('*');
+        var index = body.IndexOfAny([':', '=', '?']);
+        var constraints = new List<RouteConstraint>();
+        string? defaultValue = null;
+        var isOptional = false;
+
+        while (index >= 0 && index < body.Length && body[index] == ':')
+        {
+            var nameStart = index + 1;
+            var nameEnd = nameStart;
+            while (nameEnd < body.Length && body[nameEnd] is not ('(' or ':' or '=' or '?'))
+            {
+                nameEnd++;
+            }
+
+            string? argument = null;
+            index = nameEnd;
+            if (nameEnd < body.Length && body[nameEnd] == '(')
+            {
+                var close = ClosingParenthesis(body, nameEnd + 1);
+                argument = Unescape(body[(nameEnd + 1)..close]);
+                index = close + 1;
+            }
+
+            constraints.Add(new RouteConstraint(body[nameStart..nameEnd].Trim(), argument));
+        }
+
+        if (index >= 0 && index < body.Length)
+        {
+            if (body[index] == '=')
+            {
+                defaultValue = body[(index + 1)..];
+            }
+            else if (body[index] == '?')
+            {
+                isOptional = true;
+            }
+        }
+
+        return new RouteToken(name, constraints, isOptional, defaultValue, isCatchAll);
+    }
+
+    private static int ClosingParenthesis(string body, int start)
+    {
+        for (var scan = start; scan < body.Length; scan++)
+        {
+            if (
+                body[scan] == ')'
+                && (
+                    scan + 1 == body.Length
+                    || body[scan + 1] is ':' or '='
+                    || body[scan + 1] == '?' && scan + 2 == body.Length
+                )
+            )
+            {
+                return scan;
+            }
+        }
+
+        // No closing parenthesis: routing refuses the template at startup. Read the rest
+        // as the argument so the constraint is still checked rather than dropped.
+        return body.Length;
+    }
+
+    private static string Unescape(string argument) =>
+        argument.Replace("{{", "{").Replace("}}", "}");
 
     /// <summary>
     /// Scans a route template for {…} parameter tokens, using brace-depth tracking so
@@ -116,7 +202,7 @@ public static class RouteParser
 
             if (name.Length > 0)
             {
-                yield return new RouteParamToken(name, start, end - start + 1);
+                yield return new RouteParamToken(name, body, start, end - start + 1);
             }
 
             index = end + 1;
@@ -172,4 +258,19 @@ public static class RouteParser
 
         return new string(buffer[..length]);
     }
+}
+
+/// <summary>A route parameter token and what ASP.NET routing reads from it.</summary>
+public sealed record RouteToken(
+    string Name,
+    IReadOnlyList<RouteConstraint> Constraints,
+    bool IsOptional,
+    string? DefaultValue,
+    bool IsCatchAll
+);
+
+/// <summary>One inline route constraint: <c>int</c>, or <c>min(1)</c> with its argument.</summary>
+public sealed record RouteConstraint(string Name, string? Argument)
+{
+    public override string ToString() => Argument is null ? Name : $"{Name}({Argument})";
 }

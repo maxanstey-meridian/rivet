@@ -98,7 +98,8 @@ honest degradation, not full support.
   warning (`RIV3003` / `operation-method-dropped`).
 - **Bodies**: `application/json` (typed records), `application/x-www-form-urlencoded`
   (form-encoded inputs), `multipart/form-data` (incl. `IFormFile` /
-  `List<IFormFile>`), binary content types (file endpoints / `ProducesFile`),
+  `List<IFormFile>`, and a multipart body with no file in it, which is still a form
+  input of text parts, never a JSON one), binary content types (file endpoints / `ProducesFile`),
   `text/*` and `*/*` fallbacks. A `text/*` body or success response keeps its
   media type via `.AcceptsContentType(...)` / `.ProducesContentType(...)` and
   the complete media-type map persists through explicit request-content
@@ -233,7 +234,12 @@ honest degradation, not full support.
 - **Response headers**: typed `.WithResponseHeader<T>(...)` /
   `.WithResponseHeaderKey<T>(...)` provenance preserves schema type/format,
   description, requiredness, examples, deprecation, serialization metadata, and
-  header content. Headers are not restricted to `string`.
+  header content. Headers are not restricted to `string`. The one exception is a
+  response header named `Content-Type`, which OpenAPI says "SHALL be ignored": it
+  never becomes a `.WithResponseHeader(...)` (generation would refuse it with
+  `RIV2009`, and a required one would have the adapters demand it), and comes back
+  verbatim as a preserved field instead, so the re-emitted spec still says what the
+  source said. A response component keeps its own as raw provenance.
 - **Validation metadata on schema properties**: min/max length, pattern,
   ranges, item counts → DataAnnotations / Rivet constraint attributes;
   defaults, formats, descriptions, examples, readOnly/writeOnly. Records

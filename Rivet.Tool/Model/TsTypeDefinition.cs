@@ -15,7 +15,8 @@ public sealed record TsTypeDefinition
         IReadOnlyList<TsPropertyDefinition>? Properties = null,
         string? Description = null,
         TsTypeMetadata? Metadata = null,
-        TsScalarMetadata? ScalarMetadata = null
+        TsScalarMetadata? ScalarMetadata = null,
+        bool? AdditionalProperties = null
     )
     {
         // Exactly one of Type (an alias) or Properties (an object), as the schema's oneOf says.
@@ -33,6 +34,13 @@ public sealed record TsTypeDefinition
             );
         }
 
+        if (Type is not null && AdditionalProperties is not null)
+        {
+            throw new ArgumentException(
+                $"type '{Name}' has both 'type' and 'additionalProperties'; additionalProperties says whether an object type's 'properties' are all its members, so an alias can't carry it"
+            );
+        }
+
         this.Name = Name;
         this.TypeParameters = TypeParameters;
         this.Properties = Properties ?? [];
@@ -40,6 +48,7 @@ public sealed record TsTypeDefinition
         this.Description = Description;
         this.Metadata = Metadata;
         this.ScalarMetadata = ScalarMetadata;
+        this.AdditionalProperties = AdditionalProperties;
     }
 
     public TsTypeDefinition(
@@ -48,7 +57,8 @@ public sealed record TsTypeDefinition
         IReadOnlyList<TsPropertyDefinition> properties,
         string? Description = null,
         TsTypeMetadata? Metadata = null,
-        TsScalarMetadata? ScalarMetadata = null
+        TsScalarMetadata? ScalarMetadata = null,
+        bool? AdditionalProperties = null
     )
         : this(
             name,
@@ -57,7 +67,8 @@ public sealed record TsTypeDefinition
             Properties: properties,
             Description: Description,
             Metadata: Metadata,
-            ScalarMetadata: ScalarMetadata
+            ScalarMetadata: ScalarMetadata,
+            AdditionalProperties: AdditionalProperties
         ) { }
 
     public TsTypeDefinition(
@@ -97,6 +108,15 @@ public sealed record TsTypeDefinition
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TsScalarMetadata? ScalarMetadata { get; }
+
+    /// <summary>
+    /// Whether an object type takes members beyond its <see cref="Properties"/>: <c>true</c>
+    /// when a <c>[JsonExtensionData]</c> bag reads and writes them (<c>additionalProperties: {}</c>),
+    /// <c>false</c> when <c>[JsonUnmappedMemberHandling(Disallow)]</c> refuses them
+    /// (<c>additionalProperties: false</c>), and null when the type says neither. Objects only.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AdditionalProperties { get; }
 }
 
 public enum TsTypeProvenance
@@ -149,12 +169,14 @@ public sealed record TsSchemaXmlMetadata(
 );
 
 /// <summary>
-/// A single property within a type definition.
+/// One property of a type definition or an inline object (a tuple, or a polymorphic variant
+/// that describes its members exactly as the derived record would). An absent
+/// <c>optional</c> reads as required: a nullable type does not make the property optional.
 /// </summary>
 public sealed record TsPropertyDefinition(
     [property: JsonRequired] string Name,
     [property: JsonRequired] TsType Type,
-    [property: JsonRequired, JsonPropertyName("optional")] bool IsOptional,
+    [property: JsonPropertyName("optional")] bool IsOptional = false,
     [property:
         JsonPropertyName("deprecated"),
         JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)

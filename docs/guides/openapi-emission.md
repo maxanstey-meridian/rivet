@@ -30,4 +30,19 @@ bodies, file endpoints with `x-rivet-file`), security schemes, and the `x-rivet-
 metadata across re-import. Shapes outside the importer profile degrade with
 diagnostics or structured unsupported markers rather than being presented as lossless.
 
+A component example is one entry in `components.examples`, however many operations
+point at it. Endpoints that pin the same id with the same value share it, and the entry
+carries the summary and description any of them gives. Two that pin it with different
+values, or with summaries (or descriptions) that disagree, stop generation with
+`RIV2015`: the alternative is the second `$ref` quietly showing the first one's example.
+
+Contract JSON (`--from`) can say what the whole document requires with a top-level
+`security`, the same shape an endpoint's `security` takes and the counterpart of the
+C# side's `[assembly: RivetGlobalSecurity*]`. It becomes the root `security` and wins
+over the default `--security` would otherwise supply; `--security` still defines the
+schemes, since contract JSON carries no scheme definitions. `{ "alternatives": [] }` is
+`security: []`. A `routeTemplate` is written as the path key exactly as given, so its
+tokens must be bare (`{id}`): a constraint, `?`, default or catch-all is `RIV2017`, and
+the param's own `type` says what the token holds.
+
 See the [CLI Reference](/reference/cli) for the current command set.

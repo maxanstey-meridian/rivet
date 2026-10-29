@@ -31,7 +31,14 @@ Verified limits of the current tool, so you don't discover them in production.
   ([why](/guides/runtime-validation#runtime-guarantees-contract-responses)).
 - A response header declared `required: true` has to be on the response when the
   adapter runs, which means set before the handler returns. One a middleware only
-  adds in `OnStarting` arrives too late to count.
+  adds in `OnStarting` arrives too late to count, and that's a trade-off, not an
+  oversight. Moving the check into an `OnStarting` callback of Rivet's own doesn't
+  help: the callbacks run last-registered-first, and the handler registers after the
+  middleware, so Rivet's would run before the middleware's and still see no header.
+  The only real fix is a `UseRivet()` middleware registered first in every host, whose
+  callback would then run last. That's a new pipeline requirement for every app, for
+  a header style that's rare in practice, so it stays refused: set the header in the
+  handler, or in middleware before the handler returns, and it counts.
 - Host effects such as authentication challenges, sign-out cookies, and dynamic
   response headers happen through ordinary ASP.NET APIs before returning a
   matching bodyless terminal. Rivet preserves an already-started matching
@@ -53,10 +60,26 @@ Verified limits of the current tool, so you don't discover them in production.
   type-level serializer metadata. A converter registered globally in the host's
   JSON options is refused when a result runs, so the spec and the wire can't part
   ways over it.
-- Security scheme definitions come from the `--security` flag, or from the
-  `[assembly: RivetSecurityScheme(...)]` attributes an import writes; a `.Secure("name")`
-  with no matching definition fails generation (`RIV2002`). Security is spec-only:
-  Rivet describes it, ASP.NET enforces it.
+- Security scheme definitions come from `[assembly: RivetSecurityScheme(...)]` in
+  source (import writes them too) or the `--security` flag; a `.Secure("name")` with no
+  matching definition fails generation (`RIV2002`). Declare the document's default in
+  source as well, so generation and `--check` read the same thing. Rivet describes
+  security and ASP.NET enforces it. `--check` compares the two (`RIV4008`), reading
+  only ASP.NET's own authorization metadata, so custom authorization filters and
+  middleware are invisible to it.
+- Route constraints are read from the template: the built-in ones type a path
+  parameter and bound it, and one that contradicts its member stops generation
+  (`RIV1125`). Custom route constraints you register in code, and `required`, add
+  nothing to the spec; Rivet reads the built-in ones only. A `regex(...)` constraint's
+  pattern is copied in .NET syntax with its letters case-folded (routing matches it
+  ignoring case, and a JSON Schema pattern has no flags); .NET-only constructs (class
+  subtraction, inline options) pass through as written.
+- A form part's name is what both of ASP.NET's form binders read: the C# name, or a
+  rename both are given (`[DataMember(Name)]` for the minimal-API form mapper,
+  `[FromForm(Name)]` for MVC). `[JsonPropertyName]` doesn't name a form part, and a
+  rename only one binder reads is refused (`RIV1100`), because a contract can be served
+  by either host. Only top-level parts are named this way; a nested complex member
+  keeps `Inner.Value`.
 - The spec reflects *declared* C# types and the default System.Text.Json
   conventions. `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies emit as
   `oneOf` + `discriminator`, and polymorphism that skips them doesn't get past the
@@ -108,7 +131,7 @@ combination:
   route, query, header or form, and not every wire value will bind on that host.
   Minimal APIs need each value to equal its member name exactly; MVC needs it to
   equal ignoring case. An Azure Functions handler takes no name at all: the worker
-  fills an enum parameter from the route by parsing the raw text as JSON, and an
+  fills an enum parameter from the route or the query by parsing the raw text as JSON, and an
   unquoted name isn't JSON, so only a plain enum (or a `string`) binds there.
 
   A parameter the host reads as a JSON body is left alone, and so are `[FromServices]`
@@ -118,7 +141,11 @@ combination:
   `"get"` still infers a body), and any other unattributed collection is a body. An
   `[AsParameters]` type is bound member by member, and so is a `[FromForm]` complex
   type, which goes through the form mapper: it binds each member by name and, unlike
-  the rest of the minimal-API binder, ignores case. On MVC an
+  the rest of the minimal-API binder, ignores case. It names a member by its C# name or
+  its `[DataMember(Name = ...)]`, never by a member's `[FromForm(Name = ...)]`, and
+  reads every member from the form, whatever binding attribute it carries. On a
+  positional record it also refuses (400) a request that leaves out any constructor
+  parameter, nullable ones included; MVC binds the missing one as null. On MVC an
   unattributed collection or complex type is a body under `[ApiController]`, with the
   same two exceptions MVC makes: a complex type whose members carry their own binding
   source (a `[FromQuery]` property, an `IFormFile`) is bound piece by piece, and so is
@@ -168,7 +195,9 @@ quietly: callbacks (`RIV3027`), webhooks and `components.pathItems` (`RIV3028`),
 parameters with `content` instead of a `schema` (`RIV3025`), and operation-level
 `externalValue` examples (an `external-value` marker in the generated C#).
 Discriminator dispatch imports as a `[JsonPolymorphic]` hierarchy when the `oneOf`
-mapping is usable, and falls back loudly otherwise. The full list, including every
+mapping is usable, and falls back loudly otherwise. A document OpenAPI itself calls
+invalid, such as an operation whose path template has a token no path parameter
+declares, stops the import (`RIV3032`) rather than being guessed into shape. The full list, including every
 diagnostic marker and warning category, is in the
 [Import Profile](/reference/import-profile).
 

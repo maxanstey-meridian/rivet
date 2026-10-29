@@ -10,7 +10,7 @@ namespace Rivet.Tests;
 /// <summary>
 /// Guards the diagnostic ID scheme: every ID Rivet can emit is registered in
 /// Rivet.Tool/Diagnostics.cs, unique, in its stage's range, and has a row in
-/// docs/reference/diagnostics.md. Also pins the diagnosed-unsupported
+/// docs/reference/diagnostics.md with the severity the registry gives it. Also pins the diagnosed-unsupported
 /// TypeWalker holes and the symbol-naming unknown-type emission warning folded
 /// into this wave (FABLE_GAPS §7 item 12).
 /// </summary>
@@ -121,6 +121,30 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void Docs_Severity_Column_Matches_The_Registry()
+    {
+        // The registry decides each ID's severity (Warn and Error refuse the other kind), so
+        // the page's Severity column must say the same thing for every row.
+        var page = File.ReadAllText(CliRunner.RepoPath("docs", "reference", "diagnostics.md"));
+        var mismatches = Regex
+            .Matches(page, @"^\| `(RIV\d{4})` \| (\w+) \|", RegexOptions.Multiline)
+            .Select(match => (Id: match.Groups[1].Value, Column: match.Groups[2].Value))
+            .Where(row =>
+                Diagnostics.Registry.TryGetValue(row.Id, out var entry)
+                && row.Column != entry.Severity.ToString()
+            )
+            .Select(row =>
+                $"{row.Id}: page says {row.Column}, registry says {Diagnostics.Registry[row.Id].Severity}"
+            )
+            .ToList();
+
+        Assert.True(
+            mismatches.Count == 0,
+            $"Severity column disagrees with the registry:\n  {string.Join("\n  ", mismatches)}"
+        );
+    }
+
+    [Fact]
     public void Docs_Intro_Lists_Exactly_The_Error_Rows()
     {
         var page = File.ReadAllText(CliRunner.RepoPath("docs", "reference", "diagnostics.md"));
@@ -158,6 +182,63 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void Every_User_Error_Is_Built_By_Diagnostics_Error()
+    {
+        // T.2: a user-facing error carries an ID, so nothing but Diagnostics.Error may build
+        // a RivetUserException. A site that can only fire on a Rivet bug throws
+        // InvalidOperationException instead, stack trace and all.
+        var toolRoot = CliRunner.RepoPath("Rivet.Tool");
+        var construction = new Regex(
+            @"new\s+RivetUserException\s*\(|RivetUserException\s+\w+\s*\([^)]*\)\s*=>\s*new\s*\("
+        );
+        var offenders = Directory
+            .EnumerateFiles(toolRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path =>
+                !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                && Path.GetFileName(path) is not ("Diagnostics.cs" or "RivetUserException.cs")
+            )
+            .Where(path => construction.IsMatch(File.ReadAllText(path)))
+            .Select(path => Path.GetRelativePath(toolRoot, path))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        Assert.True(
+            offenders.Count == 0,
+            $"RivetUserException built outside Diagnostics.Error: {string.Join(", ", offenders)}"
+        );
+    }
+
+    [Theory]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("key", "apiKey", parameterName: "X-Key", location: "body")]""",
+        "unsupported location 'body'"
+    )]
+    [InlineData("""[assembly: RivetSecurityScheme("sso", "saml")]""", "unsupported type 'saml'")]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("bearer", "http", scheme: "bearer")] [assembly: RivetSecurityScheme("bearer", "http", scheme: "basic")]""",
+        "duplicate Rivet security scheme metadata for 'bearer'"
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("oauth", "oauth2")] [assembly: RivetOAuthFlow("oauth", "deviceCode", null, "https://t", null, new string[0], new string[0])]""",
+        "unsupported flow 'deviceCode'"
+    )]
+    public void Invalid_Security_Scheme_Metadata_Fails_With_RIV1121(
+        string attributes,
+        string expected
+    )
+    {
+        var compilation = CompilationHelper.CreateCompilation($"using Rivet;\n\n{attributes}\n");
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            Rivet.Tool.Analysis.SecurityMetadataWalker.Walk(compilation)
+        );
+
+        Assert.StartsWith("error RIV1121: ", exception.Message);
+        Assert.Contains(expected, exception.Message);
+    }
+
+    [Fact]
     public void Warn_Writes_The_Canonical_Stderr_Line()
     {
         var stderr = CompilationHelper.CaptureStdErr(() =>
@@ -165,6 +246,49 @@ public sealed class DiagnosticsTests
         );
 
         Assert.Contains("warning RIV1013: test message", stderr);
+    }
+
+    [Fact]
+    public void Error_Builds_The_Canonical_Message()
+    {
+        var exception = Diagnostics.Error(Diagnostics.UnsupportedBigInteger, "test message");
+
+        Assert.Equal("error RIV1010: test message", exception.Message);
+    }
+
+    [Fact]
+    public void Format_Takes_Its_Word_From_The_Registry()
+    {
+        Assert.Equal(
+            "warning RIV4001: test message",
+            Diagnostics.Format(Diagnostics.CoverageMissingImplementation, "test message")
+        );
+        Assert.Equal(
+            "error RIV4006: test message",
+            Diagnostics.Format(Diagnostics.CoverageInputBindingMismatch, "test message")
+        );
+    }
+
+    [Fact]
+    public void Warn_Error_And_Prefix_Refuse_The_Other_Severity()
+    {
+        // An error printed as a warning lets a run carry on that should have stopped, and a
+        // warning thrown as an error stops one that shouldn't, so a mismatch is a Rivet bug.
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            Assert.Throws<InvalidOperationException>(() =>
+                Diagnostics.Warn(Diagnostics.UnsupportedBigInteger, "test message")
+            )
+        );
+        Assert.Empty(stderr);
+        Assert.Throws<InvalidOperationException>(() =>
+            Diagnostics.Prefix(Diagnostics.UnsupportedBigInteger, "test message")
+        );
+        Assert.Throws<InvalidOperationException>(() =>
+            Diagnostics.Error(Diagnostics.DictionaryKeyTypeDropped, "test message")
+        );
+        Assert.Throws<InvalidOperationException>(() =>
+            Diagnostics.Format("RIV9999", "test message")
+        );
     }
 
     [Fact]
@@ -609,8 +733,8 @@ public sealed class DiagnosticsTests
             public static class UpdateContract
             {
                 [RivetRequestBody(typeof(Unrelated))]
-                public static readonly RouteDefinition<UpdateInput> Update =
-                    Define.Put<UpdateInput>("/api/items/{id}");
+                public static readonly InputRouteDefinition<UpdateInput> Update =
+                    Define.Put("/api/items/{id}").Accepts<UpdateInput>();
             }
             """;
 
@@ -637,8 +761,8 @@ public sealed class DiagnosticsTests
             public static class UpdateContract
             {
                 [RivetRequestBody(typeof(Body))]
-                public static readonly RouteDefinition<UpdateInput> Update =
-                    Define.Put<UpdateInput>("/api/items/{body}");
+                public static readonly InputRouteDefinition<UpdateInput> Update =
+                    Define.Put("/api/items/{body}").Accepts<UpdateInput>();
             }
             """;
 
@@ -668,8 +792,8 @@ public sealed class DiagnosticsTests
             public static class UpdateContract
             {
                 [RivetRequestBody(typeof(Body))]
-                public static readonly RouteDefinition<UpdateInput> Update =
-                    Define.Put<UpdateInput>("/api/items/{id}");
+                public static readonly InputRouteDefinition<UpdateInput> Update =
+                    Define.Put("/api/items/{id}").Accepts<UpdateInput>();
             }
             """;
 
@@ -695,8 +819,8 @@ public sealed class DiagnosticsTests
             public static class UpdateContract
             {
                 [RivetRequestBody(typeof(EmptyBody))]
-                public static readonly RouteDefinition<UpdateInput> Update =
-                    Define.Put<UpdateInput>("/api/items/{id}");
+                public static readonly InputRouteDefinition<UpdateInput> Update =
+                    Define.Put("/api/items/{id}").Accepts<UpdateInput>();
             }
             """;
 

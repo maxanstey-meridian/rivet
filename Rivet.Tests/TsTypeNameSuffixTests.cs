@@ -56,8 +56,8 @@ public sealed class TsTypeNameSuffixTests
     {
         // E2 root cause: the suffix must incorporate field TYPES, not just field names —
         // {value: string} and {value: number} are distinct shapes and must get distinct suffixes.
-        var ofString = new TsType.InlineObject([("value", new TsType.Primitive("string"))]);
-        var ofNumber = new TsType.InlineObject([("value", new TsType.Primitive("number"))]);
+        var ofString = new TsType.InlineObject([new("value", new TsType.Primitive("string"))]);
+        var ofNumber = new TsType.InlineObject([new("value", new TsType.Primitive("number"))]);
 
         Assert.Equal("Value_String", TsType.GetNameSuffix(ofString));
         Assert.Equal("Value_Number", TsType.GetNameSuffix(ofNumber));
@@ -68,8 +68,8 @@ public sealed class TsTypeNameSuffixTests
             "Key_String_Value_Number",
             TsType.GetNameSuffix(
                 new TsType.InlineObject([
-                    ("key", new TsType.Primitive("string")),
-                    ("value", new TsType.Primitive("number")),
+                    new("key", new TsType.Primitive("string")),
+                    new("value", new TsType.Primitive("number")),
                 ])
             )
         );
@@ -79,10 +79,10 @@ public sealed class TsTypeNameSuffixTests
             "Object",
             TsType.GetNameSuffix(
                 new TsType.InlineObject([
-                    ("a", new TsType.Primitive("string")),
-                    ("b", new TsType.Primitive("string")),
-                    ("c", new TsType.Primitive("string")),
-                    ("d", new TsType.Primitive("string")),
+                    new("a", new TsType.Primitive("string")),
+                    new("b", new TsType.Primitive("string")),
+                    new("c", new TsType.Primitive("string")),
+                    new("d", new TsType.Primitive("string")),
                 ])
             )
         );
@@ -95,7 +95,7 @@ public sealed class TsTypeNameSuffixTests
             (TsType)
                 new TsType.Generic(
                     "Wrapper",
-                    [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
+                    [new TsType.InlineObject([new("value", new TsType.Primitive("string"))])]
                 );
 
         Assert.Equal(TsType.GetNameSuffix(make()), TsType.GetNameSuffix(make()));
@@ -106,11 +106,11 @@ public sealed class TsTypeNameSuffixTests
     {
         var ofString = new TsType.Generic(
             "Wrapper",
-            [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
+            [new TsType.InlineObject([new("value", new TsType.Primitive("string"))])]
         );
         var ofNumber = new TsType.Generic(
             "Wrapper",
-            [new TsType.InlineObject([("value", new TsType.Primitive("number"))])]
+            [new TsType.InlineObject([new("value", new TsType.Primitive("number"))])]
         );
 
         Assert.Equal("Wrapper_Value_String", TsType.MonomorphisedName(ofString));

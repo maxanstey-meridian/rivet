@@ -91,10 +91,14 @@ public sealed class FunctionsPrefixTests
     {
         using var directory = new TempDir();
         File.WriteAllText(Path.Combine(directory.FullName, "host.json"), json);
-        Assert.Throws<RivetUserException>(() =>
+        var exception = Assert.Throws<RivetUserException>(() =>
             FunctionsHostConfiguration.LoadRoutePrefix(
                 Path.Combine(directory.FullName, "Api.csproj")
             )
+        );
+        Assert.StartsWith(
+            "error RIV1124: cannot read the Functions route prefix",
+            exception.Message
         );
     }
 }

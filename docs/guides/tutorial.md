@@ -31,7 +31,7 @@ public sealed record TaskDto(Guid Id, string Title, TaskStatus Status);
 public static class TasksContract
 {
     public static readonly RouteDefinition<TaskDto> Get =
-        Define.Get<TaskDto>("/api/tasks/{id}")
+        Define.Get<TaskDto>("/api/tasks/{id:guid}")
             .Description("Fetch a task");
 }
 ```

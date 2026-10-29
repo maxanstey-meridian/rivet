@@ -173,11 +173,11 @@ public sealed class JsonContractReaderTests
 
         var ep = Assert.Single(result.Endpoints);
         var inlineObj = Assert.IsType<TsType.InlineObject>(ep.RequestType);
-        Assert.Equal(2, inlineObj.Fields.Count);
-        Assert.Equal("id", inlineObj.Fields[0].Name);
-        Assert.IsType<TsType.Primitive>(inlineObj.Fields[0].Type);
-        Assert.Equal("name", inlineObj.Fields[1].Name);
-        Assert.IsType<TsType.Primitive>(inlineObj.Fields[1].Type);
+        Assert.Equal(2, inlineObj.Properties.Count);
+        Assert.Equal("id", inlineObj.Properties[0].Name);
+        Assert.IsType<TsType.Primitive>(inlineObj.Properties[0].Type);
+        Assert.Equal("name", inlineObj.Properties[1].Name);
+        Assert.IsType<TsType.Primitive>(inlineObj.Properties[1].Type);
     }
 
     [Fact]
@@ -212,10 +212,10 @@ public sealed class JsonContractReaderTests
             .IsType<TsType.InlineObject>(
                 Assert.Single(JsonContractReader.Read(json).Endpoints).RequestType
             )
-            .Fields;
+            .Properties;
 
-        Assert.False(fields.Single(field => field.Name == "note").Optional);
-        Assert.True(fields.Single(field => field.Name == "hint").Optional);
+        Assert.False(fields.Single(field => field.Name == "note").IsOptional);
+        Assert.True(fields.Single(field => field.Name == "hint").IsOptional);
     }
 
     [Fact]
@@ -297,8 +297,8 @@ public sealed class JsonContractReaderTests
             ControllerName: "buyer",
             Responses: [],
             RequestType: new TsType.InlineObject([
-                ("id", new TsType.Primitive("number", "int32")),
-                ("name", new TsType.Primitive("string")),
+                new("id", new TsType.Primitive("number", "int32")),
+                new("name", new TsType.Primitive("string")),
             ])
         );
 
@@ -312,11 +312,11 @@ public sealed class JsonContractReaderTests
 
         var ep = Assert.Single(result.Endpoints);
         var inlineObj = Assert.IsType<TsType.InlineObject>(ep.RequestType);
-        Assert.Equal(2, inlineObj.Fields.Count);
-        Assert.Equal("id", inlineObj.Fields[0].Name);
-        Assert.IsType<TsType.Primitive>(inlineObj.Fields[0].Type);
-        Assert.Equal("name", inlineObj.Fields[1].Name);
-        Assert.IsType<TsType.Primitive>(inlineObj.Fields[1].Type);
+        Assert.Equal(2, inlineObj.Properties.Count);
+        Assert.Equal("id", inlineObj.Properties[0].Name);
+        Assert.IsType<TsType.Primitive>(inlineObj.Properties[0].Type);
+        Assert.Equal("name", inlineObj.Properties[1].Name);
+        Assert.IsType<TsType.Primitive>(inlineObj.Properties[1].Type);
     }
 
     [Fact]
@@ -946,6 +946,62 @@ public sealed class JsonContractReaderTests
         Assert.True(tokenParam.GetProperty("required").GetBoolean());
     }
 
+    // G.3/G.9: --from can say an object is open (a bag on the C# side) or closed, on a type
+    // and on an inline object (a variant), and the emitter says it as the walker path does.
+    [Fact]
+    public void AdditionalProperties_Is_Read_And_Surfaces_In_OpenApi()
+    {
+        var json = """
+            {
+              "types": [
+                { "name": "Open", "typeParameters": [], "properties": [{ "name": "id", "type": { "kind": "primitive", "type": "string" } }], "additionalProperties": true },
+                { "name": "Closed", "typeParameters": [], "properties": [], "additionalProperties": false },
+                { "name": "Shape", "typeParameters": [], "type": { "kind": "taggedUnion", "discriminator": "kind", "variants": [
+                  { "tag": "circle", "type": { "kind": "inlineObject", "additionalProperties": false, "properties": [
+                    { "name": "kind", "type": { "kind": "stringUnion", "values": ["circle"] } }
+                  ] } }
+                ] } }
+              ],
+              "enums": [],
+              "endpoints": []
+            }
+            """;
+
+        var result = JsonContractReader.Read(json);
+        var definitions = result.Types.ToDictionary(type => type.Name);
+        Assert.True(definitions["Open"].AdditionalProperties);
+        Assert.False(definitions["Closed"].AdditionalProperties);
+
+        var openApi = OpenApiEmitter.Emit(
+            [],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            security: null
+        );
+        using var doc = JsonDocument.Parse(openApi);
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+
+        Assert.Equal(
+            JsonValueKind.Object,
+            schemas.GetProperty("Open").GetProperty("additionalProperties").ValueKind
+        );
+        Assert.Empty(
+            schemas.GetProperty("Open").GetProperty("additionalProperties").EnumerateObject()
+        );
+        Assert.False(
+            schemas.GetProperty("Closed").GetProperty("additionalProperties").GetBoolean()
+        );
+        var circle = schemas
+            .EnumerateObject()
+            .Single(schema =>
+                schema.Name != "Shape"
+                && schema.Value.TryGetProperty("properties", out var p)
+                && p.TryGetProperty("kind", out _)
+            );
+        Assert.False(circle.Value.GetProperty("additionalProperties").GetBoolean());
+    }
+
     [Fact]
     public void IsFileEndpoint_Survives_Emit_And_Read_RoundTrip()
     {
@@ -1184,6 +1240,50 @@ public sealed class JsonContractReaderTests
         Assert.StartsWith("error RIV2017:", message);
         Assert.Contains("tagged-union variant 'a' (discriminator 'kind')", message);
         Assert.Contains(expected, message);
+    }
+
+    [Theory]
+    [InlineData("/things/{id:int}", "'id' with the constraint ':int'")]
+    [InlineData("/things/{id:int:min(1)}", "the constraint ':int' and the constraint ':min(1)'")]
+    [InlineData("/things/{id?}", "'id' with the optional marker '?'")]
+    [InlineData("/things/{page=1}", "'page' with the default '=1'")]
+    [InlineData("/files/{*path}", "'path' with the catch-all '*'")]
+    public void A_Route_Token_With_Routing_Syntax_Fails_With_RIV2017(
+        string routeTemplate,
+        string expected
+    )
+    {
+        // Decision 29: the template is the OpenAPI path key as written, so '{id:int}' made a
+        // path whose token matched no parameter.
+        var json = $$"""
+            { "types": [], "enums": [], "endpoints": [{
+              "name": "get", "httpMethod": "GET", "routeTemplate": "{{routeTemplate}}", "controllerName": "things",
+              "params": [], "responses": [{ "statusCode": 200 }] }] }
+            """;
+
+        var message = Assert
+            .Throws<RivetUserException>(() => JsonContractReader.Read(json))
+            .Message;
+
+        Assert.StartsWith("error RIV2017:", message);
+        Assert.Contains($"endpoint 'things.get' (GET {routeTemplate})", message);
+        Assert.Contains(expected, message);
+    }
+
+    [Fact]
+    public void A_Bare_Route_Token_Reads()
+    {
+        var json = """
+            { "types": [], "enums": [], "endpoints": [{
+              "name": "get", "httpMethod": "GET", "routeTemplate": "/things/{id}", "controllerName": "things",
+              "params": [{ "name": "id", "type": { "kind": "primitive", "type": "number", "format": "int32" }, "source": "route" }],
+              "responses": [{ "statusCode": 200 }] }] }
+            """;
+
+        Assert.Equal(
+            "/things/{id}",
+            Assert.Single(JsonContractReader.Read(json).Endpoints).RouteTemplate
+        );
     }
 
     [Theory]
@@ -1561,11 +1661,120 @@ public sealed class JsonContractReaderTests
         );
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("error: invalid contract JSON", stderr);
+        Assert.Contains("error RIV2017: invalid contract JSON", stderr);
         Assert.Contains("endpoint 'things.get' (GET /api/things)", stderr);
         Assert.Contains("security scheme 'oauth' more than once", stderr);
         Assert.DoesNotContain("ArgumentException", stderr);
         Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
+    }
+
+    [Fact]
+    public void Cli_Emits_The_Contracts_Document_Security_Over_The_Security_Default()
+    {
+        // G.7: a contract can say "every operation needs X" itself. --security still defines
+        // the schemes (contract JSON has no definitions), but its first scheme is only the
+        // default for a contract that says nothing.
+        using var workDirectory = new TempDir();
+        var contractPath = Path.Combine(workDirectory.FullName, "contract.json");
+        File.WriteAllText(
+            contractPath,
+            $$"""
+            {
+              "types": [],
+              "enums": [],
+              "endpoints": [{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }] }],
+              "security": { "alternatives": [{ "schemes": [{ "name": "oauth", "scopes": ["read"] }] }] }
+            }
+            """
+        );
+        var outputDirectory = Path.Combine(workDirectory.FullName, "out");
+
+        var (exitCode, _, stderr) = CliRunner.RunCli(
+            workDirectory.FullName,
+            [
+                "--from",
+                contractPath,
+                "--output",
+                outputDirectory,
+                "--security",
+                "bearer",
+                "--security",
+                "oauth=bearer",
+            ]
+        );
+
+        Assert.True(exitCode == 0, stderr);
+        using var document = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(outputDirectory, "openapi.json"))
+        );
+        var requirement = Assert.Single(
+            document.RootElement.GetProperty("security").EnumerateArray()
+        );
+        var scheme = Assert.Single(requirement.EnumerateObject());
+        Assert.Equal("oauth", scheme.Name);
+        Assert.Equal("read", Assert.Single(scheme.Value.EnumerateArray()).GetString());
+        var schemes = document.RootElement.GetProperty("components").GetProperty("securitySchemes");
+        Assert.True(schemes.TryGetProperty("bearer", out _));
+        Assert.True(schemes.TryGetProperty("oauth", out _));
+    }
+
+    [Theory]
+    [InlineData("""{ "alternatives": [] }""", "[]")]
+    [InlineData("""{ "alternatives": [{ "schemes": [] }] }""", "[{}]")]
+    public void Document_Security_Says_No_Credentials_Or_Optional_Ones(
+        string security,
+        string expected
+    )
+    {
+        var json = $$"""
+            { "types": [], "enums": [], "security": {{security}},
+              "endpoints": [{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }] }] }
+            """;
+
+        using var document = JsonDocument.Parse(CompilationHelper.EmitOpenApiFromJson(json));
+
+        Assert.True(
+            JsonElement.DeepEquals(
+                JsonDocument.Parse(expected).RootElement,
+                document.RootElement.GetProperty("security")
+            )
+        );
+    }
+
+    [Fact]
+    public void Document_Security_Naming_An_Undefined_Scheme_Fails()
+    {
+        // The same rule as the C# path's global security: a scheme needs a definition.
+        var json = $$"""
+            { "types": [], "enums": [],
+              "security": { "alternatives": [{ "schemes": [{ "name": "oauth", "scopes": [] }] }] },
+              "endpoints": [{ {{GetEndpoint}}, "responses": [{ "statusCode": 200 }] }] }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApiFromJson(json)
+        );
+
+        Assert.StartsWith($"error {Diagnostics.UndefinedSecurityScheme}:", exception.Message);
+        Assert.Contains("'oauth'", exception.Message);
+    }
+
+    [Fact]
+    public void Document_Security_Listing_A_Scheme_Twice_In_One_Alternative_Is_Refused()
+    {
+        var json = """
+            { "types": [], "enums": [], "endpoints": [],
+              "security": { "alternatives": [{ "schemes": [
+                { "name": "oauth", "scopes": ["read"] }, { "name": "oauth", "scopes": ["write"] }
+              ] }] } }
+            """;
+
+        var exception = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+
+        Assert.Contains(
+            "the document's security lists security scheme 'oauth' more than once",
+            exception.Message
+        );
     }
 
     /// <summary>
@@ -1605,7 +1814,7 @@ public sealed class JsonContractReaderTests
         );
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("error: invalid contract JSON", stderr);
+        Assert.Contains("error RIV2017: invalid contract JSON", stderr);
         Assert.Contains($"Path: {path}", stderr);
         Assert.False(File.Exists(Path.Combine(outputDirectory, "openapi.json")));
     }

@@ -191,8 +191,25 @@ public sealed class TerminalAndAdapterTests
         var exception = Assert.Throws<InvalidOperationException>(() =>
             Define.Get<Response>("/invalid-key").Returns(statusKey)
         );
+        // .StatusKey(...) refuses the same keys, as generation does (RIV1120).
+        var successKey = Assert.Throws<InvalidOperationException>(() =>
+            Define.Get<Response>("/invalid-success-key").StatusKey(statusKey)
+        );
 
         Assert.Contains($"'{statusKey}'", exception.Message);
+        Assert.Contains($"success status key '{statusKey}'", successKey.Message);
+        Assert.Contains("GET /invalid-success-key", successKey.Message);
+    }
+
+    [Theory]
+    [InlineData("201")]
+    [InlineData("2XX")]
+    [InlineData("2xx")]
+    [InlineData("default")]
+    [InlineData("DEFAULT")]
+    public void Success_status_keys_OpenAPI_allows_are_taken(string statusKey)
+    {
+        Assert.NotNull(Define.Get<Response>("/key").StatusKey(statusKey));
     }
 
     [Fact]
@@ -787,6 +804,65 @@ public sealed class TerminalAndAdapterTests
         await Assert.ThrowsAsync<RivetContractViolationException>(() => ExecuteAsync(result, mvc));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Extension_data_keys_beside_the_declared_members_reach_the_wire(bool mvc)
+    {
+        var result = Define
+            .Get<Extended>("/extended")
+            .Success(new Extended("x") { Extra = new() { ["colour"] = Element("\"red\"") } });
+
+        var json = JsonDocument.Parse((await ExecuteAsync(result, mvc)).Body).RootElement;
+
+        Assert.Equal("x", json.GetProperty("name").GetString());
+        Assert.Equal("red", json.GetProperty("colour").GetString());
+    }
+
+    // System.Text.Json writes a bag's entries after the declared members without looking at
+    // them, so "name" would appear twice; the spec can't describe that object. Nested in a
+    // list, the walk names where.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task An_extension_data_key_repeating_a_member_is_refused_before_writing(bool mvc)
+    {
+        var result = Define
+            .Get<ExtendedPage>("/extended")
+            .Success(
+                new ExtendedPage([
+                    new Extended("ok"),
+                    new Extended("x") { Extra = new() { ["name"] = Element("1") } },
+                ])
+            );
+
+        var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(result, mvc)
+        );
+
+        Assert.Contains("at 'items[1]'", refusal.Message);
+        Assert.Contains("[JsonExtensionData] 'Extra' holds the key 'name'", refusal.Message);
+        Assert.Contains("declared member 'name'", refusal.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task An_extension_data_key_repeating_the_discriminator_is_refused(bool mvc)
+    {
+        var result = Define
+            .Get<Pet>("/pet")
+            .Success(new TaggedPet("Rex") { Extra = new() { ["kind"] = Element("1") } });
+
+        var refusal = await Assert.ThrowsAsync<RivetContractViolationException>(() =>
+            ExecuteAsync(result, mvc)
+        );
+
+        Assert.Contains("declared discriminator 'kind'", refusal.Message);
+    }
+
+    private static JsonElement Element(string json) => JsonDocument.Parse(json).RootElement;
+
     // [JsonPolymorphic] with nothing registered can't be read or written at all: the
     // serializer refuses the type as soon as the options build its metadata, on .NET 8, 9
     // and 10 alike, so generation refuses it too (RIV1015) rather than flattening it.
@@ -1036,6 +1112,24 @@ public sealed class TerminalAndAdapterTests
 
     [JsonPolymorphic]
     public record Unvaried(string Name);
+
+    public sealed record Extended(string Name)
+    {
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extra { get; init; } = [];
+    }
+
+    public sealed record ExtendedPage(IReadOnlyList<Extended> Items);
+
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+    [JsonDerivedType(typeof(TaggedPet), "pet")]
+    public abstract record Pet(string Name);
+
+    public sealed record TaggedPet(string Name) : Pet(Name)
+    {
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement> Extra { get; init; } = [];
+    }
 
     public record Vehicle(string Id);
 

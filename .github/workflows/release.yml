@@ -53,6 +53,8 @@ jobs:
           mkdir -p smoke/bin
           tar -xzf rivet-${{ matrix.rid }}.tar.gz -C smoke/bin
           rivet=./smoke/bin/rivet-${{ matrix.rid }}
+          # rivet-ts trusts this to gate binaryPath, so it must be the tag's release.
+          test "$("$rivet" --tool-version)" = "${GITHUB_REF_NAME#v}"
           dotnet restore samples/ContractApi/ContractApi.csproj
           "$rivet" --project samples/ContractApi/ContractApi.csproj --security bearer --output smoke/project
           "$rivet" --from-openapi Rivet.Tests/Fixtures/openapi-petstore-v3.json --namespace PetStore --output smoke/petstore

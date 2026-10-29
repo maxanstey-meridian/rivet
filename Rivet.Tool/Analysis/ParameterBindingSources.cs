@@ -31,7 +31,12 @@ internal enum InputSource
     /// </summary>
     BodyOrService,
 
-    /// <summary>An Azure Functions parameter filled from the trigger's metadata (route values).</summary>
+    /// <summary>
+    /// An Azure Functions parameter the worker fills from the trigger's binding data by name
+    /// that isn't a route value of the handler's route: a query parameter, else a top-level
+    /// property of a JSON body (never a header or a form field). A route value is
+    /// <see cref="Route"/> when the route is known, and this when it isn't.
+    /// </summary>
     TriggerMetadata,
 
     /// <summary>
@@ -70,8 +75,9 @@ internal enum EnumParser
 
     /// <summary>
     /// The Azure Functions worker's input converters: none of them turns a string into an
-    /// enum, so the route value falls through to JsonPocoConverter, which parses the raw text
-    /// as JSON. An unquoted member name isn't JSON; only an integer converts.
+    /// enum, so a route or query value falls through to JsonPocoConverter, which parses the
+    /// raw text as JSON. An unquoted member name isn't JSON; only an integer converts, and
+    /// anything else fails the invocation with a 500 (pinned by tools/test_functions_host.py).
     /// </summary>
     FunctionsJson,
 }
@@ -140,7 +146,7 @@ internal static class ParameterBindingSources
                 topLevel: true
             ),
             ParameterBindingHost.Mvc => Mvc(wkt, parameter, infersBody, routeParameters),
-            _ => Functions(wkt, parameter),
+            _ => Functions(wkt, parameter, routeParameters),
         };
 
     // ---------------------------------------------------------------
@@ -214,7 +220,8 @@ internal static class ParameterBindingSources
             // Each member binds as if it were a parameter of its own. ASP.NET refuses a nested
             // [AsParameters], so members don't expand further.
             return type is INamedTypeSymbol container
-                ? BoundMembers(container)
+                ? FormBinding
+                    .BoundMembers(wkt.Compilation, container)
                     .SelectMany(member =>
                         MinimalApi(
                             wkt,
@@ -283,25 +290,25 @@ internal static class ParameterBindingSources
     )
     {
         var type = parameter.Type;
-        BoundInput Leaf(InputSource source, AttributeData? named = null) =>
+        // The model name: a simple parameter's key, and the prefix a complex one's members
+        // are read under, so [FromQuery(Name = "f")] SearchRecord f reads ?f.Search=, never
+        // ?Search=. Without one, MVC falls back to the empty prefix: ?Search=.
+        var modelName = FormBinding.MvcModelName(parameter.GetAttributes(), type);
+        BoundInput Leaf(InputSource source) =>
             new(
                 parameter.Name,
-                NameOverride(named) ?? parameter.Name,
+                modelName ?? parameter.Name,
                 source,
                 type,
                 parameter,
                 ReachesEnumParser(source) ? EnumParser.IgnoreCase : EnumParser.None
             );
-        IEnumerable<BoundInput> Members(
-            INamedTypeSymbol complex,
-            InputSource source,
-            string? prefix = null
-        ) =>
+        IEnumerable<BoundInput> Members(INamedTypeSymbol complex, InputSource source) =>
             ComplexMembers(
                 wkt,
                 parameter,
                 parameter.Name,
-                prefix,
+                modelName,
                 complex,
                 source,
                 ParameterBindingHost.Mvc,
@@ -309,16 +316,14 @@ internal static class ParameterBindingSources
                 []
             );
 
-        // On a complex parameter, Name= is the model name its members are prefixed with:
-        // [FromQuery(Name = "f")] SearchRecord f reads ?f.Search=, never ?Search=.
         if (MvcOwnSource(wkt, parameter.GetAttributes(), type) is { } own)
         {
             return
                 own.Inherited is { } inherited
                 && type is INamedTypeSymbol complex
                 && IsComplex(wkt, type, ParameterBindingHost.Mvc)
-                ? Members(complex, inherited, NameOverride(own.Attribute))
-                : [Leaf(own.Source, own.Attribute)];
+                ? Members(complex, inherited)
+                : [Leaf(own.Source)];
         }
 
         if (!infersBody)
@@ -344,8 +349,9 @@ internal static class ParameterBindingSources
         return
             type is INamedTypeSymbol withSources
             && IsComplex(wkt, type, ParameterBindingHost.Mvc)
-            && BoundMembers(withSources)
-                .Any(member => MvcOwnSource(wkt, member.Attributes, member.Type) is not null)
+            && FormBinding
+                .BoundMembers(wkt.Compilation, withSources)
+                .Any(member => MvcOwnSource(wkt, member.MvcAttributes, member.Type) is not null)
             ? Members(withSources, InputSource.ValueProviders)
             : [Leaf(InputSource.BodyOrService)];
     }
@@ -367,15 +373,15 @@ internal static class ParameterBindingSources
         {
             if (attribute.Is(wkt.FromBody))
             {
-                return new(InputSource.Body, null, attribute);
+                return new(InputSource.Body, null);
             }
             if (IsServiceAttribute(wkt, attribute))
             {
-                return new(InputSource.NotRequest, null, attribute);
+                return new(InputSource.NotRequest, null);
             }
             if (IsModelBinder(wkt, attribute))
             {
-                return new(InputSource.WholeRequest, null, attribute);
+                return new(InputSource.WholeRequest, null);
             }
 
             var source =
@@ -386,7 +392,7 @@ internal static class ParameterBindingSources
                 : (InputSource?)null;
             if (source is { } named)
             {
-                return new(named, named, attribute);
+                return new(named, named);
             }
         }
 
@@ -395,38 +401,45 @@ internal static class ParameterBindingSources
             && enumType.GetAttributes().Any(attribute => IsModelBinder(wkt, attribute))
         )
         {
-            return new(InputSource.WholeRequest, null, null);
+            return new(InputSource.WholeRequest, null);
         }
 
         return Classify(wkt, type) switch
         {
-            Special.FormFile => new(InputSource.Form, null, null),
-            Special.WholeForm => new(InputSource.WholeForm, null, null),
+            Special.FormFile => new(InputSource.Form, null),
+            Special.WholeForm => new(InputSource.WholeForm, null),
             _ when FullName(type) == "System.Threading.CancellationToken" => new(
                 InputSource.NotRequest,
-                null,
                 null
             ),
             _ => null,
         };
     }
 
-    private sealed record OwnSource(
-        InputSource Source,
-        InputSource? Inherited,
-        AttributeData? Attribute
-    );
+    private sealed record OwnSource(InputSource Source, InputSource? Inherited);
 
     /// <summary>
-    /// The members of a complex type bound member by member: a member's own binding source
-    /// wins (see <see cref="MvcOwnSource"/>), and otherwise it inherits
-    /// <paramref name="source"/>. A complex member is listed itself, as the input its prefix
-    /// names, and then recursed into with that prefix, the way MVC's ComplexObjectModelBinder
-    /// and the minimal-API form mapper bind nested types. Both parse an enum member ignoring
-    /// case. A type already being expanded on the path stops the recursion.
-    /// <paramref name="prefix"/> is the model name the members' keys start with (an MVC
-    /// <c>Name =</c> on the parameter, or the outer member's key); <paramref name="nested"/>
-    /// marks members of a complex member.
+    /// Where MVC reads a member from by its own attributes or type (see
+    /// <see cref="MvcOwnSource"/>), or null when it inherits its container's source.
+    /// </summary>
+    internal static InputSource? MvcMemberSource(
+        WellKnownTypes wkt,
+        IReadOnlyList<AttributeData> attributes,
+        ITypeSymbol type
+    ) => MvcOwnSource(wkt, attributes, type)?.Source;
+
+    /// <summary>
+    /// The members of a complex type bound member by member. On MVC a member's own binding
+    /// source wins (see <see cref="MvcOwnSource"/>), and otherwise it inherits
+    /// <paramref name="source"/>; the minimal-API form mapper reads every member from the form,
+    /// whatever attributes it carries. A complex member is listed itself, as the input its
+    /// prefix names, and then recursed into with that prefix, the way MVC's
+    /// ComplexObjectModelBinder and the form mapper bind nested types. Both parse an enum
+    /// member ignoring case. A type already being expanded on the path stops the recursion.
+    /// <paramref name="prefix"/> is the model name the members' keys start with (an MVC model
+    /// name on the parameter, or the outer member's key); <paramref name="nested"/> marks
+    /// members of a complex member. Real-host pins: <c>MvcBindingHostTests</c> and
+    /// <c>MinimalApiBindingHostTests</c>.
     /// </summary>
     private static IEnumerable<BoundInput> ComplexMembers(
         WellKnownTypes wkt,
@@ -445,16 +458,21 @@ internal static class ParameterBindingSources
             yield break;
         }
 
-        foreach (var (name, memberType, attributes) in BoundMembers(type))
+        foreach (var member in FormBinding.BoundMembers(wkt.Compilation, type))
         {
-            var own = MvcOwnSource(wkt, attributes, memberType);
+            var (name, memberType) = (member.Name, member.Type);
+            var mvc = host == ParameterBindingHost.Mvc;
+            var attributes = mvc ? member.MvcAttributes : member.FormMapperAttributes;
+            var own = mvc ? MvcOwnSource(wkt, attributes, memberType) : null;
             var effective = own?.Source ?? source;
             var wireName = MemberWireName(
                 host,
                 effective,
                 prefix,
                 name,
-                NameOverride(own?.Attribute)
+                mvc
+                    ? FormBinding.MvcModelName(attributes, memberType)
+                    : FormBinding.DataMemberName(attributes)
             );
             var memberPath = $"{path}.{name}";
             var reaches = ReachesEnumParser(effective);
@@ -499,10 +517,12 @@ internal static class ParameterBindingSources
 
     /// <summary>
     /// The key a member of a complex type is read under. MVC's ComplexObjectModelBinder
-    /// names the member <c>Name =</c> ?? its own name (the field name) and prefixes it with
-    /// the container's model name (ModelNames.CreatePropertyModelName), so a renamed member
-    /// under a prefix is <c>prefix.override</c>; HeaderModelBinder reads the field name alone,
-    /// never prefixed. The minimal-API form mapper takes the override as the whole key.
+    /// names the member by its model name ?? its own name (the field name) and prefixes it
+    /// with the container's model name (ModelNames.CreatePropertyModelName), so a renamed
+    /// member under a prefix is <c>prefix.override</c>; HeaderModelBinder reads the field name
+    /// alone, never prefixed. The minimal-API form mapper names the member by its
+    /// [DataMember] name ?? its own name, under the outer member's key and never the
+    /// parameter's.
     /// </summary>
     private static string MemberWireName(
         ParameterBindingHost host,
@@ -512,13 +532,10 @@ internal static class ParameterBindingSources
         string? nameOverride
     )
     {
-        if (host != ParameterBindingHost.Mvc)
-        {
-            return nameOverride ?? (prefix is null ? name : $"{prefix}.{name}");
-        }
-
         var fieldName = nameOverride ?? name;
-        return source == InputSource.Header || prefix is null ? fieldName : $"{prefix}.{fieldName}";
+        return source == InputSource.Header && host == ParameterBindingHost.Mvc || prefix is null
+            ? fieldName
+            : $"{prefix}.{fieldName}";
     }
 
     // ---------------------------------------------------------------
@@ -526,13 +543,22 @@ internal static class ParameterBindingSources
     // ---------------------------------------------------------------
 
     /// <summary>
-    /// The worker fills a parameter with no binding attribute from the trigger's metadata by
-    /// name (DefaultFunctionInputBindingFeature), which for an HTTP trigger carries the route
-    /// values. The trigger parameter itself is the request; FunctionContext and
-    /// CancellationToken are the worker's own; any other attributed parameter is an input
-    /// binding, except the HTTP extension's [FromBody].
+    /// The worker fills a parameter with no binding attribute from the trigger's binding data
+    /// by name, ignoring case (DefaultFunctionInputBindingFeature). For an HTTP trigger the
+    /// host puts the route values there first, then the query parameters, then a JSON body's
+    /// top-level properties, whatever the request's content type; headers and form fields
+    /// never get there, and a name none of them carries is null (a value type fails the
+    /// invocation). Every such value reaches the worker's input converters, so an enum is
+    /// parsed as JSON. tools/test_functions_host.py pins all of this on the real host. The
+    /// trigger parameter itself is the request; FunctionContext and CancellationToken are the
+    /// worker's own; any other attributed parameter is an input binding, except the HTTP
+    /// extension's [FromBody].
     /// </summary>
-    private static IEnumerable<BoundInput> Functions(WellKnownTypes wkt, IParameterSymbol parameter)
+    private static IEnumerable<BoundInput> Functions(
+        WellKnownTypes wkt,
+        IParameterSymbol parameter,
+        IReadOnlySet<string>? routeParameters
+    )
     {
         var attributes = parameter.GetAttributes();
         BoundInput Leaf(InputSource source) =>
@@ -542,7 +568,9 @@ internal static class ParameterBindingSources
                 source,
                 parameter.Type,
                 parameter,
-                source == InputSource.TriggerMetadata ? EnumParser.FunctionsJson : EnumParser.None
+                source is InputSource.TriggerMetadata or InputSource.Route
+                    ? EnumParser.FunctionsJson
+                    : EnumParser.None
             );
 
         if (attributes.Any(attribute => attribute.Is(wkt.HttpTrigger)))
@@ -568,7 +596,14 @@ internal static class ParameterBindingSources
             return [Leaf(InputSource.NotRequest)];
         }
 
-        return [Leaf(InputSource.TriggerMetadata)];
+        return
+        [
+            Leaf(
+                routeParameters?.Contains(parameter.Name) == true
+                    ? InputSource.Route
+                    : InputSource.TriggerMetadata
+            ),
+        ];
     }
 
     // ---------------------------------------------------------------
@@ -629,9 +664,9 @@ internal static class ParameterBindingSources
                 )
                 {
                     var span = assignment.Syntax.GetLocation().GetLineSpan();
-                    throw new RivetUserException(
-                        $"error {Diagnostics.BindingInferenceUnreadable}: "
-                            + $"{span.Path}({span.StartLinePosition.Line + 1},{span.StartLinePosition.Character + 1}): "
+                    throw Diagnostics.Error(
+                        Diagnostics.BindingInferenceUnreadable,
+                        $"{span.Path}({span.StartLinePosition.Line + 1},{span.StartLinePosition.Character + 1}): "
                             + $"ApiBehaviorOptions.{property} is set to a value that isn't a compile-time "
                             + "constant, so Rivet can't tell whether MVC infers binding sources for "
                             + "[ApiController] actions, and every input and enum binding check on an MVC "
@@ -859,72 +894,6 @@ internal static class ParameterBindingSources
                     == SpecialType.System_Collections_Generic_IEnumerable_T
                 && SymbolEqualityComparer.Default.Equals(candidate.TypeArguments[0], element)
             );
-
-    /// <summary>
-    /// The members ASP.NET binds on a complex type: the parameters of its single public
-    /// parameterised constructor (a record's primary constructor), carrying the attributes
-    /// of both the parameter and its same-named property, then any other public settable
-    /// or init-only instance property, inherited ones included.
-    /// </summary>
-    private static IEnumerable<(
-        string Name,
-        ITypeSymbol Type,
-        IReadOnlyList<AttributeData> Attributes
-    )> BoundMembers(INamedTypeSymbol type)
-    {
-        var properties = new List<IPropertySymbol>();
-        for (
-            var current = type;
-            current is not null && current.SpecialType == SpecialType.None;
-            current = current.BaseType
-        )
-        {
-            properties.AddRange(
-                current
-                    .GetMembers()
-                    .OfType<IPropertySymbol>()
-                    .Where(property =>
-                        property is { IsStatic: false, IsIndexer: false }
-                        && property.DeclaredAccessibility == Accessibility.Public
-                        && properties.All(seen => seen.Name != property.Name)
-                    )
-            );
-        }
-
-        var constructorParameters = type
-            .InstanceConstructors.Where(constructor =>
-                constructor.DeclaredAccessibility == Accessibility.Public
-                && constructor.Parameters.Length > 0
-            )
-            .ToList()
-            is [var constructor]
-            ? constructor.Parameters
-            : [];
-
-        var bound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var parameter in constructorParameters)
-        {
-            var property = properties.FirstOrDefault(candidate =>
-                string.Equals(candidate.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)
-            );
-            bound.Add(parameter.Name);
-            yield return (
-                property?.Name ?? parameter.Name,
-                parameter.Type,
-                [.. parameter.GetAttributes(), .. property?.GetAttributes() ?? []]
-            );
-        }
-
-        foreach (
-            var property in properties.Where(property =>
-                property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
-                && !bound.Contains(property.Name)
-            )
-        )
-        {
-            yield return (property.Name, property.Type, property.GetAttributes());
-        }
-    }
 
     private static string? FullName(ISymbol? symbol) => symbol?.ToDisplayString(_fullName);
 }

@@ -238,7 +238,34 @@ public sealed class PreservedFieldProvenanceTests
             )
         );
 
+        Assert.StartsWith("error RIV2016: ", exception.Message);
         Assert.Contains("emitted owner '#/components/schemas/Missing'", exception.Message);
+    }
+
+    [Fact]
+    public void A_preserved_field_that_is_neither_an_extension_nor_documentation_is_RIV1122()
+    {
+        // Import writes only x- extensions and documentation fields, so anything else is
+        // stale or hand-edited generated code.
+        var compilation = CompilationHelper.CreateCompilation(
+            """
+            using Rivet;
+
+            [assembly: RivetDocumentInfo("Broken", "1")]
+            [assembly: RivetPreservedField("", "paths", "{}")]
+            """
+        );
+        var (_, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            Rivet.Tool.Analysis.OpenApiProvenanceWalker.Walk(compilation, walker)
+        );
+
+        Assert.StartsWith(
+            "error RIV1122: Invalid Rivet preserved-field name 'paths'.",
+            exception.Message
+        );
+        Assert.Contains("Re-import the OpenAPI document", exception.Message);
     }
 
     [Fact]

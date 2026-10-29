@@ -38,7 +38,7 @@ public sealed class PolymorphismTests
         public static class ShapesContract
         {
             public static readonly RouteDefinition<Shape> GetShape =
-                Define.Get<Shape>("/api/shapes/{id}");
+                Define.Get<Shape>("/api/shapes/{id:guid}");
         }
         """;
 
@@ -116,7 +116,7 @@ public sealed class PolymorphismTests
             public static class ChannelsContract
             {
                 public static readonly RouteDefinition<Channel> GetChannel =
-                    Define.Get<Channel>("/api/channels/{id}");
+                    Define.Get<Channel>("/api/channels/{id:guid}");
             }
             """;
 
@@ -215,10 +215,10 @@ public sealed class PolymorphismTests
             public static class DiscountsContract
             {
                 public static readonly RouteDefinition<Discount> GetDiscount =
-                    Define.Get<Discount>("/api/discounts/{id}");
+                    Define.Get<Discount>("/api/discounts/{id:guid}");
 
                 public static readonly RouteDefinition<Coupon> GetCoupon =
-                    Define.Get<Coupon>("/api/coupons/{id}");
+                    Define.Get<Coupon>("/api/coupons/{id:guid}");
             }
             """;
 
@@ -280,7 +280,7 @@ public sealed class PolymorphismTests
             public static class DiscountsContract
             {
                 public static readonly RouteDefinition<Discount> GetDiscount =
-                    Define.Get<Discount>("/api/discounts/{id}");
+                    Define.Get<Discount>("/api/discounts/{id:guid}");
             }
             """;
 
@@ -407,13 +407,13 @@ public sealed class PolymorphismTests
             public static class ShapesContract
             {
                 public static readonly RouteDefinition<Shape> GetShape =
-                    Define.Get<Shape>("/api/shapes/{id}");
+                    Define.Get<Shape>("/api/shapes/{id:guid}");
 
                 public static readonly RouteDefinition<Circle> GetCircle =
-                    Define.Get<Circle>("/api/circles/{id}");
+                    Define.Get<Circle>("/api/circles/{id:guid}");
 
                 public static readonly RouteDefinition<Tagged<int>> GetTagged =
-                    Define.Get<Tagged<int>>("/api/tagged/{id}");
+                    Define.Get<Tagged<int>>("/api/tagged/{id:guid}");
             }
             """;
 
@@ -458,10 +458,10 @@ public sealed class PolymorphismTests
             public static class ShapesContract
             {
                 public static readonly RouteDefinition<Shape> GetShape =
-                    Define.Get<Shape>("/api/shapes/{id}");
+                    Define.Get<Shape>("/api/shapes/{id:guid}");
 
                 public static readonly RouteDefinition<Circle> GetCircle =
-                    Define.Get<Circle>("/api/circles/{id}");
+                    Define.Get<Circle>("/api/circles/{id:guid}");
             }
             """;
 
@@ -513,7 +513,7 @@ public sealed class PolymorphismTests
             public static class ShapesContract
             {
                 public static readonly RouteDefinition<Shape> GetShape =
-                    Define.Get<Shape>("/api/shapes/{id}");
+                    Define.Get<Shape>("/api/shapes/{id:guid}");
             }
             """;
 
@@ -577,7 +577,7 @@ public sealed class PolymorphismTests
             public static class ShapesContract
             {
                 public static readonly RouteDefinition<{{usage}}> GetShape =
-                    Define.Get<{{usage}}>("/api/shapes/{id}");
+                    Define.Get<{{usage}}>("/api/shapes/{id:guid}");
             }
             """;
 
@@ -612,7 +612,7 @@ public sealed class PolymorphismTests
                 public static readonly RouteDefinition<{{(
                 generic ? "Shape<string>" : "Shape"
             )}}> GetShape =
-                    Define.Get<{{(generic ? "Shape<string>" : "Shape")}}>("/api/shapes/{id}");
+                    Define.Get<{{(generic ? "Shape<string>" : "Shape")}}>("/api/shapes/{id:guid}");
             }
             """;
 
@@ -686,7 +686,7 @@ public sealed class PolymorphismTests
             public static class ShapesContract
             {
                 public static readonly RouteDefinition<Shape> GetShape =
-                    Define.Get<Shape>("/api/shapes/{id}");
+                    Define.Get<Shape>("/api/shapes/{id:guid}");
             }
             """;
 

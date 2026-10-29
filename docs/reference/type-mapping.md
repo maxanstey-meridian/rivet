@@ -7,6 +7,12 @@ Nullability does not make a property optional: System.Text.Json writes `null`, s
 `string?` property is required with type `["string", "null"]`. Query, header and form
 parameters follow the model binder instead: a nullable parameter is optional.
 
+`[JsonRequired]` and C# `required` keep a property required, which it already was. What
+they can't do is sit on a property that's also allowed to go missing: `[RivetOptional]`, or
+a `[JsonIgnore]` condition that leaves it out when it's null or default. The host would then
+refuse a request without the member while the spec says it's optional, and one schema can't
+say both, so generation stops (`RIV1119`) and the message tells you which of the two to drop.
+
 ## Primitives
 
 | C# | JSON Schema |
@@ -109,6 +115,42 @@ parameters follow the model binder instead: a nullable parameter is optional.
   it: no `oneOf` of Rivet's own and no `{Base}_{Tag}` inventions. Variants it names that
   weren't preserved are still built from their records, under the source's ids.
 
+## Open and closed objects
+
+An object schema says nothing about members beyond its properties unless the type does:
+
+- **`[JsonExtensionData]`** opens it. System.Text.Json writes every entry of the bag as a
+  member of the object and reads every member it doesn't recognise into it, so the schema
+  says `additionalProperties: {}`: "anything else goes", which generators turn into an
+  index signature rather than a closed type. The bag itself never appears as a property.
+  A base type's bag opens every type that inherits it, polymorphic variants included. The
+  bag has to be something System.Text.Json takes: a `Dictionary<string, JsonElement>`, a
+  `Dictionary<string, object>` (or anything else implementing `IDictionary<string,
+  JsonElement>` or `IDictionary<string, object>`), or a `JsonObject`. Anything else (an
+  `IReadOnlyDictionary`, a `Dictionary<string, string>`), or a second bag anywhere down
+  the inheritance chain, would blow up at runtime, so it stops generation instead
+  (`RIV1118`). A private bag with no `[JsonInclude]` is invisible to the serializer and
+  opens nothing.
+- **`[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]`** closes it: the host
+  refuses a request carrying a member the type doesn't declare, so the schema says
+  `additionalProperties: false`. The attribute isn't inherited (System.Text.Json reads it off
+  the type itself), so neither is the `false`. On a polymorphic variant it's fine: the
+  discriminator is one of the variant's own properties. Disallow beside a bag is a pair
+  System.Text.Json refuses outright, and so does Rivet (`RIV1118`): the bag exists to take
+  exactly the members Disallow turns away. The host-wide `UnmappedMemberHandling` option is
+  a different story: generation can't see it, so the runtime adapters refuse it (see
+  [Runtime Validation](/guides/runtime-validation)).
+
+Contract JSON (`--from`) says the same with `"additionalProperties": true | false` on an
+object type or an inline object.
+
+An imported record gets a bag whenever its source admits extra members, so the server keeps
+whatever a client sends. Whether the spec says so is the source's call, as with every other
+keyword an import preserves: a schema that leaves `additionalProperties` out (which JSON Schema
+reads as "anything else goes") comes back without it, and one that writes it comes back as
+`additionalProperties: {}`. The importer records which on the type
+(`[RivetGeneratedType(..., DeclaresAdditionalProperties = true)]`).
+
 ## Constraint and metadata flow
 
 DataAnnotations and Rivet attributes enrich property schemas: `minLength`,
@@ -118,3 +160,11 @@ DataAnnotations and Rivet attributes enrich property schemas: `minLength`,
 [Attributes](/reference/attributes) for which attribute produces which keyword —
 and note these are spec-only; Rivet does not enforce them at runtime
 ([Runtime Validation](/guides/runtime-validation)).
+
+`[RivetSchemaType]` re-types a primitive: an unformatted `long` that should say `integer`,
+a `JsonElement` that's always an `object`. It needs a primitive (or nullable primitive) to
+work on, so on a member whose type is a record, a collection, an enum or a `[RivetScalar]`
+brand it would have nothing to change and used to vanish without a word. Now it stops
+generation (`RIV1117`). If the type really is a string (or another scalar) on the wire,
+say so on the type: make it a `[RivetScalar]` record with a single `Value` property, and
+every member that uses it gets the scalar's schema.

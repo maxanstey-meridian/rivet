@@ -29,7 +29,7 @@ public sealed class EnumParameterBindingCheckTests
                 Define.Get<StreetDto>("/api/streets");
 
             public static readonly RouteDefinition<StreetDto> Get =
-                Define.Get<StreetDto>("/api/streets/{kind}");
+                Define.Get<StreetDto>("/api/streets/{kind}").Parameter<string>("kind", "path", true);
 
             public static readonly RouteDefinition<StreetDto> Create =
                 Define.Post<StreetDto>("/api/streets");
@@ -1048,11 +1048,19 @@ public sealed class EnumParameterBindingCheckTests
     [InlineData(Camel, true)]
     [InlineData(Builtin, true)]
     [InlineData("", false)]
-    public void Functions_Handler_Binding_A_String_Enum_Is_Reported(string converter, bool reported)
+    [InlineData(Builtin, true, "streets", "List")]
+    [InlineData("", false, "streets", "List")]
+    public void Functions_Handler_Binding_A_String_Enum_Is_Reported(
+        string converter,
+        bool reported,
+        string route = "streets/{kind}",
+        string field = "Get"
+    )
     {
-        // The worker fills 'kind' from the route values, and none of its input converters
-        // turns a string into an enum but JsonPocoConverter, which parses the raw text as
-        // JSON. No member name survives that, whatever its casing; an integer does.
+        // The worker fills 'kind' from the route values, or from the query when the route
+        // has no such token, and none of its input converters turns a string into an enum
+        // but JsonPocoConverter, which parses the raw text as JSON. No member name survives
+        // that, whatever its casing; an integer does (tools/test_functions_host.py).
         const string azure = """
             using System;
 
@@ -1086,25 +1094,31 @@ public sealed class EnumParameterBindingCheckTests
             {
                 [Function("get-street")]
                 public IActionResult Run(
-                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "streets/{kind}")] object request,
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "ROUTE")] object request,
                     StreetKind kind,
                     System.Threading.CancellationToken cancellationToken
-                ) => StreetsContract.Get.Success(new StreetDto("1")).ToActionResult();
+                ) => StreetsContract.FIELD.Success(new StreetDto("1")).ToActionResult();
             }
             """;
 
-        var warnings = RunCheck(Contract, StreetKind(converter), azure, function);
+        var warnings = RunCheck(
+            Contract,
+            StreetKind(converter),
+            azure,
+            function.Replace("ROUTE", route).Replace("FIELD", field)
+        );
 
         if (reported)
         {
             var warning = AssertReported(warnings);
-            Assert.Equal("Get", warning.FieldName);
+            Assert.Equal(field, warning.FieldName);
             Assert.Contains("Azure Functions parameter 'kind'", warning.Message);
+            Assert.Contains("read a route or query value as JSON", warning.Message);
             Assert.Contains("for member Unknown", warning.Message);
         }
         else
         {
-            AssertNotReported(warnings, "Get");
+            AssertNotReported(warnings, field);
         }
     }
 

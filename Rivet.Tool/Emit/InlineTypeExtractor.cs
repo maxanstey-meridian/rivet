@@ -41,25 +41,28 @@ public static class InlineTypeExtractor
                 $"G:{Encode(g.Name)}<{string.Join(",", g.TypeArguments.Select(CanonicalHash))}>",
             TsType.TypeParam tp => $"TP:{Encode(tp.Name)}",
             TsType.Brand b => $"B:{Encode(b.Name)}({CanonicalHash(b.Inner)})",
+            // An open or closed object is another shape than an unstated one; an unstated one
+            // keeps the historical hash, so existing names stay stable.
             TsType.InlineObject obj => "IO:{"
                 + string.Join(
                     ",",
-                    obj.Fields.OrderBy(f => f.Name)
-                        .Select(f =>
-                            $"N:{Encode(f.Name)}O:{(f.Optional ? 1 : 0)}M:{FieldMetadataHash(f)}"
-                            + $"T:{CanonicalHash(f.Type)}"
-                        )
+                    obj.Properties.OrderBy(p => p.Name)
+                        .Select(p => $"{AnnotationsHash(p)}T:{CanonicalHash(p.Type)}")
                 )
-                + "}",
+                + "}"
+                + obj.AdditionalProperties switch
+                {
+                    true => "+",
+                    false => "-",
+                    null => "",
+                },
             TsType.TaggedUnion tu => "TU:"
                 + Encode(tu.Discriminator)
                 + "["
                 + string.Join(
                     ",",
                     tu.Variants.OrderBy(v => v.Tag)
-                        .Select(v =>
-                            $"{Encode(v.Tag)}:{CanonicalHash(v.Type)}M:{VariantMetadataHash(v)}"
-                        )
+                        .Select(v => $"{AnnotationsHash(v)}T:{CanonicalHash(v.Type)}")
                 )
                 + "]",
             TsType.Union u => "U:["
@@ -72,16 +75,22 @@ public static class InlineTypeExtractor
     private static string MetadataHash(TsScalarMetadata? metadata) =>
         metadata is null ? "" : Encode(JsonSerializer.Serialize(metadata));
 
-    // Every annotation a field, variant or inline enum carries tells two shapes apart: two
-    // variants that differ only in a description are two component schemas, not one. The
-    // type (an enum's members) is hashed on its own.
-    private static readonly TsType _hashedElsewhere = new TsType.TypeParam("");
+    // Every annotation a property or variant carries (its name or tag, optionality,
+    // description, constraints, ...) tells two shapes apart: two variants that differ only in
+    // a description are two component schemas, not one. Its type is left out, since
+    // CanonicalHash hashes that on its own (an enum's members in any order, say).
+    private static string AnnotationsHash<TRecord>(TRecord record)
+    {
+        var json = JsonSerializer.SerializeToNode(record)!.AsObject();
+        if (!json.Remove(nameof(TsPropertyDefinition.Type)))
+        {
+            throw new InvalidOperationException(
+                $"{typeof(TRecord).Name} serializes no '{nameof(TsPropertyDefinition.Type)}' to leave out of its annotations hash."
+            );
+        }
 
-    private static string FieldMetadataHash(TsType.InlineObjectField field) =>
-        Encode(JsonSerializer.Serialize(field with { Type = _hashedElsewhere }));
-
-    private static string VariantMetadataHash(TsType.TaggedUnionVariant variant) =>
-        Encode(JsonSerializer.Serialize(variant with { Type = _hashedElsewhere }));
+        return Encode(json.ToJsonString());
+    }
 
     public static List<(TsType.InlineObject Type, string Context)> CollectInlineObjects(
         IReadOnlyList<TsEndpointDefinition> endpoints
@@ -185,7 +194,7 @@ public static class InlineTypeExtractor
         }
 
         // Condition 2: type has at least one wrapper field
-        return type.Fields.Any(f => _responseWrapperFields.Contains(f.Name));
+        return type.Properties.Any(f => _responseWrapperFields.Contains(f.Name));
     }
 
     internal static string DisambiguateCollision(
@@ -227,7 +236,7 @@ public static class InlineTypeExtractor
 
         if (nameTypes.TryGetValue(name, out var existing))
         {
-            if (type.Fields.Count < existing.Fields.Count)
+            if (type.Properties.Count < existing.Properties.Count)
             {
                 var candidate = baseName + "Summary" + suffix;
                 if (!usedNames.Contains(candidate) && !HasStutter(candidate))
@@ -236,7 +245,7 @@ public static class InlineTypeExtractor
                 }
             }
 
-            if (type.Fields.Count > existing.Fields.Count)
+            if (type.Properties.Count > existing.Properties.Count)
             {
                 var candidate = baseName + "Detail" + suffix;
                 if (!usedNames.Contains(candidate) && !HasStutter(candidate))
@@ -246,10 +255,10 @@ public static class InlineTypeExtractor
             }
 
             // Strategy: same field names but different optionality → Ref for the more-optional variant
-            if (type.Fields.Count == existing.Fields.Count)
+            if (type.Properties.Count == existing.Properties.Count)
             {
-                var typeOptional = type.Fields.Count(f => f.Optional);
-                var existingOptional = existing.Fields.Count(f => f.Optional);
+                var typeOptional = type.Properties.Count(f => f.IsOptional);
+                var existingOptional = existing.Properties.Count(f => f.IsOptional);
                 if (typeOptional > existingOptional)
                 {
                     var candidate = baseName + "Ref" + suffix;
@@ -269,8 +278,8 @@ public static class InlineTypeExtractor
             }
 
             // Find a distinguishing field name
-            var existingFieldNames = existing.Fields.Select(f => f.Name).ToHashSet();
-            var distinguishing = type.Fields.FirstOrDefault(f =>
+            var existingFieldNames = existing.Properties.Select(f => f.Name).ToHashSet();
+            var distinguishing = type.Properties.FirstOrDefault(f =>
                 !existingFieldNames.Contains(f.Name)
             );
             if (distinguishing != default)
@@ -325,11 +334,11 @@ public static class InlineTypeExtractor
 
     internal static string DeriveStructuralName(TsType.InlineObject type)
     {
-        var fields = type.Fields.Where(f => f.Name != "data").ToList();
+        var fields = type.Properties.Where(f => f.Name != "data").ToList();
         // Don't strip data when it's the only field — "Object" is never useful
         if (fields.Count == 0)
         {
-            fields = type.Fields.ToList();
+            fields = type.Properties.ToList();
         }
 
         if (fields.Count == 0)
@@ -397,7 +406,7 @@ public static class InlineTypeExtractor
             var items = group.ToList();
             var representative = items[0].Type;
 
-            if (items.Count < 2 && representative.Fields.Count < fieldThreshold)
+            if (items.Count < 2 && representative.Properties.Count < fieldThreshold)
             {
                 continue;
             }
@@ -438,15 +447,17 @@ public static class InlineTypeExtractor
         {
             var representative = collected.First(c => CanonicalHash(c.Type) == hash).Type;
             var properties = representative
-                .Fields.Select(f =>
-                    f.ToProperty() with
-                    {
-                        Type = ReplaceInType(f.Type, replacements),
-                    }
-                )
+                .Properties.Select(p => p with { Type = ReplaceInType(p.Type, replacements) })
                 .ToList();
 
-            extractedTypes.Add(new TsTypeDefinition(typeRef.Name, [], properties));
+            extractedTypes.Add(
+                new TsTypeDefinition(
+                    typeRef.Name,
+                    [],
+                    properties,
+                    AdditionalProperties: representative.AdditionalProperties
+                )
+            );
         }
 
         // Replace InlineObjects in all endpoints
@@ -518,8 +529,8 @@ public static class InlineTypeExtractor
                                 Type = variant.Type is TsType.InlineObject own
                                     ? own with
                                     {
-                                        Fields = own
-                                            .Fields.Select(field =>
+                                        Properties = own
+                                            .Properties.Select(field =>
                                                 field with
                                                 {
                                                     Type = ReplaceInType(field.Type, replacements),
@@ -558,7 +569,7 @@ public static class InlineTypeExtractor
         {
             case TsType.InlineObject io:
                 results.Add((io, context));
-                foreach (var field in io.Fields)
+                foreach (var field in io.Properties)
                 {
                     CollectFromType(field.Type, $"{context}.field.{field.Name}", results);
                 }
@@ -574,7 +585,7 @@ public static class InlineTypeExtractor
                     var variantContext = $"{context}.variant.{variant.Tag}";
                     if (variant.Type is TsType.InlineObject own)
                     {
-                        foreach (var field in own.Fields)
+                        foreach (var field in own.Properties)
                         {
                             CollectFromType(
                                 field.Type,

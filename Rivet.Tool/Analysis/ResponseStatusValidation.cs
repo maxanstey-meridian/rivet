@@ -21,6 +21,41 @@ internal static partial class ResponseStatusValidation
     [GeneratedRegex(StatusKeyPattern)]
     private static partial Regex StatusKeyRegex();
 
+    /// <summary>
+    /// A status key authored in C# (<c>.StatusKey(...)</c>, or the statusKey form of
+    /// <c>.Returns(...)</c>, <c>.ResponseContent(...)</c> and the rest), as the spec writes it.
+    /// The runtime matches <c>default</c> ignoring case, by design, but OpenAPI only knows the
+    /// lowercase field, so any casing of it is emitted as <c>default</c>. Anything else
+    /// <see cref="IsStatusKey"/> refuses would reach the spec as written, so it stops
+    /// generation (RIV1120). A range keeps its spelling, as an imported one does.
+    /// </summary>
+    internal static string AuthoredStatusKey(string key, string where)
+    {
+        if (key.Equals("default", StringComparison.OrdinalIgnoreCase))
+        {
+            return "default";
+        }
+
+        return IsStatusKey(key) ? key : throw InvalidStatusKey($"'{key}'", where, "a status key");
+    }
+
+    /// <summary>
+    /// A status code authored as an int (<c>.Status(...)</c>, <c>.Returns(...)</c>,
+    /// <c>[ProducesResponseType]</c>): it must be one OpenAPI can key a response by, 100 to 599.
+    /// </summary>
+    internal static int AuthoredStatusCode(int code, string where) =>
+        IsStatusKey(code.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            ? code
+            : throw InvalidStatusKey(code.ToString(), where, "status code");
+
+    private static RivetUserException InvalidStatusKey(string key, string where, string what) =>
+        Diagnostics.Error(
+            Diagnostics.InvalidStatusKey,
+            $"{where} declares {what} {key}, which OpenAPI can't key a response by, so the spec "
+                + "would carry a response no client can match. Use a status code from 100 to 599 "
+                + "(\"404\"), a range (\"4XX\") or \"default\""
+        );
+
     internal static void RejectContractDuplicates(
         IEnumerable<TsResponseType> responses,
         string endpointName
@@ -34,8 +69,9 @@ internal static partial class ResponseStatusValidation
             return;
         }
 
-        throw new RivetUserException(
-            $"error {Diagnostics.DuplicateResponseStatus}: endpoint '{endpointName}' declares response status "
+        throw Diagnostics.Error(
+            Diagnostics.DuplicateResponseStatus,
+            $"endpoint '{endpointName}' declares response status "
                 + $"{duplicate.Key} more than once; authored contracts must declare exactly one response shape per status"
         );
     }
@@ -53,8 +89,9 @@ internal static partial class ResponseStatusValidation
             if (!seen.Add(response.EffectiveStatusKey))
             {
                 // Keeping either declaration would silently drop the other's shape and metadata.
-                throw new RivetUserException(
-                    $"error {Diagnostics.DuplicateResponseStatusInIr}: endpoint '{endpointName}' declares response status "
+                throw Diagnostics.Error(
+                    Diagnostics.DuplicateResponseStatusInIr,
+                    $"endpoint '{endpointName}' declares response status "
                         + $"{response.EffectiveStatusKey} more than once; a status carries a single response shape. "
                         + "Remove the duplicate (often one declaration has the wrong status), or, if the status genuinely "
                         + "returns different shapes, declare one union type ([RivetUnion] in C#) and declare it once"
@@ -153,8 +190,9 @@ internal static partial class ResponseStatusValidation
 
             if (IsBodyForbiddenStatusKey(response.EffectiveStatusKey))
             {
-                throw new RivetUserException(
-                    $"error {Diagnostics.BodyForbiddenStatusExample}: endpoint '{endpointName}' "
+                throw Diagnostics.Error(
+                    Diagnostics.BodyForbiddenStatusExample,
+                    $"endpoint '{endpointName}' "
                         + $"authors response content on body-forbidden status {response.EffectiveStatusKey} — "
                         + "HTTP forbids a message body on 1xx/204/205/304, so the authored example/content "
                         + "could never reach the wire; move it to a status that allows a body or remove it"

@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
+using Microsoft.CodeAnalysis.Text;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tool.Analysis;
@@ -13,6 +14,12 @@ public enum CoverageWarningKind
     RouteMismatch,
     UnbindableEnumParameter,
     InputBindingMismatch,
+
+    /// <summary>RIV4008: the contract's security and the handler's authorization disagree.</summary>
+    SecurityMismatch,
+
+    /// <summary>RIV4009: whether the handler requires authentication can't be read.</summary>
+    AuthorizationUnreadable,
 }
 
 public sealed record CoverageWarning(
@@ -58,10 +65,22 @@ public static class CoverageChecker
         }
         if (fieldMap.Count == 0)
         {
-            return [];
+            return
+            [
+                .. SecurityWarnings(
+                    compilation,
+                    wkt,
+                    security,
+                    fieldMap,
+                    new Dictionary<IFieldSymbol, List<TerminalImplementation>>(
+                        SymbolEqualityComparer.Default
+                    )
+                ),
+            ];
         }
 
         var adapterType = compilation.GetTypeByMetadataName("Rivet.RivetResultExtensions");
+        var mapHandlers = IndexMapHandlers(compilation, wkt);
 
         var implementations = new Dictionary<IFieldSymbol, List<TerminalImplementation>>(
             SymbolEqualityComparer.Default
@@ -89,7 +108,8 @@ public static class CoverageChecker
                 {
                     bindings.Add(new ContractBinding(bound.Field, syntax));
                     if (
-                        RouteHandler(wkt, invocation, functionsRoutePrefix) is { } handler
+                        RouteHandler(wkt, mapHandlers, invocation, functionsRoutePrefix)
+                            is { } handler
                         && bindingHandlers.Add(handler.Syntax)
                     )
                     {
@@ -108,14 +128,15 @@ public static class CoverageChecker
                     continue;
                 }
 
-                var context = ResolveImplementation(
+                var contexts = ResolveImplementations(
                     wkt,
                     adapterType,
+                    mapHandlers,
                     invocation,
                     fieldMap,
                     functionsRoutePrefix
                 );
-                if (!context.IsEndpoint)
+                if (contexts.Count == 0)
                 {
                     continue;
                 }
@@ -131,11 +152,25 @@ public static class CoverageChecker
                     implementations[reference.Field] = fieldImplementations;
                 }
 
-                fieldImplementations.Add(new TerminalImplementation(syntax, context));
+                fieldImplementations.AddRange(
+                    contexts.Select(context => new TerminalImplementation(syntax, context))
+                );
             }
         }
 
-        return BuildWarnings(wkt, security, fieldMap, implementations, bindings, consumedBindings);
+        var warnings = BuildWarnings(
+            wkt,
+            security,
+            fieldMap,
+            implementations,
+            bindings,
+            consumedBindings
+        );
+        return
+        [
+            .. warnings,
+            .. SecurityWarnings(compilation, wkt, security, fieldMap, implementations),
+        ];
     }
 
     // Matched on the receiver's type, not the method's declaring type: Error and File are
@@ -226,9 +261,10 @@ public static class CoverageChecker
     /// be known statically: the local is ref, passed by ref/out, or assigned more than
     /// its initializer. A local declared without an initializer qualifies only through
     /// one simple assignment statement in the declaring block, between the declaration
-    /// and the statement using it.
+    /// and the statement using it. A top-level statement's local is scoped to the file's
+    /// top-level program.
     /// </summary>
-    private static IOperation? ProvenanceValue(ILocalReferenceOperation use)
+    internal static IOperation? ProvenanceValue(ILocalReferenceOperation use)
     {
         var local = use.Local;
         if (
@@ -244,7 +280,12 @@ public static class CoverageChecker
         var scopeSyntax =
             declaratorSyntax.FirstAncestorOrSelf<AnonymousFunctionExpressionSyntax>() as SyntaxNode
             ?? declaratorSyntax.FirstAncestorOrSelf<LocalFunctionStatementSyntax>() as SyntaxNode
-            ?? declaratorSyntax.FirstAncestorOrSelf<BaseMethodDeclarationSyntax>();
+            ?? declaratorSyntax.FirstAncestorOrSelf<BaseMethodDeclarationSyntax>() as SyntaxNode
+            ?? (
+                declaratorSyntax.FirstAncestorOrSelf<GlobalStatementSyntax>() is not null
+                    ? declaratorSyntax.FirstAncestorOrSelf<CompilationUnitSyntax>()
+                    : null
+            );
         if (scopeSyntax is null || semanticModel.GetOperation(scopeSyntax) is not { } scope)
         {
             return null;
@@ -341,45 +382,65 @@ public static class CoverageChecker
                 continue;
             }
 
+            // A handler is read once per field for RIV4005, which its route doesn't change, and
+            // once per route it's mapped on for RIV4006, whose route values do.
             var checkedHandlers = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+            var checkedRoutes = new Dictionary<IMethodSymbol, HashSet<string?>>(
+                SymbolEqualityComparer.Default
+            );
             foreach (var implementation in fieldImplementations)
             {
                 if (
-                    implementation.Context
-                        is {
-                            Handler: { } handler,
-                            BindingHost: { } host,
-                            InfersBody: var infersBody
-                        }
-                    && checkedHandlers.Add(handler)
+                    implementation.Context is
+                    { Handler: { } handler, BindingHost: { } host, InfersBody: var infersBody }
                 )
                 {
-                    warnings.AddRange(
-                        UnbindableEnumParameters(wkt, field, endpoint, handler, host, infersBody)
-                    );
-                    warnings.AddRange(
-                        ContractInputBinding
-                            .Compare(
+                    if (checkedHandlers.Add(handler))
+                    {
+                        warnings.AddRange(
+                            UnbindableEnumParameters(
                                 wkt,
-                                security,
+                                field,
                                 endpoint,
                                 handler,
                                 host,
-                                infersBody,
-                                implementation.Context.Route
+                                infersBody
                             )
-                            .Select(mismatch => new CoverageWarning(
-                                CoverageWarningKind.InputBindingMismatch,
-                                field.ContainingType.Name,
-                                field.Name,
-                                mismatch.Expected,
-                                mismatch.Actual,
-                                mismatch.Location,
-                                Message: $"{field.ContainingType.Name}.{field.Name} "
-                                    + $"({endpoint.HttpMethod} {endpoint.RouteTemplate}): "
-                                    + mismatch.Problem
-                            ))
-                    );
+                        );
+                    }
+
+                    if (!checkedRoutes.TryGetValue(handler, out var routes))
+                    {
+                        routes = [];
+                        checkedRoutes[handler] = routes;
+                    }
+
+                    if (routes.Add(implementation.Context.Route))
+                    {
+                        warnings.AddRange(
+                            ContractInputBinding
+                                .Compare(
+                                    wkt,
+                                    security,
+                                    endpoint,
+                                    handler,
+                                    host,
+                                    infersBody,
+                                    implementation.Context.Route
+                                )
+                                .Select(mismatch => new CoverageWarning(
+                                    CoverageWarningKind.InputBindingMismatch,
+                                    field.ContainingType.Name,
+                                    field.Name,
+                                    mismatch.Expected,
+                                    mismatch.Actual,
+                                    mismatch.Location,
+                                    Message: $"{field.ContainingType.Name}.{field.Name} "
+                                        + $"({endpoint.HttpMethod} {endpoint.RouteTemplate}): "
+                                        + mismatch.Problem
+                                ))
+                        );
+                    }
                 }
 
                 if (
@@ -448,6 +509,280 @@ public static class CoverageChecker
     }
 
     /// <summary>
+    /// K.5: each handler's authorization against the security its spec declares, asking only
+    /// whether a caller must authenticate (schemes and policies can't be matched). The spec is
+    /// a contract field's own security, or a <c>[RivetEndpoint]</c> action's
+    /// <c>[RivetSecure]</c>-family attributes (<see cref="SecurityDeclaration.FromAttributes"/>),
+    /// else the document's default. None at all is what the emitted OpenAPI says it is: no
+    /// credentials needed. A secured spec over a handler anyone can reach, and a spec admitting
+    /// anonymous callers over a handler that requires authentication, are RIV4008. When the
+    /// document declares no security scheme at all, the handlers that require authentication
+    /// under a spec that says nothing are one RIV4008, since one missing default is the cause.
+    /// Authorization --check can't read is RIV4009, never a guess. A <c>[RivetEndpoint]</c>
+    /// action that implements a contract field is compared once, as the field's handler.
+    /// </summary>
+    private static IEnumerable<CoverageWarning> SecurityWarnings(
+        Compilation compilation,
+        WellKnownTypes wkt,
+        ContractSecurityMetadata? security,
+        IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
+        IReadOnlyDictionary<IFieldSymbol, List<TerminalImplementation>> implementations
+    )
+    {
+        var actions = SymbolDiscovery
+            .Discover(compilation)
+            .EndpointMethods.Where(method => !method.IsStatic && !method.IsAbstract)
+            .ToList();
+        if (fieldMap.Count == 0 && actions.Count == 0)
+        {
+            yield break;
+        }
+
+        var authorization = HandlerAuthorization.Scan(compilation, wkt);
+        var comparison = new SecurityComparison(security);
+        var compared = new HashSet<(ISymbol?, SyntaxNode?)>();
+        foreach (var (field, endpoint) in fieldMap)
+        {
+            if (!implementations.TryGetValue(field, out var fieldImplementations))
+            {
+                continue;
+            }
+
+            var spec = new SecuritySpec(
+                field.ContainingType.Name,
+                field.Name,
+                $"{field.ContainingType.Name}.{field.Name} ({endpoint.HttpMethod} {endpoint.RouteTemplate})",
+                endpoint.Security,
+                IsContract: true
+            );
+            foreach (
+                var context in fieldImplementations.Select(implementation => implementation.Context)
+            )
+            {
+                if (
+                    context.Handler is not { } handler
+                    || !compared.Add((handler, context.MapCall?.Syntax))
+                )
+                {
+                    continue;
+                }
+
+                var verdict = context switch
+                {
+                    { BindingHost: ParameterBindingHost.Functions } => authorization.ForFunction(
+                        handler
+                    ),
+                    {
+                        BindingHost: ParameterBindingHost.MinimalApi,
+                        MapCall: { } mapCall,
+                        Groups: { } groups,
+                    } => authorization.ForMinimalApi(handler, mapCall, groups.Groups, groups.Root),
+                    { BindingHost: ParameterBindingHost.Mvc } => authorization.ForMvc(handler),
+                    _ => null,
+                };
+                if (
+                    verdict is not null
+                    && comparison.Compare(spec, verdict, handler.Locations.FirstOrDefault())
+                        is { } warning
+                )
+                {
+                    yield return warning;
+                }
+            }
+        }
+
+        foreach (var action in actions)
+        {
+            var (httpMethod, route) = EndpointWalker.ResolveActionRoute(wkt, action);
+            if (httpMethod is null || !compared.Add((action, null)))
+            {
+                continue;
+            }
+
+            var label = $"{action.ContainingType.Name}.{action.Name}";
+            var spec = new SecuritySpec(
+                action.ContainingType.Name,
+                action.Name,
+                $"{label} ({httpMethod} {route ?? "(unresolved route)"})",
+                SecurityDeclaration.FromAttributes(wkt, action, label),
+                IsContract: false
+            );
+            if (
+                comparison.Compare(
+                    spec,
+                    authorization.ForMvc(action),
+                    action.Locations.FirstOrDefault()
+                ) is
+                { } warning
+            )
+            {
+                yield return warning;
+            }
+        }
+
+        if (comparison.Summary() is { } summary)
+        {
+            yield return summary;
+        }
+    }
+
+    /// <summary>
+    /// What a handler's spec says about security: its own requirement (null inherits the
+    /// document's), and whether it's a contract field or a <c>[RivetEndpoint]</c> action, which
+    /// say it in different words.
+    /// </summary>
+    private sealed record SecuritySpec(
+        string ContractName,
+        string FieldName,
+        string Label,
+        SecurityRequirements? Own,
+        bool IsContract
+    );
+
+    /// <summary>One spec's security against one handler's verdict (K.5).</summary>
+    private sealed class SecurityComparison(ContractSecurityMetadata? security)
+    {
+        private readonly bool _noSchemes = security is null || security.Schemes.Count == 0;
+        private readonly List<string> _undeclared = [];
+
+        public CoverageWarning? Compare(SecuritySpec spec, Verdict verdict, Location? location)
+        {
+            var requirements = spec.Own ?? security?.GlobalRequirements;
+            var inherited = spec.Own is null;
+            if (verdict.RequiresAuthentication is not { } requiresAuthentication)
+            {
+                return Warning(
+                    CoverageWarningKind.AuthorizationUnreadable,
+                    $"{spec.Label}: --check can't tell whether the handler requires "
+                        + $"authentication: {string.Join("; ", verdict.Because)}. Apply "
+                        + "authorization unconditionally, from values --check can read (a "
+                        + "constant policy name, or a policy built inline with "
+                        + "AuthorizationPolicyBuilder), or decide the endpoint with "
+                        + "[AllowAnonymous]."
+                );
+            }
+
+            var why =
+                verdict.Because.Count > 0
+                    ? string.Join(", ", verdict.Because)
+                    : "nothing on it, its controller or route group, or the app requires an authenticated user";
+            var anonymous = spec.IsContract
+                ? "say .Anonymous() in the contract"
+                : "declare [RivetAnonymous] on the action";
+            if (requirements is null)
+            {
+                if (!requiresAuthentication)
+                {
+                    return null;
+                }
+
+                if (_noSchemes)
+                {
+                    _undeclared.Add(spec.Label);
+                    return null;
+                }
+
+                var declare = spec.IsContract ? ".Secure(...)" : "[RivetSecure(...)]";
+                return Warning(
+                    CoverageWarningKind.SecurityMismatch,
+                    $"{spec.Label}: the spec declares no security and the document has no "
+                        + "default, so it says anyone may call it, but the handler requires "
+                        + $"authentication ({why}), so an anonymous caller gets a 401. Declare "
+                        + $"the document's default security, or the endpoint's with {declare}, "
+                        + "or let anonymous callers in with [AllowAnonymous] (.AllowAnonymous() "
+                        + "on a minimal API)."
+                );
+            }
+
+            if (
+                requirements.Alternatives.Count == 0
+                || requirements.Alternatives.Any(alternative => alternative.Schemes.Count == 0)
+            )
+            {
+                if (!requiresAuthentication)
+                {
+                    return null;
+                }
+
+                var admits =
+                    inherited ? "the document's default security admits anonymous callers"
+                    : requirements.Alternatives.Count == 0
+                        ? spec.IsContract ? "the contract says .Anonymous()"
+                            : "the action's security is anonymous"
+                    : spec.IsContract ? "the contract says .OrAnonymous()"
+                    : "the action's security says [RivetOrAnonymous]";
+                return Warning(
+                    CoverageWarningKind.SecurityMismatch,
+                    $"{spec.Label}: {admits}, but the handler requires authentication ({why}), "
+                        + "so an anonymous caller gets a 401. Let anonymous callers in with "
+                        + "[AllowAnonymous] (.AllowAnonymous() on a minimal API), or stop "
+                        + "admitting them in the spec."
+                );
+            }
+
+            if (requiresAuthentication)
+            {
+                return null;
+            }
+
+            var requires = inherited
+                ? "the spec requires credentials (the document's default security)"
+                : "the spec requires credentials";
+            return Warning(
+                CoverageWarningKind.SecurityMismatch,
+                $"{spec.Label}: {requires}, but anyone can call the handler ({why}). "
+                    + "Authorize it ([Authorize], .RequireAuthorization() on it or its route "
+                    + "group or MapControllers(), an AuthorizeFilter in MvcOptions.Filters, a "
+                    + "fallback policy, or a Functions trigger level other than Anonymous), or "
+                    + $"{anonymous}."
+            );
+
+            CoverageWarning Warning(CoverageWarningKind kind, string message) =>
+                new(
+                    kind,
+                    spec.ContractName,
+                    spec.FieldName,
+                    Expected: null,
+                    Actual: null,
+                    location,
+                    Message: message
+                );
+        }
+
+        /// <summary>
+        /// The one RIV4008 for every handler that requires authentication under a spec that
+        /// says nothing, when the document declares no security scheme at all.
+        /// </summary>
+        public CoverageWarning? Summary()
+        {
+            if (_undeclared.Count == 0)
+            {
+                return null;
+            }
+
+            _undeclared.Sort(StringComparer.Ordinal);
+            return new CoverageWarning(
+                CoverageWarningKind.SecurityMismatch,
+                ContractName: "",
+                FieldName: "",
+                Expected: null,
+                Actual: null,
+                Location: null,
+                Message: $"{_undeclared.Count} endpoint(s) require authentication in their "
+                    + "handlers, but the document declares no security scheme, so the spec says "
+                    + "anyone may call them: "
+                    + string.Join(", ", _undeclared)
+                    + ". Declare the document's default security in source, so generation and "
+                    + "--check read the same one: [assembly: RivetSecurityScheme(...)] for the "
+                    + "scheme, then [assembly: RivetGlobalSecurity(0)] and "
+                    + "[assembly: RivetGlobalSecurityScheme(0, \"<scheme>\", new string[0])]. "
+                    + "Then mark the endpoints anyone may call .Anonymous() ([RivetAnonymous] "
+                    + "on a [RivetEndpoint] action)."
+            );
+        }
+    }
+
+    /// <summary>
     /// RIV4005: each value the handler binds from route, query, header or form (a parameter,
     /// or a member of a complex parameter bound member by member, at any depth) whose enum
     /// advertises a wire value the host's enum parser refuses. What reaches which parser is
@@ -489,9 +824,14 @@ public static class CoverageChecker
         }
     }
 
-    private static EndpointContext ResolveImplementation(
+    /// <summary>
+    /// The endpoints <paramref name="terminal"/> implements: its MVC action or Azure Function,
+    /// or else one per Map* call of the minimal-API handler it's returned from.
+    /// </summary>
+    private static IReadOnlyList<EndpointContext> ResolveImplementations(
         WellKnownTypes wkt,
         INamedTypeSymbol? adapterType,
+        MapHandlerIndex mapHandlers,
         IInvocationOperation terminal,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
         string functionsRoutePrefix
@@ -499,7 +839,7 @@ public static class CoverageChecker
     {
         if (adapterType is null)
         {
-            return EndpointContext.None;
+            return [];
         }
 
         if (ReturningMethod(terminal, "ToActionResult", adapterType) is { } method)
@@ -507,17 +847,20 @@ public static class CoverageChecker
             var controller = TryResolveController(wkt, method);
             if (controller.IsEndpoint)
             {
-                return controller;
+                return [controller];
             }
 
             var function = TryResolveFunction(wkt, method, functionsRoutePrefix);
             if (function.IsEndpoint)
             {
-                return function;
+                return [function];
             }
         }
 
-        return TryResolveMinimalApi(wkt, adapterType, terminal, fieldMap);
+        return MapHandler(mapHandlers, terminal)
+            .Select(handler => TryResolveMinimalApi(wkt, adapterType, terminal, handler, fieldMap))
+            .Where(context => context.IsEndpoint)
+            .ToList();
     }
 
     /// <summary>
@@ -581,18 +924,17 @@ public static class CoverageChecker
         WellKnownTypes wkt,
         INamedTypeSymbol adapterType,
         IInvocationOperation terminal,
+        MappedHandler handler,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
     )
     {
-        var (handler, mapCall) = MapHandler(wkt, terminal);
-        if (
-            handler is null
-            || mapCall is null
-            || !IsReturnedThroughAdapter(terminal, handler, "ToResult", adapterType)
-        )
+        var mapCall = handler.MapCall;
+        if (!IsReturnedThroughAdapter(terminal, handler.Body, "ToResult", adapterType))
         {
             return EndpointContext.None;
         }
+
+        var groups = ResolveMapGroups(wkt, mapCall.Arguments[0].Value);
 
         IReadOnlyList<string> methods;
         if (_minimalApiMethodMap.TryGetValue(mapCall.TargetMethod.Name, out var verb))
@@ -625,6 +967,8 @@ public static class CoverageChecker
                     Handler = handler.Symbol,
                     BindingHost = ParameterBindingHost.MinimalApi,
                     InfersBody = true,
+                    MapCall = mapCall,
+                    Groups = groups,
                 };
             }
 
@@ -653,13 +997,13 @@ public static class CoverageChecker
             // Constant MapGroup receiver chains: prepend accumulated group prefixes
             // (nested groups accumulate). Unresolvable receivers keep the route
             // unresolved rather than inventing a prefix.
-            var groupPrefix = ResolveMapGroupPrefix(wkt, mapCall.Arguments[0].Value, []);
-            routeError = groupPrefix.Unresolved
+            var groupPrefix = groups.Prefix();
+            routeError = groupPrefix is null
                 ? "unresolved route: receiver chain does not resolve to constant MapGroup prefixes"
                 : null;
-            route = groupPrefix.Unresolved
+            route = groupPrefix is null
                 ? null
-                : TransportIdentity.NormalizeRoute($"{groupPrefix.Prefix}/{template.Trim('/')}");
+                : TransportIdentity.NormalizeRoute($"{groupPrefix}/{template.Trim('/')}");
         }
 
         // The method-mismatch check compares verbs case-blind, but body inference reads them
@@ -671,42 +1015,123 @@ public static class CoverageChecker
             Handler = handler.Symbol,
             BindingHost = ParameterBindingHost.MinimalApi,
             InfersBody = EnumParameterBinding.MinimalApiInfersBody(methods),
+            MapCall = mapCall,
+            Groups = groups,
         };
     }
 
     /// <summary>
-    /// The lambda handed to Map* that <paramref name="operation"/> sits in, and that Map*
-    /// call. It's the Map* lambda, not the nearest one: a terminal in a Match arm sits in a
-    /// lambda of its own inside it.
+    /// Every Map* call's handler, keyed by the syntax of the function it runs: a lambda, a
+    /// local holding one, a local function, or a method named as a method group
+    /// (<c>app.MapGet(route, TaskHandlers.Get)</c>) that has source in the compilation. A
+    /// function mapped more than once has an entry per Map* call. A method group naming a
+    /// method without source has no body to read, so it's left out: no terminal can be found
+    /// in it anyway.
     /// </summary>
-    private static (IAnonymousFunctionOperation? Handler, IInvocationOperation? MapCall) MapHandler(
-        WellKnownTypes wkt,
-        IOperation operation
-    ) =>
-        Ancestors(operation)
-            .OfType<IAnonymousFunctionOperation>()
-            .Select(lambda => (lambda, call: ArgumentOf(lambda)))
-            .FirstOrDefault(candidate =>
-                candidate.call is { } call
-                && SymbolEqualityComparer.Default.Equals(
-                    call.TargetMethod.ContainingType,
-                    wkt.EndpointRouteBuilderExtensions
+    private static MapHandlerIndex IndexMapHandlers(Compilation compilation, WellKnownTypes wkt)
+    {
+        var index = new MapHandlerIndex();
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            SemanticModel? semanticModel = null;
+            foreach (
+                var syntax in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            )
+            {
+                // Every Map* method's name says so; the semantic check below is the real one.
+                if (
+                    InvokedName(syntax) is not { } name
+                    || !name.StartsWith("Map", StringComparison.Ordinal)
                 )
-            );
+                {
+                    continue;
+                }
+
+                semanticModel ??= compilation.GetSemanticModel(tree);
+                if (
+                    semanticModel.GetOperation(syntax) is not IInvocationOperation call
+                    || !SymbolEqualityComparer.Default.Equals(
+                        call.TargetMethod.ContainingType,
+                        wkt.EndpointRouteBuilderExtensions
+                    )
+                )
+                {
+                    continue;
+                }
+
+                foreach (var argument in call.Arguments)
+                {
+                    if (HandlerFunction(argument.Value) is not var (body, symbol))
+                    {
+                        continue;
+                    }
+
+                    var key = (body.Syntax.SyntaxTree, body.Syntax.Span);
+                    if (!index.TryGetValue(key, out var mappings))
+                    {
+                        mappings = [];
+                        index[key] = mappings;
+                    }
+
+                    mappings.Add(new MappedHandler(body, symbol, call));
+                }
+            }
+        }
+
+        return index;
+
+        static string? InvokedName(InvocationExpressionSyntax syntax) =>
+            syntax.Expression switch
+            {
+                MemberAccessExpressionSyntax access => access.Name.Identifier.ValueText,
+                MemberBindingExpressionSyntax binding => binding.Name.Identifier.ValueText,
+                SimpleNameSyntax simple => simple.Identifier.ValueText,
+                _ => null,
+            };
+    }
 
     /// <summary>
-    /// The route handler <paramref name="operation"/> sits in: the lambda handed to Map*,
+    /// The function a Map* handler argument runs and its symbol, through the delegate
+    /// creation: a lambda (or a local holding one), or a method group's method with source.
+    /// </summary>
+    private static (IOperation Body, IMethodSymbol Symbol)? HandlerFunction(IOperation value) =>
+        DelegateTarget(value, []) switch
+        {
+            IAnonymousFunctionOperation lambda => (lambda, lambda.Symbol),
+            IMethodReferenceOperation { Method: var method } when SourceBody(method) is { } body =>
+                (body, method),
+            _ => null,
+        };
+
+    /// <summary>
+    /// The Map* handlers <paramref name="operation"/> sits in: walking out from it, the first
+    /// function some Map* call runs. It's the Map* lambda, not the nearest one: a terminal in
+    /// a Match arm sits in a lambda of its own inside it.
+    /// </summary>
+    private static IReadOnlyList<MappedHandler> MapHandler(
+        MapHandlerIndex mapHandlers,
+        IOperation operation
+    ) =>
+        operation
+            .Syntax.Ancestors()
+            .Select(node => mapHandlers.GetValueOrDefault((node.SyntaxTree, node.Span)))
+            .FirstOrDefault(mappings => mappings is not null)
+        ?? [];
+
+    /// <summary>
+    /// The route handler <paramref name="operation"/> sits in: the function handed to Map*,
     /// or else its method when that's an MVC action or an Azure Function.
     /// </summary>
     private static IOperation? RouteHandler(
         WellKnownTypes wkt,
+        MapHandlerIndex mapHandlers,
         IOperation operation,
         string functionsRoutePrefix
     )
     {
-        if (MapHandler(wkt, operation).Handler is { } lambda)
+        if (MapHandler(mapHandlers, operation) is [var mapped, ..])
         {
-            return lambda;
+            return mapped.Body;
         }
 
         var method = operation
@@ -737,9 +1162,9 @@ public static class CoverageChecker
     /// path's business, not a helper's: a handler returning <c>endpoint.Success(x).ToResult()</c>
     /// has used its binding only if that's its host's adapter, which the terminal path decides.
     /// A helper's answer handed to the adapter, as in <c>NotFound(endpoint).ToResult()</c>, is
-    /// still searched. Passing
-    /// a binding makes it used, so it isn't orphaned, but it never covers a field: that still
-    /// takes a terminal the handler returns through the adapter itself.
+    /// still searched. Passing a binding makes it used, so it isn't orphaned. Covering a
+    /// field is the terminal path's call: a terminal the handler returns through the adapter,
+    /// itself or through a helper that adapts it (<see cref="IsReturnedThroughAdapter"/>).
     /// </summary>
     private static IEnumerable<SyntaxNode> BindingsPassedOnReturn(
         WellKnownTypes wkt,
@@ -765,7 +1190,8 @@ public static class CoverageChecker
                 .SelectMany(leaf =>
                     leaf switch
                     {
-                        IInvocationOperation call => PassedValues(call).SelectMany(Argument),
+                        IInvocationOperation call => PassedArguments(call)
+                            .SelectMany(passed => Argument(passed.Value)),
                         // Marked only once resolved: a use outside the declaring block may not
                         // resolve where a later one does.
                         ILocalReferenceOperation local
@@ -785,69 +1211,108 @@ public static class CoverageChecker
                         ? Argument(receiver).Concat(Passed(leaf))
                     : Passed(leaf)
                 );
-
-        // A C# 14 extension block's receiver is the call's instance, not its first argument.
-        static IEnumerable<IOperation> PassedValues(IInvocationOperation call) =>
-            call
-                .Arguments.Select(argument => argument.Value)
-                .Concat(
-                    call
-                        is { TargetMethod.ContainingType.IsExtension: true, Instance: { } receiver }
-                        ? [receiver]
-                        : []
-                );
     }
 
     /// <summary>
-    /// Accumulated constant MapGroup prefixes for a minimal-API receiver, or an
-    /// unresolved marker when the receiver chain cannot be resolved statically.
-    /// Only compile-time-constant prefixes are supported (mirroring the extractor's
-    /// constant-string policy); receivers that do not resolve keep the route
-    /// unresolved instead of inventing a prefix.
+    /// The MapGroup calls a minimal-API receiver is built from, innermost first, and the
+    /// receiver the chain starts from. It follows locals with one known value and convention
+    /// calls that hand back the builder they're given (<c>.RequireAuthorization()</c>,
+    /// <c>.WithTags(...)</c>), so <c>var api = app.MapGroup("/api").RequireAuthorization();</c>
+    /// still names the group. A local it can't follow leaves the chain unresolved. The route
+    /// prefix (<see cref="Prefix"/>) and the groups' authorization (K.5) both read it.
     /// </summary>
-    private readonly record struct MapGroupPrefix(string Prefix, bool Unresolved);
-
-    private static MapGroupPrefix ResolveMapGroupPrefix(
-        WellKnownTypes wkt,
-        IOperation receiver,
-        HashSet<ILocalSymbol> visitedLocals
+    private sealed record MapGroupChain(
+        IReadOnlyList<IInvocationOperation> Groups,
+        bool Unresolved,
+        IOperation Root
     )
     {
-        switch (WithoutImplicitConversions(receiver))
+        /// <summary>
+        /// The accumulated prefix, or null when it can't be known statically: the chain is
+        /// unresolved, or a prefix isn't a compile-time constant (mirroring the extractor's
+        /// constant-string policy). A receiver that isn't a group, the app or any other root,
+        /// adds no prefix.
+        /// </summary>
+        public string? Prefix()
         {
-            // A local provenance hop: var group = ...; group.MapGet(...)
-            case ILocalReferenceOperation local:
-                return visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } value
-                    ? ResolveMapGroupPrefix(wkt, value, visitedLocals)
-                    : new MapGroupPrefix(Prefix: "", Unresolved: true);
+            if (Unresolved)
+            {
+                return null;
+            }
 
-            // Chained group: inner.MapGroup("/v3") — its prefix follows the receiver's.
-            case IInvocationOperation { TargetMethod.Name: "MapGroup" } group
-                when SymbolEqualityComparer.Default.Equals(
-                    group.TargetMethod.ContainingType,
-                    wkt.EndpointRouteBuilderExtensions
-                ):
+            var prefix = "";
+            foreach (var group in Groups.Reverse())
+            {
                 if (
                     Argument(group, "prefix")?.ConstantValue
-                    is not { HasValue: true, Value: string prefix }
+                    is not { HasValue: true, Value: string part }
                 )
                 {
-                    return new MapGroupPrefix(Prefix: "", Unresolved: true);
+                    return null;
                 }
 
-                var outer = ResolveMapGroupPrefix(wkt, group.Arguments[0].Value, visitedLocals);
-                return outer.Unresolved
-                    ? outer
-                    : new MapGroupPrefix(
-                        TransportIdentity.NormalizeRoute($"{outer.Prefix}/{prefix.Trim('/')}"),
-                        Unresolved: false
-                    );
+                prefix = TransportIdentity.NormalizeRoute($"{prefix}/{part.Trim('/')}");
+            }
 
-            // Root receiver (app / IEndpointRouteBuilder, or any other base): no prefix.
-            default:
-                return new MapGroupPrefix(Prefix: "", Unresolved: false);
+            return prefix;
         }
     }
+
+    private static MapGroupChain ResolveMapGroups(WellKnownTypes wkt, IOperation receiver)
+    {
+        var groups = new List<IInvocationOperation>();
+        var visitedLocals = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
+        var current = receiver;
+        while (true)
+        {
+            switch (WithoutImplicitConversions(current))
+            {
+                case ILocalReferenceOperation local:
+                    if (visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } value)
+                    {
+                        current = value;
+                        continue;
+                    }
+
+                    return new MapGroupChain(groups, Unresolved: true, local);
+                case IInvocationOperation { TargetMethod.Name: "MapGroup" } group
+                    when SymbolEqualityComparer.Default.Equals(
+                        group.TargetMethod.ContainingType,
+                        wkt.EndpointRouteBuilderExtensions
+                    ):
+                    groups.Add(group);
+                    current = group.Arguments[0].Value;
+                    continue;
+                case IInvocationOperation call when PassedBuilder(call) is { } passed:
+                    current = passed;
+                    continue;
+                case var root:
+                    return new MapGroupChain(groups, Unresolved: false, root!);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The builder a convention call hands back, when it returns the type it takes: an
+    /// extension method returning its <c>this</c> parameter's type, as
+    /// <c>RequireAuthorization&lt;TBuilder&gt;(this TBuilder)</c> and <c>WithName</c> do, or an
+    /// instance method returning its receiver's. Null for anything else, a call that makes a
+    /// new builder (MapGroup, MapGet) included.
+    /// </summary>
+    internal static IOperation? PassedBuilder(IInvocationOperation call) =>
+        call switch
+        {
+            {
+                TargetMethod: { IsExtensionMethod: true, ReturnType: var returned },
+                Arguments: [var first, ..]
+            }
+                when first.Parameter is { Ordinal: 0 } parameter
+                    && SymbolEqualityComparer.Default.Equals(returned, parameter.Type) =>
+                first.Value,
+            { Instance: { Type: var receiverType } instance, TargetMethod.ReturnType: var returned }
+                when SymbolEqualityComparer.Default.Equals(returned, receiverType) => instance,
+            _ => null,
+        };
 
     private static EndpointContext TryResolveFunction(
         WellKnownTypes wkt,
@@ -892,45 +1357,103 @@ public static class CoverageChecker
 
     /// <summary>
     /// True when <paramref name="function"/> returns, from a reachable return of its own,
-    /// the named Rivet adapter applied to <paramref name="terminal"/>. Both the returned
-    /// value and the adapter's receiver are expanded by <see cref="ValuesOf"/>, and the
-    /// receiver also through a local holding it.
+    /// the named Rivet adapter applied to <paramref name="terminal"/>, or hands the terminal
+    /// to a helper that does. Both the returned value and the adapter's receiver are expanded
+    /// by <see cref="ValuesOf"/>, and the receiver also through a local holding it. A helper is
+    /// any called method with source in the compilation, a local function included: it counts
+    /// when one of its own returned values is the adapter applied to the parameter the terminal
+    /// was passed in, as in <c>Done(r) =&gt; r.ToResult()</c>, or hands that parameter on to a
+    /// helper that does. Helpers are followed transitively, each parameter once. One that
+    /// throws the terminal away, or adapts something else, gives nothing.
     /// </summary>
     private static bool IsReturnedThroughAdapter(
         IInvocationOperation terminal,
         IOperation function,
         string adapterName,
         INamedTypeSymbol adapterType
-    )
-    {
-        return ReturnedValues(function)
-            .Any(candidate =>
-                candidate is IInvocationOperation { Arguments: [var receiver, ..] } adapter
-                && adapter.TargetMethod.Name == adapterName
-                && SymbolEqualityComparer.Default.Equals(
-                    adapter.TargetMethod.ContainingType,
-                    adapterType
-                )
-                && ResolvesTo(receiver.Value, terminal, [])
+    ) =>
+        Adapts(
+            function,
+            value => IsSameSyntax(value.Syntax, terminal.Syntax),
+            adapterName,
+            adapterType,
+            new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default)
+        );
+
+    private static bool Adapts(
+        IOperation function,
+        Func<IOperation, bool> isTarget,
+        string adapterName,
+        INamedTypeSymbol adapterType,
+        HashSet<IParameterSymbol> followed
+    ) =>
+        ReturnedValues(function)
+            .OfType<IInvocationOperation>()
+            .Any(call =>
+                SymbolEqualityComparer.Default.Equals(call.TargetMethod.ContainingType, adapterType)
+                    ? call.TargetMethod.Name == adapterName
+                        && call.Arguments is [var receiver, ..]
+                        && ResolvesTo(receiver.Value, isTarget, [])
+                    : PassedArguments(call)
+                        .Any(passed =>
+                            ResolvesTo(passed.Value, isTarget, [])
+                            && followed.Add(passed.Parameter.OriginalDefinition)
+                            && SourceBody(call.TargetMethod) is { } helper
+                            && Adapts(
+                                helper,
+                                value => IsParameter(value, passed.Parameter),
+                                adapterName,
+                                adapterType,
+                                followed
+                            )
+                        )
             );
 
-        static bool ResolvesTo(
-            IOperation receiver,
-            IInvocationOperation terminal,
-            HashSet<ILocalSymbol> visitedLocals
-        ) =>
-            ValuesOf(receiver)
-                .Any(value =>
-                    IsSameSyntax(value.Syntax, terminal.Syntax)
-                    || value is ILocalReferenceOperation local
-                        && visitedLocals.Add(local.Local)
-                        && ProvenanceValue(local) is { } provenance
-                        && ResolvesTo(provenance, terminal, visitedLocals)
-                );
-    }
+    private static bool ResolvesTo(
+        IOperation value,
+        Func<IOperation, bool> isTarget,
+        HashSet<ILocalSymbol> visitedLocals
+    ) =>
+        ValuesOf(value)
+            .Any(candidate =>
+                isTarget(candidate)
+                || candidate is ILocalReferenceOperation local
+                    && visitedLocals.Add(local.Local)
+                    && ProvenanceValue(local) is { } provenance
+                    && ResolvesTo(provenance, isTarget, visitedLocals)
+            );
+
+    private static bool IsParameter(IOperation value, IParameterSymbol parameter) =>
+        value is IParameterReferenceOperation reference
+        && SymbolEqualityComparer.Default.Equals(
+            reference.Parameter.OriginalDefinition,
+            parameter.OriginalDefinition
+        );
+
+    /// <summary>
+    /// Each value <paramref name="call"/> passes and the parameter it lands in. A classic
+    /// extension method's receiver is its first argument; a C# 14 extension block's is the
+    /// call's instance, landing in the block's parameter.
+    /// </summary>
+    private static IEnumerable<(IParameterSymbol Parameter, IOperation Value)> PassedArguments(
+        IInvocationOperation call
+    ) =>
+        call
+            .Arguments.Where(argument => argument.Parameter is not null)
+            .Select(argument => (argument.Parameter!, argument.Value))
+            .Concat(
+                call
+                    is {
+                        TargetMethod.ContainingType:
+                        { IsExtension: true, ExtensionParameter: { } extensionParameter },
+                        Instance: { } receiver,
+                    }
+                    ? [(extensionParameter, receiver)]
+                    : []
+            );
 
     /// <summary>The values <paramref name="function"/> returns from its own reachable returns.</summary>
-    private static IEnumerable<IOperation> ReturnedValues(IOperation function)
+    internal static IEnumerable<IOperation> ReturnedValues(IOperation function)
     {
         // An iterator, so each enumeration starts with nothing expanded.
         foreach (
@@ -994,7 +1517,7 @@ public static class CoverageChecker
             .SelectMany(leaf =>
                 leaf is IInvocationOperation invocation
                     ? invocation
-                        .Arguments.Select(argument => FunctionOf(argument.Value, [], expanded))
+                        .Arguments.Select(argument => FunctionOf(argument.Value, expanded))
                         .OfType<IOperation>()
                         .SelectMany(function => ReturnedValues(function, expanded))
                         .Prepend(invocation)
@@ -1029,47 +1552,55 @@ public static class CoverageChecker
     /// function already in <paramref name="expanded"/> resolves to nothing, so one that names
     /// itself is read once.
     /// </summary>
-    private static IOperation? FunctionOf(
-        IOperation value,
-        HashSet<ILocalSymbol> visitedLocals,
-        HashSet<IMethodSymbol> expanded
-    ) =>
-        value switch
+    private static IOperation? FunctionOf(IOperation value, HashSet<IMethodSymbol> expanded) =>
+        DelegateTarget(value, []) switch
         {
             IAnonymousFunctionOperation lambda => lambda,
-            IDelegateCreationOperation creation => FunctionOf(
-                creation.Target,
-                visitedLocals,
-                expanded
-            ),
-            IConversionOperation conversion => FunctionOf(
-                conversion.Operand,
-                visitedLocals,
-                expanded
-            ),
-            ILocalReferenceOperation local
-                when visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } provenance =>
-                FunctionOf(provenance, visitedLocals, expanded),
-            IMethodReferenceOperation
-            {
-                Method: { MethodKind: MethodKind.LocalFunction } localFunction,
-                SemanticModel: { } semanticModel,
-            } when expanded.Add(localFunction.OriginalDefinition) =>
-                localFunction.DeclaringSyntaxReferences is [var reference]
-                    ? semanticModel.GetOperation(reference.GetSyntax()) as ILocalFunctionOperation
-                    : null,
+            IMethodReferenceOperation { Method: { MethodKind: MethodKind.LocalFunction } local }
+                when expanded.Add(local.OriginalDefinition) => SourceBody(local),
             _ => null,
         };
 
-    /// <summary>The invocation a lambda is passed to as an argument, if it is one.</summary>
-    private static IInvocationOperation? ArgumentOf(IAnonymousFunctionOperation lambda) =>
-        Ancestors(lambda)
-            .FirstOrDefault(operation =>
-                operation is not (IDelegateCreationOperation or IConversionOperation)
-            )
-            is IArgumentOperation { Parent: IInvocationOperation invocation }
-            ? invocation
-            : null;
+    /// <summary>
+    /// What a delegate-typed value is made from, through its delegate creation, conversions
+    /// and a local with a single known value: a lambda or a method group, or null.
+    /// </summary>
+    private static IOperation? DelegateTarget(
+        IOperation value,
+        HashSet<ILocalSymbol> visitedLocals
+    ) =>
+        value switch
+        {
+            IAnonymousFunctionOperation or IMethodReferenceOperation => value,
+            IDelegateCreationOperation creation => DelegateTarget(creation.Target, visitedLocals),
+            IConversionOperation conversion => DelegateTarget(conversion.Operand, visitedLocals),
+            ILocalReferenceOperation local
+                when visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } provenance =>
+                DelegateTarget(provenance, visitedLocals),
+            _ => null,
+        };
+
+    /// <summary>
+    /// The operation body of <paramref name="method"/> when its source is in the compilation:
+    /// an ordinary method's or accessor's, or a local function's own operation. A partial
+    /// method's is its implementation's. Null for a method only metadata knows.
+    /// </summary>
+    internal static IOperation? SourceBody(IMethodSymbol method)
+    {
+        var definition = method.OriginalDefinition;
+        definition = definition.PartialImplementationPart ?? definition;
+        if (
+            definition.ContainingAssembly
+                is not ISourceAssemblySymbol { Compilation: var compilation }
+            || definition.DeclaringSyntaxReferences is not [var reference]
+        )
+        {
+            return null;
+        }
+
+        var syntax = reference.GetSyntax();
+        return compilation.GetSemanticModel(syntax.SyntaxTree).GetOperation(syntax);
+    }
 
     /// <summary>Descendants of a function body, excluding nested functions' bodies.</summary>
     private static IEnumerable<IOperation> OwnDescendants(IOperation operation)
@@ -1129,6 +1660,20 @@ public static class CoverageChecker
     private sealed record ContractReference(IFieldSymbol Field, SyntaxNode? Binding);
 
     /// <summary>
+    /// A function a Map* call runs: its operation (a lambda's, a local function's or a method
+    /// body's), its symbol, whose parameters are what the host binds, and that Map* call.
+    /// </summary>
+    private sealed record MappedHandler(
+        IOperation Body,
+        IMethodSymbol Symbol,
+        IInvocationOperation MapCall
+    );
+
+    /// <summary>Map* handlers by the syntax of the function they run (<see cref="IndexMapHandlers"/>).</summary>
+    private sealed class MapHandlerIndex
+        : Dictionary<(SyntaxTree Tree, TextSpan Span), List<MappedHandler>>;
+
+    /// <summary>
     /// A resolved implementation. <see cref="Handler"/> and <see cref="BindingHost"/> are set
     /// for every handler whose binding <see cref="ParameterBindingSources"/> knows: minimal
     /// APIs, MVC actions and Azure Functions.
@@ -1151,5 +1696,11 @@ public static class CoverageChecker
         /// or <see cref="EnumParameterBinding.MvcInfersBody"/>. Unused for Azure Functions.
         /// </summary>
         public bool InfersBody { get; init; }
+
+        /// <summary>A minimal API's Map* call, whose conventions K.5 reads.</summary>
+        public IInvocationOperation? MapCall { get; init; }
+
+        /// <summary>The route groups a minimal API's Map* call is made on.</summary>
+        public MapGroupChain? Groups { get; init; }
     }
 }

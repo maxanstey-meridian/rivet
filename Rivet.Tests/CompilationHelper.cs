@@ -301,6 +301,59 @@ public static class CompilationHelper
         return mainCompilation;
     }
 
+    /// <summary>
+    /// Creates a compilation where packageSource is a compiled assembly the main source
+    /// references by its image, as it would a NuGet package: outside the walkable assemblies,
+    /// and imported with <c>MetadataImportOptions.Public</c>, so its non-public members aren't
+    /// symbols. Returns the image too, to load beside the main assembly at runtime.
+    /// </summary>
+    public static (
+        Compilation Compilation,
+        byte[] PackageImage
+    ) CreateCompilationWithPackageReference(string mainSource, string packageSource)
+    {
+        var packageCompilation = CSharpCompilation.Create(
+            "PackageAssembly",
+            [
+                CSharpSyntaxTree.ParseText(
+                    packageSource,
+                    new CSharpParseOptions(LanguageVersion.Latest)
+                ),
+            ],
+            _coreReferences,
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+        ThrowOnErrors(packageCompilation, "Package test source");
+        using var image = new MemoryStream();
+        var emitted = packageCompilation.Emit(image);
+        if (!emitted.Success)
+        {
+            throw new InvalidOperationException("Package test source failed to emit.");
+        }
+
+        var packageImage = image.ToArray();
+        var mainCompilation = CSharpCompilation.Create(
+            "TestAssembly",
+            [
+                CSharpSyntaxTree.ParseText(
+                    mainSource,
+                    new CSharpParseOptions(LanguageVersion.Latest)
+                ),
+            ],
+            [.. _coreReferences, MetadataReference.CreateFromImage(packageImage)],
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+        ThrowOnErrors(mainCompilation, "Main test source");
+
+        return (mainCompilation, packageImage);
+    }
+
     private static void ThrowOnErrors(Compilation compilation, string label)
     {
         var errors = compilation
@@ -416,9 +469,15 @@ public static class CompilationHelper
         ContractSecurityMetadata? security = null
     )
     {
-        var (types, enums, endpoints, brands) = JsonContractReader.Read(json);
-        var definitions = types.ToDictionary(t => t.Name);
-        return OpenApiEmitter.Emit(endpoints, definitions, brands, enums, security, documentInfo);
+        var contract = JsonContractReader.Read(json);
+        return OpenApiEmitter.Emit(
+            contract.Endpoints,
+            contract.Types.ToDictionary(t => t.Name),
+            contract.Brands,
+            contract.Enums,
+            contract.WithSecuritySchemes(security),
+            documentInfo
+        );
     }
 
     // --- Emission helpers ---
@@ -468,6 +527,21 @@ public static class CompilationHelper
             ),
             MetadataReference.CreateFromFile(
                 typeof(Microsoft.AspNetCore.Routing.RouteData).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute).Assembly.Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Builder.AuthorizationEndpointConventionBuilderExtensions)
+                    .Assembly
+                    .Location
+            ),
+            MetadataReference.CreateFromFile(
+                typeof(Microsoft.AspNetCore.Authorization.IAuthorizeData).Assembly.Location
+            ),
+            // [DataMember(Name = ...)]: the minimal-API form mapper's rename.
+            MetadataReference.CreateFromFile(
+                typeof(System.Runtime.Serialization.DataMemberAttribute).Assembly.Location
             ),
         ];
     }

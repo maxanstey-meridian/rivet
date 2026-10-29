@@ -7,9 +7,10 @@ public static class MembersEndpoints
 {
     public static IEndpointRouteBuilder MapMembersEndpoints(this IEndpointRouteBuilder endpoints)
     {
-        // Minimal API example mapped separately from the controller's /api/health action.
+        // The minimal-API side of the sample: the health check is mapped here, on the
+        // contract's own route, and .Anonymous() agrees with a handler nobody guards.
         endpoints.MapGet(
-            MembersContract.MinimalRoutePrefix + MembersContract.Health.Route,
+            MembersContract.Health.Route,
             () => MembersContract.Health.Success().ToResult()
         );
 

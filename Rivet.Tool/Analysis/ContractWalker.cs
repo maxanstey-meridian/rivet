@@ -75,8 +75,9 @@ public static class ContractWalker
             {
                 if (member is IPropertySymbol property && IsRivetEndpointType(property.Type))
                 {
-                    throw new RivetUserException(
-                        $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
+                    throw Diagnostics.Error(
+                        Diagnostics.UnreadableContractEndpoint,
+                        "contract endpoint "
                             + $"'{type.Name}.{property.Name}' is a property. Rivet reads the spec from a "
                             + "field's initializer, so it can't read a property and would drop the operation. "
                             + "Declare it as a 'public static readonly' field."
@@ -94,8 +95,9 @@ public static class ContractWalker
 
                 if (!field.IsStatic || !field.IsReadOnly)
                 {
-                    throw new RivetUserException(
-                        $"error {Diagnostics.EndpointFieldNotStaticReadonly}: contract endpoint '{type.Name}.{field.Name}' "
+                    throw Diagnostics.Error(
+                        Diagnostics.EndpointFieldNotStaticReadonly,
+                        $"contract endpoint '{type.Name}.{field.Name}' "
                             + "is not 'static readonly'. Rivet reads the spec from the field's initializer, so a field "
                             + "that can be reassigned, or exists once per instance, can serve a different definition "
                             + "at runtime than the one in the spec. Declare it 'public static readonly'."
@@ -128,17 +130,19 @@ public static class ContractWalker
         var root = chain[0];
         var builderCalls = chain[1..];
 
-        var route =
+        var routeTemplate =
             root.StringArg("route")
-            ?? throw new RivetUserException(
-                $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
+            ?? throw Diagnostics.Error(
+                Diagnostics.UnreadableContractEndpoint,
+                "contract endpoint "
                     + $"'{field.ContainingType.Name}.{field.Name}' has a null route, so the operation "
                     + "has no path in the spec. Pass a route template such as \"/api/items\"."
             );
 
         var isFileEndpoint = root.TargetMethod.Name == "File";
         var httpMethod = isFileEndpoint ? "GET" : root.TargetMethod.Name.ToUpperInvariant();
-        route = RouteParser.StripRouteConstraints(route);
+        var route = RouteParser.StripRouteConstraints(routeTemplate);
+        var routeTokens = RouteParser.ParseRouteTokens(routeTemplate);
 
         var name = Naming.ToCamelCase(field.Name);
         var provenance = OpenApiProvenanceWalker.ReadOperation(compilation, field);
@@ -173,10 +177,10 @@ public static class ContractWalker
         var suppressImplicitResponse = false;
         string? endpointSummary = null;
         string? endpointDescription = null;
-        var anonymous = false;
-        var securityAlternatives = new SecurityRequirementsBuilder();
-        var securityAlternativeCount = 0;
-        var lastAlternativeHasSchemes = false;
+        var securityDeclaration = new SecurityDeclaration(
+            SecurityDeclaration.BuilderCalls,
+            reason => InvalidSecurity(field, reason)
+        );
         bool? requestBodyRequired = null;
         var requestBodyPresent = false;
         var acceptsFile = false;
@@ -242,11 +246,12 @@ public static class ContractWalker
                     RequireCompleteExample(call, field);
                     requestExampleCalls.Add(ToExampleCall(call, statusKey: null));
                     break;
-                case "ResponseExampleJson" or "ResponseExampleRef" when call.Status() is { } status:
+                case "ResponseExampleJson"
+                or "ResponseExampleRef" when call.Status(name) is { } status:
                     RequireCompleteExample(call, field);
                     responseExampleCalls.Add(ToExampleCall(call, status.Key));
                     break;
-                case "Returns" when call.Status() is { } status:
+                case "Returns" when call.Status(name) is { } status:
                     responses.Add(
                         new TsResponseType(
                             status.Code,
@@ -260,18 +265,25 @@ public static class ContractWalker
                 or "WithResponseHeaderKey" when call.StringArg("name") is { } headerName:
                     // The convenience overload has no status — null targets the success
                     // response, resolved after the responses list is built.
+                    var headerType =
+                        typeArgs.Length == 1
+                            ? typeWalker.MapType(typeArgs[0])
+                            : new TsType.Primitive("string");
+                    // Unlike a param's or content's, a header's schemaType: only re-types the
+                    // leaf, so on anything but a primitive it would vanish.
+                    headerType.RequirePrimitiveLeaf(
+                        call.StringArg("schemaType"),
+                        $"response header '{headerName}' ({(typeArgs.Length == 1 ? typeArgs[0].ToDisplayString() : "string")}) on endpoint '{name}'",
+                        fromBuilderArgument: true
+                    );
                     responseHeaderCalls.Add(
                         new PendingResponseHeaderCall(
-                            call.Status()?.Key,
+                            call.Status(name)?.Key,
                             headerName,
-                            typeArgs.Length == 1
-                                ? typeWalker
-                                    .MapType(typeArgs[0])
-                                    .WithLeaf(
-                                        call.StringArg("schemaType"),
-                                        call.StringArg("format")
-                                    )
-                                : new TsType.Primitive("string"),
+                            headerType.WithLeaf(
+                                call.StringArg("schemaType"),
+                                call.StringArg("format")
+                            ),
                             call.StringArg("description"),
                             call.BoolArg("required") ?? false,
                             ParseJsonArgument(
@@ -298,17 +310,24 @@ public static class ContractWalker
                 case "Status" when call.IntArg("statusCode") is int statusCode:
                     if (successStatusOverride is not null)
                     {
-                        throw new RivetUserException(
-                            $"error {Diagnostics.DuplicateResponseStatus}: endpoint '{name}' calls .Status() more than once"
+                        throw Diagnostics.Error(
+                            Diagnostics.DuplicateResponseStatus,
+                            $"endpoint '{name}' calls .Status() more than once"
                         );
                     }
-                    successStatusOverride = statusCode;
+                    successStatusOverride = ResponseStatusValidation.AuthoredStatusCode(
+                        statusCode,
+                        StatusSite(call, name)
+                    );
                     break;
                 case "SuppressImplicitResponse":
                     suppressImplicitResponse = true;
                     break;
                 case "StatusKey" when call.StringArg("statusKey") is { } statusKey:
-                    successStatusKey = statusKey;
+                    successStatusKey = ResponseStatusValidation.AuthoredStatusKey(
+                        statusKey,
+                        StatusSite(call, name)
+                    );
                     successResponseDescription = call.StringArg("description");
                     break;
                 case "Summary" when call.StringArg("summary") is { } summary:
@@ -318,34 +337,22 @@ public static class ContractWalker
                     endpointDescription = description;
                     break;
                 case "Anonymous":
-                    anonymous = true;
+                    securityDeclaration.Anonymous();
                     break;
                 case "Secure":
-                    securityAlternatives.AddRequirement(securityAlternativeCount);
-                    securityAlternatives.AddScheme(
-                        securityAlternativeCount++,
+                    securityDeclaration.Secure(
                         SecuritySchemeArg(call, field),
                         SecurityScopesArg(call, field)
                     );
-                    lastAlternativeHasSchemes = true;
                     break;
                 case "AndSecure":
-                    if (!lastAlternativeHasSchemes)
-                    {
-                        throw InvalidSecurity(
-                            field,
-                            ".AndSecure() must follow .Secure(): it adds a scheme to the alternative .Secure() started"
-                        );
-                    }
-                    securityAlternatives.AddScheme(
-                        securityAlternativeCount - 1,
+                    securityDeclaration.AndSecure(
                         SecuritySchemeArg(call, field),
                         SecurityScopesArg(call, field)
                     );
                     break;
                 case "OrAnonymous":
-                    securityAlternatives.AddRequirement(securityAlternativeCount++);
-                    lastAlternativeHasSchemes = false;
+                    securityDeclaration.OrAnonymous();
                     break;
                 case "RequestContent" when call.StringArg("mediaType") is { } mediaType:
                     requestContents.Add(
@@ -395,7 +402,7 @@ public static class ContractWalker
                     );
                     break;
                 case "ResponseContent"
-                    when call.Status() is { } status
+                    when call.Status(name) is { } status
                         && call.StringArg("mediaType") is { } mediaType:
                     responseContents.Add(
                         (
@@ -407,7 +414,7 @@ public static class ContractWalker
                     );
                     break;
                 case "ResponseBinaryContent"
-                    when call.Status() is { } status
+                    when call.Status(name) is { } status
                         && call.StringArg("mediaType") is { } mediaType:
                     responseContents.Add(
                         (status.Key, new TsMediaTypeContent(mediaType, null, IsBinary: true))
@@ -428,7 +435,8 @@ public static class ContractWalker
         if (binaryRequestContentType is not null && (acceptsFile || isFormEncoded))
         {
             var conflictingCall = acceptsFile ? ".AcceptsFile()" : ".FormEncoded()";
-            throw new RivetUserException(
+            throw Diagnostics.Error(
+                Diagnostics.MixedFormFileParameters,
                 $"{httpMethod} {route} ({controllerName}.{name}): .AcceptsBinary() cannot be combined "
                     + $"with {conflictingCall} — a request body is either raw binary or {(acceptsFile ? "multipart/form-data" : "form-encoded")}, not both."
             );
@@ -473,9 +481,11 @@ public static class ContractWalker
 
         var declaredRequestBody = ReadDeclaredRequestBody(field, wkt);
         var (builtParameters, inputTypeName, bodyFieldNames) = BuildParams(
+            compilation,
             wkt,
             httpMethod,
             route,
+            routeTokens,
             tInput,
             field,
             declaredRequestBody,
@@ -506,7 +516,18 @@ public static class ContractWalker
                         && IsGeneratedCollisionName(parameter.Name, declaredParameter.Name)
                 )
             );
-            parameters.Add(declaredParameter);
+            parameters.Add(
+                declaredParameter.Source == ParamSource.Route
+                && routeTokens.FirstOrDefault(token => token.Name == declaredParameter.Name)
+                    is { } token
+                    ? RouteConstraints.Apply(
+                        declaredParameter,
+                        token,
+                        RouteLabel(httpMethod, route, field),
+                        $"its .Parameter<T>(\"{declaredParameter.Name}\", \"path\", ...) declaration"
+                    )
+                    : declaredParameter
+            );
         }
 
         // The success response. Void endpoints with typed error responses also need one
@@ -591,17 +612,7 @@ public static class ContractWalker
                     )
                     .ToList();
 
-        if (anonymous && securityAlternativeCount > 0)
-        {
-            throw InvalidSecurity(
-                field,
-                ".Anonymous() declares that the endpoint has no security requirement, so it can't be combined "
-                    + "with .Secure() or .OrAnonymous(); use .OrAnonymous() alongside .Secure() to make "
-                    + "credentials optional"
-            );
-        }
-
-        var security = anonymous ? new SecurityRequirements([]) : securityAlternatives.Build();
+        var security = securityDeclaration.Build();
 
         return new TsEndpointDefinition(
             name,
@@ -618,7 +629,7 @@ public static class ContractWalker
             inputTypeName,
             isFormEncoded,
             RequestExamples: requestExamples,
-            FormFieldNames: isFormEncoded ? bodyFieldNames : null,
+            BodyFieldNames: bodyFieldNames,
             IsFileEndpoint: isFileEndpoint,
             QueryAuth: queryAuth,
             BinaryRequestContentType: binaryRequestContentType,
@@ -734,8 +745,9 @@ public static class ContractWalker
                 return contents[0].MediaType;
             }
 
-            throw new RivetUserException(
-                $"error {Diagnostics.ContractExampleUndeclaredStatus}: contract endpoint '{endpointName}' "
+            throw Diagnostics.Error(
+                Diagnostics.ContractExampleUndeclaredStatus,
+                $"contract endpoint '{endpointName}' "
                     + $"has a response example for status {statusKey} without a media type, and that status "
                     + $"declares several ({declared}), so Rivet can't tell which one the example shows. "
                     + "Pass the example's mediaType."
@@ -748,8 +760,9 @@ public static class ContractWalker
             )
         )
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.ContractExampleUndeclaredStatus}: contract endpoint '{endpointName}' "
+            throw Diagnostics.Error(
+                Diagnostics.ContractExampleUndeclaredStatus,
+                $"contract endpoint '{endpointName}' "
                     + $"has a response example for status {statusKey} under '{call.MediaType}', which that "
                     + $"status does not declare (it declares {declared}), so the spec would gain a media type "
                     + "the response never serves. Use one of the declared media types, or declare this one "
@@ -839,8 +852,9 @@ public static class ContractWalker
                     { } duplicate
                 )
                 {
-                    throw new RivetUserException(
-                        $"error {Diagnostics.DuplicateResponseHeader}: endpoint '{endpointName}' declares response header '{duplicate.Key}' more than once for status {group.Key}"
+                    throw Diagnostics.Error(
+                        Diagnostics.DuplicateResponseHeader,
+                        $"endpoint '{endpointName}' declares response header '{duplicate.Key}' more than once for status {group.Key}"
                     );
                 }
 
@@ -848,8 +862,9 @@ public static class ContractWalker
                 continue;
             }
 
-            throw new RivetUserException(
-                $"error {Diagnostics.ResponseHeaderUndeclaredStatus}: contract endpoint '{endpointName}' declares "
+            throw Diagnostics.Error(
+                Diagnostics.ResponseHeaderUndeclaredStatus,
+                $"contract endpoint '{endpointName}' declares "
                     + $"response header(s) {string.Join(", ", headers.Select(h => $"'{h.Name}'"))} for status "
                     + $"{group.Key}, which it does not declare, so the spec has nowhere to put them. Declare the "
                     + "status with .Returns(...), .Status(...) or .ResponseContent(...), or move the header to a declared status."
@@ -867,9 +882,11 @@ public static class ContractWalker
         string? InputTypeName,
         IReadOnlyList<string>? BodyFieldNames
     ) BuildParams(
+        Compilation compilation,
         WellKnownTypes wkt,
         string httpMethod,
         string route,
+        IReadOnlyList<RouteToken> routeTokens,
         ITypeSymbol? tInput,
         IFieldSymbol field,
         DeclaredRequestBody? declaredRequestBody,
@@ -893,10 +910,75 @@ public static class ContractWalker
             normalizedRouteTokens.TryAdd(RouteParser.NormalizeForMatching(token), token);
         }
 
+        var tokensByName = new Dictionary<string, RouteToken>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in routeTokens)
+        {
+            tokensByName.TryAdd(token.Name, token);
+        }
+        var where = RouteLabel(httpMethod, route, field);
+
+        TsEndpointParam Constrained(TsEndpointParam param, string declaredBy) =>
+            tokensByName.TryGetValue(param.Name, out var token)
+                ? RouteConstraints.Apply(param, token, where, declaredBy)
+                : param;
+
+        TsEndpointParam RouteParamFromMember(ISymbol member, string token, string? bodyName) =>
+            Constrained(
+                LoweredParam(typeWalker, member, token, ParamSource.Route, false, bodyName),
+                $"its input property '{member.Name}'"
+            );
+
+        // A token no input member binds is declared by a .Parameter<T>(name, "path", ...)
+        // (which replaces this param, constraints applied there) or by a type constraint.
+        // With neither, its type is unknown: RIV1019 stops generation.
+        TsEndpointParam UnboundRouteParam(string paramName)
+        {
+            if (
+                declaredParameters.FirstOrDefault(parameter =>
+                    parameter.Source == ParamSource.Route && parameter.Name == paramName
+                ) is
+                { } declared
+            )
+            {
+                return new TsEndpointParam(paramName, declared.Type, ParamSource.Route);
+            }
+
+            if (RouteConstraints.DeclaredType(tokensByName[paramName], where) is { } constrained)
+            {
+                return Constrained(
+                    new TsEndpointParam(paramName, constrained, ParamSource.Route),
+                    "its type constraint"
+                );
+            }
+
+            throw Diagnostics.Error(
+                Diagnostics.RouteTokenUndeclared,
+                $"route token '{{{paramName}}}' on {httpMethod} {route} "
+                    + (
+                        tInput is null
+                            ? "has no input type"
+                            : $"has no matching property on input type '{tInput.Name}'"
+                    )
+                    + ", no type constraint and no .Parameter<T>() declaration, so its type is unknown "
+                    + "and the spec can't say what the handler binds. Declare it: "
+                    + (tInput is null ? "give the endpoint an input type with" : "add")
+                    + $" a '{Naming.ToPascalCaseFromSegments(paramName)}' property, a type constraint "
+                    + $"('{{{paramName}:guid}}', '{{{paramName}:int}}', ...), or "
+                    + $".Parameter<T>(\"{paramName}\", \"path\", ...)."
+            );
+        }
+
         var parameters = new List<TsEndpointParam>();
         var isFormFileInput = tInput is not null && IsFormFileType(wkt, tInput);
-        var hasFormFileProperty =
-            tInput is not null && !isFormFileInput && HasFormFileProperty(wkt, typeWalker, tInput);
+        // What the form binder binds decides whether the input is multipart and, when it is,
+        // lists its parts: one list, so a file that makes the body multipart is always a part.
+        var formBound =
+            tInput is null || isFormFileInput
+                ? []
+                : FormBinding.FormBoundProperties(compilation, tInput);
+        var hasFormFileProperty = formBound.Any(property =>
+            FormBinding.CarriesFiles(wkt, typeWalker, property.Type)
+        );
         // The runtime binds TInput by the same rule. With no body, or a raw binary one
         // (.AcceptsBinary(): host code reads the stream), TInput's properties become route/query
         // params exactly like a GET/DELETE input.
@@ -938,11 +1020,12 @@ public static class ContractWalker
                 }
 
                 parameters.Add(
-                    new TsEndpointParam(
+                    LoweredParam(
+                        typeWalker,
+                        headerProp,
                         headerName,
-                        typeWalker.MapPropertyType(headerProp),
                         ParamSource.Header,
-                        IsOptional: typeWalker.IsOptional(headerProp)
+                        typeWalker.IsOptional(headerProp)
                     )
                 );
             }
@@ -962,58 +1045,61 @@ public static class ContractWalker
             var routeMatchedProps = new HashSet<string>(StringComparer.Ordinal);
             foreach (var paramName in routeParamNames)
             {
-                TsType paramType = new TsType.Primitive("string");
-                string? bodyPropertyName = null;
-                if (tInput is not null)
-                {
-                    // Match against the flattened member surface (incl. inherited)
-                    var normalized = RouteParser.NormalizeForMatching(paramName);
-                    var matchingProp = typeWalker
+                // Match against the flattened member surface (incl. inherited)
+                var normalized = RouteParser.NormalizeForMatching(paramName);
+                var matchingProp = tInput is null
+                    ? null
+                    : typeWalker
                         .GetEffectiveProperties(tInput)
                         .FirstOrDefault(p =>
                             RouteParser.NormalizeForMatching(p.Name) == normalized
                         );
-                    if (matchingProp is not null)
-                    {
-                        paramType = matchingProp is IPropertySymbol matchedProperty
-                            ? typeWalker.MapPropertyType(matchedProperty)
-                            : typeWalker.MapType(TypeWalker.GetMemberType(matchingProp));
-                        routeMatchedProps.Add(matchingProp.Name);
-                        if (requestBodyType is null)
-                        {
-                            bodyPropertyName =
-                                typeWalker.GetJsonMemberName(matchingProp)
-                                ?? Naming.ToCamelCase(matchingProp.Name);
-                        }
-                    }
-                    else
-                    {
-                        var declared = declaredParameters.FirstOrDefault(parameter =>
-                            parameter.Source == ParamSource.Route && parameter.Name == paramName
-                        );
-                        if (declared is not null)
-                        {
-                            paramType = declared.Type;
-                        }
-                        else
-                        {
-                            Diagnostics.Warn(
-                                Diagnostics.RouteTokenWithoutInputProperty,
-                                $"route token '{{{paramName}}}' on {httpMethod} {route} has no matching property "
-                                    + $"on input type '{tInput.Name}' — emitted as an untyped string path param."
-                            );
-                        }
-                    }
+                if (matchingProp is null)
+                {
+                    parameters.Add(UnboundRouteParam(paramName));
+                    continue;
                 }
+
+                routeMatchedProps.Add(matchingProp.Name);
                 parameters.Add(
-                    new TsEndpointParam(
+                    RouteParamFromMember(
+                        matchingProp,
                         paramName,
-                        paramType,
-                        ParamSource.Route,
-                        BodyPropertyName: bodyPropertyName
+                        requestBodyType is null
+                            ? typeWalker.GetJsonMemberName(matchingProp)
+                                ?? Naming.ToCamelCase(matchingProp.Name)
+                            : null
                     )
                 );
             }
+
+            // The parts of a form record (one with files, or a .FormEncoded() one, or one whose
+            // declared request content is a form, as import writes a multipart body with no
+            // file in it, and the runtime binds it; with no declared body type), or null for a
+            // JSON one. Both hosts can serve a contract.
+            IReadOnlyList<FormBinding.FormPart>? FormParts() =>
+                tInput is not null
+                && (
+                    hasFormFileProperty
+                    || (
+                        isFormEncoded
+                        || requestContents.Any(content =>
+                            !content.IsBinary && RequestInputLowering.IsForm(content.MediaType)
+                        )
+                    )
+                        && requestBodyType is null
+                        && typeWalker.IsParamLowerable(tInput)
+                )
+                    ? FormBinding.Parts(
+                        compilation,
+                        wkt,
+                        typeWalker,
+                        tInput,
+                        routeMatchedProps,
+                        FormBinding.FormHosts.Any,
+                        where
+                    )
+                    : null;
 
             // .AcceptsFile() on the contract — add a File param
             if (acceptsFile)
@@ -1032,69 +1118,25 @@ public static class ContractWalker
                         new TsEndpointParam("file", new TsType.Primitive("File"), ParamSource.File)
                     );
                 }
-                // Check if TInput is a record containing IFormFile properties
-                else if (hasFormFileProperty)
+                // A record that carries files, or a .FormEncoded() one: its parts are what the
+                // form binders bind, under the names they read. An empty form record keeps
+                // its (empty) body below, as a JSON one does.
+                else if (
+                    FormParts() is { } parts
+                    && (parts.Count > 0 || routeMatchedProps.Count > 0)
+                )
                 {
-                    // A route-split input cannot safely reference its complete definition:
-                    // that would put route properties back into the multipart body. Inputs
-                    // used wholly as multipart can be registered and referenced normally.
-                    var mappedInput =
-                        routeMatchedProps.Count == 0
-                            ? typeWalker.MapType(tInput, $"multipart input '{tInput.Name}'")
-                            : null;
-                    inputTypeName = mappedInput is TsType.TypeRef typeRef ? typeRef.Name : null;
-                    // Walk the flattened property surface (incl. inherited).
-                    // Form fields are request surface: request-only properties lower,
-                    // response-only properties are absent from the multipart body.
-                    foreach (var formProp in typeWalker.GetRequestProperties(tInput))
-                    {
-                        // Skip properties already emitted as route params
-                        if (routeMatchedProps.Contains(formProp.Name))
-                        {
-                            continue;
-                        }
-
-                        var tsName =
-                            typeWalker.GetJsonMemberName(formProp)
-                            ?? Naming.ToCamelCase(formProp.Name);
-
-                        if (IsFormFileType(wkt, formProp.Type))
-                        {
-                            parameters.Add(
-                                new TsEndpointParam(
-                                    tsName,
-                                    new TsType.Primitive("File"),
-                                    ParamSource.File,
-                                    IsOptional: typeWalker.IsOptional(formProp)
-                                )
-                            );
-                        }
-                        else if (typeWalker.IsCollectionOf(formProp.Type, wkt.IFormFile))
-                        {
-                            // List<IFormFile>/IFormFile[] →
-                            // multipart array-of-binary part, consistent with single files
-                            parameters.Add(
-                                new TsEndpointParam(
-                                    tsName,
-                                    new TsType.Array(new TsType.Primitive("File")),
-                                    ParamSource.File,
-                                    IsOptional: typeWalker.IsOptional(formProp)
-                                )
-                            );
-                        }
-                        else
-                        {
-                            // Non-file properties on a mixed upload record → form fields
-                            parameters.Add(
-                                new TsEndpointParam(
-                                    tsName,
-                                    typeWalker.MapPropertyType(formProp),
-                                    ParamSource.FormField,
-                                    IsOptional: typeWalker.IsOptional(formProp)
-                                )
-                            );
-                        }
-                    }
+                    // The body is described from the input's definition: the emitter $refs
+                    // its component when that lists exactly the parts under the same names,
+                    // and otherwise spells the parts out inline, each carrying its property's
+                    // schema. BodyPropertyName says which property a part is.
+                    inputTypeName = typeWalker.MapType(tInput, $"form input '{tInput.Name}'")
+                        is TsType.TypeRef typeRef
+                        ? typeRef.Name
+                        : null;
+                    parameters.AddRange(
+                        FormPartParams(wkt, typeWalker, parts, inputTypeName, namePrefix: null)
+                    );
                 }
                 else
                 {
@@ -1121,15 +1163,16 @@ public static class ContractWalker
                             TsType.Generic generic => generic.Name,
                             _ => null,
                         };
+                        // Null when the body has no closed list of top-level names.
                         bodyFieldNames =
                             bodyDefinitionName is not null
                             && typeWalker.Definitions.GetValueOrDefault(bodyDefinitionName)
-                                is { Type: null } definition
+                                is { Type: null, AdditionalProperties: not true } definition
                                 ? TsEndpointDefinition
                                     .RequestBodyProperties(parameters, definition.Properties)
                                     .Select(property => property.Name)
                                     .ToList()
-                                : [];
+                                : null;
                     }
                 }
             }
@@ -1144,8 +1187,9 @@ public static class ContractWalker
                 // A dictionary/collection/scalar has no property surface to lower to
                 // route/query params and there is no JSON body to carry it, so any spec
                 // either invents params from CLR members (Count, Keys, …) or drops the input.
-                throw new RivetUserException(
-                    $"error {Diagnostics.InputTypeNotParamLowerable}: input type '{tInput.ToDisplayString()}' on "
+                throw Diagnostics.Error(
+                    Diagnostics.InputTypeNotParamLowerable,
+                    $"input type '{tInput.ToDisplayString()}' on "
                         + $"{httpMethod} {route} is a dictionary, collection or scalar, but "
                         + (
                             hasDeclaredRequestBody
@@ -1192,7 +1236,6 @@ public static class ContractWalker
                         continue;
                     }
 
-                    var tsType = typeWalker.MapPropertyType(queryProp);
                     // Route matching uses the normalized C# property name ({thing_id}
                     // matches ThingId), never the JSON name — the token is wire truth
                     if (
@@ -1216,76 +1259,160 @@ public static class ContractWalker
                             );
                         }
 
-                        parameters.Add(
-                            new TsEndpointParam(
-                                routeName,
-                                tsType,
-                                ParamSource.Route,
-                                BodyPropertyName: tsName
-                            )
-                        );
+                        parameters.Add(RouteParamFromMember(queryProp, routeName, tsName));
                         continue;
                     }
 
                     // Surface property-level optionality ([RivetOptional], nullability)
                     // on the param so emitters mark non-nullable optionals required: false
                     parameters.Add(
-                        new TsEndpointParam(
+                        LoweredParam(
+                            typeWalker,
+                            queryProp,
                             tsName,
-                            tsType,
                             ParamSource.Query,
-                            IsOptional: typeWalker.IsOptional(queryProp)
+                            typeWalker.IsOptional(queryProp)
                         )
                     );
                 }
 
-                // Add route params that have no matching TInput property (default to string)
+                // Route tokens no TInput property binds
                 foreach (var paramName in routeParamNames)
                 {
                     if (!matchedRouteParams.Contains(paramName))
                     {
-                        Diagnostics.Warn(
-                            Diagnostics.RouteTokenWithoutInputProperty,
-                            $"route token '{{{paramName}}}' on {httpMethod} {route} has no matching property "
-                                + $"on input type '{tInput.Name}' — emitted as an untyped string path param."
-                        );
-                        parameters.Insert(
-                            0,
-                            new TsEndpointParam(
-                                paramName,
-                                new TsType.Primitive("string"),
-                                ParamSource.Route
-                            )
-                        );
+                        parameters.Insert(0, UnboundRouteParam(paramName));
                     }
                 }
             }
             else
             {
-                // No TInput: the route template itself declares each placeholder's
-                // existence and transport location (the narrow documented exception),
-                // so the param emits as an untyped string — but its schema type is
-                // unknown and must warn exactly like the missing-property paths above
+                // No TInput: the route template declares each placeholder's existence and
+                // transport location; its type comes from a declaration or a type
+                // constraint, or it warns like the missing-property paths above
                 // (acceptance:no-input-route-token-warns).
                 foreach (var paramName in routeParamNames)
                 {
-                    Diagnostics.Warn(
-                        Diagnostics.RouteTokenWithoutInputProperty,
-                        $"route token '{{{paramName}}}' on {httpMethod} {route} has no input type — "
-                            + "emitted as an untyped string path param."
-                    );
-                    parameters.Add(
-                        new TsEndpointParam(
-                            paramName,
-                            new TsType.Primitive("string"),
-                            ParamSource.Route
-                        )
-                    );
+                    parameters.Add(UnboundRouteParam(paramName));
                 }
             }
         }
 
         return (parameters, inputTypeName, bodyFieldNames);
+    }
+
+    /// <summary>
+    /// The params a form input's parts become: a file or a list of files, or a form field
+    /// carrying its member's annotations as a body property would. Each names the property
+    /// it is (<see cref="TsEndpointParam.BodyPropertyName"/>) so the emitter can describe the
+    /// body from the input's definition, <paramref name="inputTypeName"/>. A member that
+    /// definition marks readOnly is never sent in a request (OpenAPI), so it's no form field,
+    /// as it's no JSON body property. <paramref name="namePrefix"/> is an MVC model name the
+    /// binder reads every part under (<c>[FromForm(Name = "p")] Dto dto</c> reads <c>p.Title</c>).
+    /// </summary>
+    internal static IEnumerable<TsEndpointParam> FormPartParams(
+        WellKnownTypes wkt,
+        TypeWalker typeWalker,
+        IReadOnlyList<FormBinding.FormPart> parts,
+        string? inputTypeName,
+        string? namePrefix
+    )
+    {
+        var readOnly = (
+            inputTypeName is null ? null : typeWalker.Definitions.GetValueOrDefault(inputTypeName)
+        )
+            ?.Properties.Where(property => property.IsReadOnly)
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var part in parts)
+        {
+            var property = part.Property;
+            var propertyName =
+                typeWalker.GetJsonMemberName(property) ?? Naming.ToCamelCase(property.Name);
+            if (!part.IsFile && readOnly?.Contains(propertyName) == true)
+            {
+                continue;
+            }
+
+            var name = namePrefix is null ? part.Name : $"{namePrefix}.{part.Name}";
+            yield return part.IsFile
+                ? new TsEndpointParam(
+                    name,
+                    IsFormFileType(wkt, property.Type)
+                        ? new TsType.Primitive("File")
+                        // List<IFormFile>/IFormFile[]: a multipart array-of-binary part
+                        : new TsType.Array(new TsType.Primitive("File")),
+                    ParamSource.File,
+                    IsOptional: !part.Required && typeWalker.IsOptional(property),
+                    BodyPropertyName: propertyName
+                )
+                : LoweredParam(
+                    typeWalker,
+                    property,
+                    name,
+                    ParamSource.FormField,
+                    !part.Required && typeWalker.IsOptional(property),
+                    propertyName
+                );
+        }
+    }
+
+    private static string RouteLabel(string httpMethod, string route, IFieldSymbol field) =>
+        $"{httpMethod} {route} (contract '{field.ContainingType.Name}.{field.Name}')";
+
+    /// <summary>
+    /// A route, query, header or form-field param lowered from an input member, carrying the member's
+    /// annotations (description, constraints, default, deprecated, example and format) as
+    /// its schema would if the member were a body property. The leaf already holds
+    /// [RivetSchemaType] and the format, so the param doesn't pin SchemaType: the emitter's
+    /// pinned-leaf path would drop the inferred format the body keeps.
+    /// </summary>
+    private static TsEndpointParam LoweredParam(
+        TypeWalker typeWalker,
+        ISymbol member,
+        string name,
+        ParamSource source,
+        bool isOptional,
+        string? bodyPropertyName = null
+    )
+    {
+        var type = typeWalker.MapType(TypeWalker.GetMemberType(member));
+        var annotations = typeWalker.ReadMemberAnnotations(member, member.ContainingType, type);
+        return new TsEndpointParam(
+            name,
+            annotations.ApplyLeaf(type),
+            source,
+            IsOptional: isOptional,
+            BodyPropertyName: bodyPropertyName,
+            Description: annotations.Description,
+            IsDeprecated: annotations.IsDeprecated,
+            DefaultValue: annotations.DefaultValue,
+            Constraints: annotations.Constraints,
+            SchemaExamples: SchemaExamples(
+                annotations.Example,
+                $"[RivetExample] on '{member.Name}'"
+            ),
+            Format: annotations is { IsFormatSpecified: true, Format: not "" }
+                ? annotations.Format
+                : null,
+            IsFormatSpecified: annotations.IsFormatSpecified
+        );
+    }
+
+    /// <summary>
+    /// A member's [RivetExample] as the one-item schema <c>examples</c> array a body
+    /// property's schema carries, so the param says what the property would.
+    /// </summary>
+    internal static JsonElement? SchemaExamples(string? example, string what)
+    {
+        if (example is null)
+        {
+            return null;
+        }
+
+        var value = ParseJsonArgument(example, what)!.Value;
+        using var array = JsonDocument.Parse($"[{value.GetRawText()}]");
+        return array.RootElement.Clone();
     }
 
     private static TsEndpointParam ToDeclaredParameter(
@@ -1303,8 +1430,10 @@ public static class ContractWalker
             "query" => ParamSource.Query,
             "header" => ParamSource.Header,
             "cookie" => ParamSource.Cookie,
-            _ => throw new RivetUserException(
-                $"Endpoint '{endpointName}' declares unsupported parameter location '{parameterLocation}'."
+            _ => throw Diagnostics.Error(
+                Diagnostics.InvalidBuilderArgument,
+                $"endpoint '{endpointName}' declares parameter '{parameterName}' in unsupported location "
+                    + $"'{parameterLocation}'. Use \"path\", \"query\", \"header\", or \"cookie\"."
             ),
         };
         var metadata = ParseParameterMetadata(
@@ -1357,8 +1486,9 @@ public static class ContractWalker
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
-            throw new RivetUserException(
-                $"error: {what} must be a JSON object of parameter metadata, got '{json}' ({exception.Message})"
+            throw Diagnostics.Error(
+                Diagnostics.InvalidBuilderArgument,
+                $"{what} must be a JSON object of parameter metadata, got '{json}' ({exception.Message})"
             );
         }
     }
@@ -1391,8 +1521,29 @@ public static class ContractWalker
         );
     }
 
-    private static IReadOnlyDictionary<string, string>? ParseReferencedComponents(string? json) =>
-        json is null ? null : JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+    private static IReadOnlyDictionary<string, string>? ParseReferencedComponents(
+        string? json,
+        string method
+    )
+    {
+        if (json is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+        }
+        catch (JsonException exception)
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InvalidBuilderArgument,
+                $"referencedComponentsJson of .{method}() must be a JSON object of strings, got "
+                    + $"'{json}' ({exception.Message})"
+            );
+        }
+    }
 
     private static JsonElement? CloneProperty(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) ? value.Clone() : null;
@@ -1411,8 +1562,9 @@ public static class ContractWalker
         }
         catch (JsonException exception)
         {
-            throw new RivetUserException(
-                $"error: {what} must be a JSON literal, got '{json}' ({exception.Message})"
+            throw Diagnostics.Error(
+                Diagnostics.InvalidBuilderArgument,
+                $"{what} must be a JSON literal, got '{json}' ({exception.Message})"
             );
         }
     }
@@ -1451,8 +1603,9 @@ public static class ContractWalker
             || !IsCompatibleRequestBodyType(bodyType, inputType, route, typeWalker)
         )
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.InvalidRequestBodyProvenance}: endpoint '{field.ContainingType.Name}.{field.Name}' "
+            throw Diagnostics.Error(
+                Diagnostics.InvalidRequestBodyProvenance,
+                $"endpoint '{field.ContainingType.Name}.{field.Name}' "
                     + $"declares request body type '{bodyType.Name}', which is not represented independently by its input type '{inputType?.Name}'"
             );
         }
@@ -1531,45 +1684,6 @@ public static class ContractWalker
 
     private static bool IsFormFileType(WellKnownTypes wkt, ITypeSymbol type) =>
         SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile);
-
-    // The tool's formFileInput, by the runtime's rule (RequestInputLowering.CarriesFormFiles):
-    // a property ASP.NET's form binder would bind is an IFormFile or a collection of them.
-    // Those are the public instance properties that aren't indexers, along the whole base
-    // chain (not just the walkable assemblies), where the most-derived property of a name,
-    // whatever its accessibility, hides the base's. Collections
-    // count: a record whose ONLY files were List<IFormFile> used to emit as JSON with
-    // format:binary strings, an unimplementable spec.
-    // FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files holds the two copies.
-    private static bool HasFormFileProperty(
-        WellKnownTypes wkt,
-        TypeWalker typeWalker,
-        ITypeSymbol type
-    )
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var current = type; current is not null; current = current.BaseType)
-        {
-            foreach (var property in current.GetMembers().OfType<IPropertySymbol>())
-            {
-                // Any instance property hides a base's of the same name, as ASP.NET's binder
-                // sees it; only a public one can carry files.
-                if (
-                    property is { IsStatic: false, IsIndexer: false }
-                    && seen.Add(property.Name)
-                    && property.DeclaredAccessibility == Accessibility.Public
-                    && (
-                        IsFormFileType(wkt, property.Type)
-                        || typeWalker.IsCollectionOf(property.Type, wkt.IFormFile)
-                    )
-                )
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
 
     /// <summary>
     /// Checks if the type is a (byte[], string) tuple — used for named file downloads
@@ -1786,9 +1900,9 @@ public static class ContractWalker
     }
 
     private static RivetUserException InvalidSecurity(IFieldSymbol field, string reason) =>
-        new(
-            $"error {Diagnostics.InvalidSecurityDeclaration}: contract endpoint "
-                + $"'{field.ContainingType.Name}.{field.Name}': {reason}."
+        Diagnostics.Error(
+            Diagnostics.InvalidSecurityDeclaration,
+            "contract endpoint " + $"'{field.ContainingType.Name}.{field.Name}': {reason}."
         );
 
     /// <summary>
@@ -1843,8 +1957,9 @@ public static class ContractWalker
         string reason,
         string remedy
     ) =>
-        new(
-            $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
+        Diagnostics.Error(
+            Diagnostics.UnreadableContractEndpoint,
+            "contract endpoint "
                 + $"'{field.ContainingType.Name}.{field.Name}' {reason}. Rivet reads the spec from the "
                 + "field's initializer statically and can't interpret this, so it would otherwise drop "
                 + $"the operation. {remedy}"
@@ -1875,10 +1990,24 @@ public static class ContractWalker
     /// The response status a builder call targets, from either its statusCode or its
     /// statusKey parameter. DeclaredKey is set only for the statusKey form.
     /// </summary>
-    private static ResponseStatus? Status(this IInvocationOperation call) =>
-        call.IntArg("statusCode") is int code ? new ResponseStatus(code, null)
-        : call.StringArg("statusKey") is { } key ? new ResponseStatus(ParseStatusCode(key), key)
+    private static ResponseStatus? Status(this IInvocationOperation call, string endpointName) =>
+        call.IntArg("statusCode") is int code
+            ? new ResponseStatus(
+                ResponseStatusValidation.AuthoredStatusCode(code, StatusSite(call, endpointName)),
+                null
+            )
+        : call.StringArg("statusKey") is { } key
+            ? AuthoredStatus(key, StatusSite(call, endpointName))
         : null;
+
+    private static ResponseStatus AuthoredStatus(string key, string where)
+    {
+        var authored = ResponseStatusValidation.AuthoredStatusKey(key, where);
+        return new ResponseStatus(ParseStatusCode(authored), authored);
+    }
+
+    private static string StatusSite(IInvocationOperation call, string endpointName) =>
+        $"contract endpoint '{endpointName}' (.{call.TargetMethod.Name}())";
 
     private readonly record struct ResponseStatus(int Code, string? DeclaredKey)
     {
@@ -1903,8 +2032,9 @@ public static class ContractWalker
             return;
         }
 
-        throw new RivetUserException(
-            $"error {Diagnostics.UnreadableContractEndpoint}: contract endpoint "
+        throw Diagnostics.Error(
+            Diagnostics.UnreadableContractEndpoint,
+            "contract endpoint "
                 + $"'{field.ContainingType.Name}.{field.Name}' passes .{call.TargetMethod.Name}() an "
                 + "example with nothing in it: no JSON value, summary or description. Give the example "
                 + "at least one of them, or remove the call."
@@ -1922,7 +2052,10 @@ public static class ContractWalker
             call.StringArg("json"),
             call.StringArg("componentExampleId"),
             call.StringArg("resolvedJson"),
-            ParseReferencedComponents(call.StringArg("referencedComponentsJson")),
+            ParseReferencedComponents(
+                call.StringArg("referencedComponentsJson"),
+                call.TargetMethod.Name
+            ),
             call.StringArg("summary"),
             call.StringArg("description")
         );

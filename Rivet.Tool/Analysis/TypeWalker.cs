@@ -51,6 +51,12 @@ public sealed class TypeWalker
     private readonly Dictionary<string, string> _emittedNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _claimedNames = new(StringComparer.Ordinal);
     private readonly HashSet<string> _generatedSchemaNames = new(StringComparer.Ordinal);
+
+    private const string GeneratedClaimant = "the generated schema ";
+
+    // Generated scalar schemas (no $ref, not an array) a [RivetScalar] brand of the same name
+    // may claim: the importer writes a brand's metadata there, and the brand's schema reads it.
+    private readonly HashSet<string> _generatedBrandSchemaNames = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TsScalarMetadata> _generatedEnumMetadata = new(
         StringComparer.Ordinal
     );
@@ -61,6 +67,7 @@ public sealed class TypeWalker
     // JSON container types that map to non-Primitive TsTypes (special-cased in MapTypeCore)
     private readonly INamedTypeSymbol? _jsonObjectType;
     private readonly INamedTypeSymbol? _jsonArrayType;
+
     private readonly INamedTypeSymbol? _bigIntegerType;
 
     // Number scalars outside SpecialType that System.Text.Json applies number handling to.
@@ -220,7 +227,8 @@ public sealed class TypeWalker
                 || attribute.ConstructorArguments[5].Value is not string metadataJson
             )
             {
-                throw new RivetUserException(
+                throw Diagnostics.Error(
+                    Diagnostics.MalformedGeneratedMetadata,
                     "Invalid generated schema metadata in RivetGeneratedSchemaAttribute."
                 );
             }
@@ -228,9 +236,9 @@ public sealed class TypeWalker
             var schemaType = attribute.ConstructorArguments[2].Value as string;
             var format = attribute.ConstructorArguments[3].Value as string;
             var metadata =
-                JsonSerializer.Deserialize<TsScalarMetadata>(
+                DeserializeGeneratedMetadata<TsScalarMetadata>(
                     metadataJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+                    $"RivetGeneratedSchemaAttribute metadata of '{name}'"
                 ) ?? new TsScalarMetadata();
             var isEnum =
                 attribute.ConstructorArguments.Length > 6
@@ -248,20 +256,32 @@ public sealed class TypeWalker
                     : null;
             if (!_generatedSchemaNames.Add(name))
             {
-                throw new RivetUserException(
+                throw Diagnostics.Error(
+                    Diagnostics.MalformedGeneratedMetadata,
                     $"Generated schema name '{name}' collides with another generated type."
                 );
             }
 
             if (isEnum)
             {
+                RequireAnnotatedEnum(name);
                 _generatedEnumMetadata[name] = metadata;
                 continue;
             }
 
+            // A generated schema is a component with no C# type behind it, so a walked type
+            // with its name would replace it: claim the name, and GetEmittedName refuses the
+            // type (RIV1007) naming both. A scalar one may annotate a [RivetScalar] brand.
+            _claimedNames[name] = $"{GeneratedClaimant}'{name}' (component '{componentId}')";
+            if (!isArray && schemaRef is null)
+            {
+                _generatedBrandSchemaNames.Add(name);
+            }
+
             TsType leaf = isArray
                 ? itemSchemaRef is null
-                    ? throw new RivetUserException(
+                    ? throw Diagnostics.Error(
+                        Diagnostics.MalformedGeneratedMetadata,
                         $"Generated array schema '{name}' has no item schema reference."
                     )
                     : new TsType.Array(new TsType.TypeRef(itemSchemaRef))
@@ -277,7 +297,8 @@ public sealed class TypeWalker
 
             if (_definitions.ContainsKey(name))
             {
-                throw new RivetUserException(
+                throw Diagnostics.Error(
+                    Diagnostics.MalformedGeneratedMetadata,
                     $"Generated schema name '{name}' collides with another generated type."
                 );
             }
@@ -291,6 +312,46 @@ public sealed class TypeWalker
                 metadata
             );
         }
+    }
+
+    /// <summary>
+    /// An <c>isEnum</c> generated schema annotates the walked enum of the same name (its
+    /// metadata joins that enum's schema), so a name no enum has is stale or hand-edited
+    /// metadata, with nothing to sit on: RIV1122.
+    /// </summary>
+    private void RequireAnnotatedEnum(string name)
+    {
+        static IEnumerable<INamedTypeSymbol> TypesNamed(
+            INamespaceOrTypeSymbol container,
+            string name
+        ) =>
+            container
+                .GetTypeMembers(name)
+                .Concat(
+                    container
+                        .GetMembers()
+                        .OfType<INamespaceOrTypeSymbol>()
+                        .SelectMany(inner => TypesNamed(inner, name))
+                );
+
+        var types = _walkableAssemblies
+            .SelectMany(assembly => TypesNamed(assembly.GlobalNamespace, name))
+            .ToList();
+        if (types.Any(type => type.TypeKind == TypeKind.Enum))
+        {
+            return;
+        }
+
+        var found =
+            types.Count == 0
+                ? "the compilation has no type of that name"
+                : $"'{types[0].ToDisplayString()}' isn't an enum";
+        throw Diagnostics.Error(
+            Diagnostics.MalformedGeneratedMetadata,
+            $"[assembly: RivetGeneratedSchema(\"{name}\", ...)] is an enum's metadata (isEnum), but "
+                + $"{found}, so there is no enum schema for it to describe: the generated code is stale "
+                + "or hand-edited. Re-import the OpenAPI document, or delete the attribute."
+        );
     }
 
     private static void AddScalar(
@@ -366,7 +427,8 @@ public sealed class TypeWalker
 
         if (!_definitions.ContainsKey(schemaRef) && !_enums.ContainsKey(schemaRef))
         {
-            throw new RivetUserException(
+            throw Diagnostics.Error(
+                Diagnostics.MalformedGeneratedMetadata,
                 $"{context} references unknown generated schema '{schemaRef}'."
             );
         }
@@ -408,22 +470,30 @@ public sealed class TypeWalker
                         context
                     ),
                 },
-            _ => throw new RivetUserException(
+            _ => throw Diagnostics.Error(
+                Diagnostics.MalformedGeneratedMetadata,
                 $"{context} references generated schema '{schemaRef}' at a pointer the type has no slot for."
             ),
         };
 
     /// <summary>
-    /// Returns true when the property is never a named JSON member: [JsonExtensionData]
-    /// always, and [JsonIgnore] Always (or the parameterless form). The condition forms
+    /// Returns true when the member is never a named JSON member: [JsonExtensionData]
+    /// always (a property, or a [JsonInclude] field; its entries are the object's
+    /// additionalProperties, see <see cref="ReadAdditionalProperties"/>), and [JsonIgnore]
+    /// Always (or the parameterless form). The condition forms
     /// Never/WhenWritingNull/WhenWritingDefault do not remove the property from either
     /// schema — WhenWritingNull/WhenWritingDefault only allow omission on the response
     /// wire, handled by requiredness (CanOmitOnWire). Direction does not change this
     /// answer; presence asymmetry lives in GetJsonPropertySurface. Fields are only
-    /// surfaced through [JsonInclude] (GetJsonFieldSurface), so they are never ignored here.
+    /// surfaced through [JsonInclude] (GetJsonFieldSurface), so [JsonIgnore] isn't read here.
     /// </summary>
     public bool IsJsonIgnored(ISymbol member)
     {
+        if (member.HasAttribute(_types.JsonExtensionData))
+        {
+            return true;
+        }
+
         if (member is not IPropertySymbol prop)
         {
             return false;
@@ -431,11 +501,6 @@ public sealed class TypeWalker
 
         foreach (var attribute in prop.GetAttributes())
         {
-            if (attribute.Is(_types.JsonExtensionData))
-            {
-                return true;
-            }
-
             if (attribute.Is(_types.JsonIgnore))
             {
                 var condition = ReadJsonIgnoreCondition(attribute);
@@ -606,8 +671,9 @@ public sealed class TypeWalker
         );
         if (attributed > 1)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.AmbiguousJsonConstructor}: type '{type.ToDisplayString()}' has "
+            throw Diagnostics.Error(
+                Diagnostics.AmbiguousJsonConstructor,
+                $"type '{type.ToDisplayString()}' has "
                     + $"{attributed} [JsonConstructor] constructors. System.Text.Json refuses such a type at "
                     + "runtime, so there is no constructor whose parameters the spec can follow. Keep "
                     + "[JsonConstructor] on one constructor."
@@ -885,9 +951,102 @@ public sealed class TypeWalker
             properties,
             typeDescription,
             GetTypeMetadata(definition),
-            ReadGeneratedSchemaMetadata(definition).GetValueOrDefault("")
+            ReadGeneratedSchemaMetadata(definition).GetValueOrDefault(""),
+            ReadAdditionalProperties(definition)
         );
     }
+
+    /// <summary>
+    /// Whether <paramref name="type"/>'s JSON takes members beyond its properties, as
+    /// System.Text.Json decides it: <c>true</c> when a <c>[JsonExtensionData]</c> bag (its
+    /// own or a base's) reads and writes them, <c>false</c> when the type itself is
+    /// <c>[JsonUnmappedMemberHandling(Disallow)]</c> (the attribute isn't inherited), null
+    /// otherwise. A bag STJ refuses at runtime (the wrong type, a second bag, or one beside
+    /// Disallow) is refused here instead (RIV1118).
+    /// </summary>
+    private bool? ReadAdditionalProperties(INamedTypeSymbol type)
+    {
+        var bags = GetEffectiveProperties(type)
+            .Where(member =>
+                member.HasAttribute(_types.JsonExtensionData)
+                && GetJsonMemberSurface(member, type) != JsonPropertySurface.Excluded
+            )
+            .ToList();
+        string Name(ISymbol member) => $"{member.ContainingType.Name}.{member.Name}";
+
+        if (bags.Count > 1)
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InvalidJsonExtensionData,
+                $"'{type.ToDisplayString()}' has more than one [JsonExtensionData] member, counting "
+                    + $"its base types ({string.Join(", ", bags.Select(bag => $"'{Name(bag)}'"))}), and "
+                    + "System.Text.Json refuses such a type at runtime. Keep one."
+            );
+        }
+
+        var bag = bags.SingleOrDefault();
+        if (bag is not null && !IsExtensionDataType(GetMemberType(bag)))
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InvalidJsonExtensionData,
+                $"[JsonExtensionData] on '{Name(bag)}' has type "
+                    + $"'{GetMemberType(bag).ToDisplayString()}', which System.Text.Json refuses at runtime: "
+                    + "an extension data member is a Dictionary<string, JsonElement>, a "
+                    + "Dictionary<string, object> (or another IDictionary<string, JsonElement> or "
+                    + "IDictionary<string, object>), or a JsonObject. Give it one of those types."
+            );
+        }
+
+        var disallow =
+            type.GetAttribute(_types.JsonUnmappedMemberHandling)
+                is { ConstructorArguments: [{ Value: int handling }] }
+            && handling == (int)JsonUnmappedMemberHandling.Disallow;
+        if (bag is not null && disallow)
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InvalidJsonExtensionData,
+                $"'{type.ToDisplayString()}' is [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)] "
+                    + $"and has the [JsonExtensionData] member '{Name(bag)}', a pair System.Text.Json refuses "
+                    + "at runtime: the bag takes exactly the members Disallow refuses. Drop the bag to refuse "
+                    + "unknown members (additionalProperties: false), or Disallow to keep them "
+                    + "(additionalProperties: {})."
+            );
+        }
+
+        // An imported type's bag carries what its source schema admits, so the source's word
+        // wins: {} when it wrote additionalProperties, nothing when it left it out (the same
+        // JSON Schema), as for every other keyword the import preserves.
+        var generated = type.GetAttribute(_types.RivetGeneratedType);
+        var open =
+            bag is not null
+            && (
+                generated is null || generated.NamedArgument("DeclaresAdditionalProperties") is true
+            );
+        return open ? true
+            : disallow ? false
+            : null;
+    }
+
+    // What System.Text.Json accepts as a [JsonExtensionData] bag besides JsonObject: anything
+    // implementing IDictionary<string, object> or IDictionary<string, JsonElement>.
+    private bool IsExtensionDataType(ITypeSymbol type) =>
+        SymbolEqualityComparer.Default.Equals(type, _jsonObjectType)
+        || (
+            type is INamedTypeSymbol named ? type.AllInterfaces.Add(named) : type.AllInterfaces
+        ).Any(candidate =>
+            SymbolEqualityComparer.Default.Equals(
+                candidate.OriginalDefinition,
+                _types.IDictionaryOfTKeyTValue
+            )
+            && candidate.TypeArguments[0].SpecialType == SpecialType.System_String
+            && (
+                candidate.TypeArguments[1].SpecialType == SpecialType.System_Object
+                || SymbolEqualityComparer.Default.Equals(
+                    candidate.TypeArguments[1],
+                    _types.JsonElement
+                )
+            )
+        );
 
     /// <summary>
     /// The wire property <paramref name="member"/> contributes to <paramref name="owner"/>'s
@@ -912,26 +1071,172 @@ public sealed class TypeWalker
 
         var tsName = jsonPropertyName ?? Naming.ToCamelCase(member.Name);
         var tsType = MapTypeCore(GetMemberType(member), context);
+        // Before the annotations: a converter (or number handling) beside a [RivetSchemaType]
+        // that can't pin it is the converter's refusal, whose fix covers both (RIV1111/1112),
+        // not RIV1117's.
+        RefuseUnmodelledMemberSerialization(member, owner, tsType, context);
         var isOptional = CanOmitOnWire(member);
-        var isDeprecated = member.HasAttribute(_types.Obsolete);
+        var attributes = GetWireMemberAttributes(member, owner);
+        if (isOptional)
+        {
+            RefuseRequiredOmittableMember(member, attributes, context);
+        }
+        var annotations = ReadMemberAnnotations(member, attributes, tsType);
+        var (schemaRef, nestedSchemaRefs) = ReadSchemaRefs(attributes);
 
-        // Read metadata attributes
+        // Accessibility-derived asymmetry becomes readOnly/writeOnly on the shared
+        // component schema, alongside any explicit [RivetReadOnly]/[RivetWriteOnly].
+        var isReadOnly =
+            annotations.IsReadOnly || memberSurface == JsonPropertySurface.ResponseOnly;
+        var isWriteOnly =
+            annotations.IsWriteOnly || memberSurface == JsonPropertySurface.RequestOnly;
+
+        tsType = annotations.ApplyLeaf(tsType);
+
+        if (schemaRef is not null)
+        {
+            tsType = ApplyGeneratedSchemaRef(tsType, schemaRef, $"Property '{context}'");
+        }
+        foreach (var (refPointer, refName) in nestedSchemaRefs)
+        {
+            tsType = ApplyGeneratedSchemaRefAt(
+                tsType,
+                refPointer,
+                refName,
+                $"Property '{context}' at '{refPointer}'"
+            );
+        }
+
+        var generatedSchemaMetadata = ReadGeneratedSchemaMetadata(member);
+        tsType = ApplyGeneratedSchemaMetadata(tsType, "", generatedSchemaMetadata);
+
+        return new TsPropertyDefinition(
+            tsName,
+            tsType,
+            isOptional,
+            annotations.IsDeprecated,
+            annotations.Format,
+            annotations.DefaultValue,
+            annotations.Constraints,
+            annotations.Description,
+            annotations.Example,
+            isReadOnly,
+            isWriteOnly,
+            generatedSchemaMetadata.GetValueOrDefault("")
+        );
+    }
+
+    /// <summary>
+    /// RIV1119: a member that may be left out (<c>[RivetOptional]</c>, or a <c>[JsonIgnore]</c>
+    /// condition that omits it when written) can't also be one System.Text.Json demands on
+    /// read (<c>[JsonRequired]</c>, or C# <c>required</c>): the request schema would admit a
+    /// body the host refuses, and one schema can't say both.
+    /// </summary>
+    private void RefuseRequiredOmittableMember(
+        ISymbol member,
+        ImmutableArray<AttributeData> attributes,
+        string context
+    )
+    {
+        var demanded =
+            attributes.Any(attribute => attribute.Is(_types.JsonRequired)) ? "[JsonRequired]"
+            : member is IPropertySymbol { IsRequired: true } or IFieldSymbol { IsRequired: true }
+                ? "required"
+            : null;
+        if (demanded is null)
+        {
+            return;
+        }
+
+        var omittable = member.HasAttribute(_types.RivetOptional)
+            ? "[RivetOptional]"
+            : $"[JsonIgnore(Condition = JsonIgnoreCondition.{ReadJsonIgnoreCondition(member.GetAttribute(_types.JsonIgnore)!)})]";
+        throw Diagnostics.Error(
+            Diagnostics.RequiredMemberMayBeOmitted,
+            $"'{context}' is {demanded} but also {omittable}: System.Text.Json refuses a request "
+                + $"without it, while {omittable} says it may be left out, and one schema can't say "
+                + $"both. Drop {demanded} if clients may leave it out, or drop {omittable} if it's "
+                + "always on the wire."
+        );
+    }
+
+    /// <summary>
+    /// The annotations a member's attributes give its schema beyond its name, type and
+    /// optionality: what a <see cref="TsPropertyDefinition"/> carries. Read the same way
+    /// for a record property and for a lowered route, query or header parameter, so the
+    /// two can't drift. <see cref="IsReadOnly"/> and <see cref="IsWriteOnly"/> are the
+    /// explicit <c>[RivetReadOnly]</c>/<c>[RivetWriteOnly]</c> only; a property also takes
+    /// them from its accessors. <see cref="Format"/> is <c>[RivetFormat]</c>'s value when
+    /// <see cref="IsFormatSpecified"/>, otherwise the DataAnnotations one
+    /// (<c>[EmailAddress]</c>, <c>[Url]</c>).
+    /// </summary>
+    public sealed record MemberAnnotations(
+        bool IsDeprecated,
+        string? Format,
+        bool IsFormatSpecified,
+        string? SchemaType,
+        string? DefaultValue,
+        TsPropertyConstraints? Constraints,
+        string? Description,
+        string? Example,
+        bool IsReadOnly,
+        bool IsWriteOnly
+    )
+    {
+        /// <summary>
+        /// <paramref name="type"/> with <c>[RivetSchemaType]</c> and the format applied to its
+        /// primitive leaf: an explicit <c>[RivetFormat]</c> (even an empty one) replaces the
+        /// inferred format, and a DataAnnotations format only fills a leaf that has none.
+        /// </summary>
+        public TsType ApplyLeaf(TsType type)
+        {
+            type = type.WithLeaf(SchemaType, IsFormatSpecified ? Format ?? "" : null);
+            return
+                !IsFormatSpecified
+                && Format is not null
+                && type
+                    is TsType.Primitive { Format: null }
+                        or TsType.Nullable { Inner: TsType.Primitive { Format: null } }
+                ? type.WithLeaf(null, Format)
+                : type;
+        }
+    }
+
+    /// <summary>
+    /// The annotations on <paramref name="member"/>, a property or field of
+    /// <paramref name="owner"/> (the type being walked or bound, whose positional record
+    /// parameter's attributes count too), whether or not it is a schema member: a
+    /// <c>[RivetHeader]</c> property has them as well. <paramref name="type"/> is the
+    /// member's mapped type; it decides whether a length constraint is an item count.
+    /// </summary>
+    public MemberAnnotations ReadMemberAnnotations(
+        ISymbol member,
+        INamedTypeSymbol owner,
+        TsType type
+    ) => ReadMemberAnnotations(member, GetWireMemberAttributes(member, owner), type);
+
+    /// <summary>
+    /// The annotations on a handler or action <paramref name="parameter"/>
+    /// (<c>[FromQuery]</c>, <c>[FromRoute]</c>, <c>[FromHeader]</c> and the like), read as
+    /// a property's are. <paramref name="type"/> is the parameter's mapped type.
+    /// </summary>
+    public MemberAnnotations ReadMemberAnnotations(IParameterSymbol parameter, TsType type) =>
+        ReadMemberAnnotations(parameter, parameter.GetAttributes(), type);
+
+    private MemberAnnotations ReadMemberAnnotations(
+        ISymbol member,
+        ImmutableArray<AttributeData> attributes,
+        TsType type
+    )
+    {
         string? format = null;
         var isFormatSpecified = false;
         string? schemaType = null;
-        string? schemaRef = null;
-        var nestedSchemaRefs = new List<(string Pointer, string Name)>();
         string? defaultValue = null;
         string? description = null;
         string? example = null;
         var isReadOnly = false;
         var isWriteOnly = false;
-        var attributes = GetWireMemberAttributes(member, owner);
-        var constraints = ReadConstraints(
-            attributes,
-            tsType is TsType.Array or TsType.Nullable { Inner: TsType.Array }
-        );
-        var daFormat = ReadDataAnnotationFormat(attributes);
         foreach (var attr in attributes)
         {
             if (attr.Is(_types.RivetFormat))
@@ -950,25 +1255,6 @@ public sealed class TypeWalker
             )
             {
                 schemaType = primitiveType;
-            }
-            else if (
-                attr.Is(_types.RivetSchemaRef)
-                && attr.ConstructorArguments.Length > 0
-                && attr.ConstructorArguments[0].Value is string refName
-            )
-            {
-                var refPointer =
-                    attr.ConstructorArguments.Length > 1
-                        ? attr.ConstructorArguments[1].Value as string ?? ""
-                        : "";
-                if (refPointer.Length == 0)
-                {
-                    schemaRef = refName;
-                }
-                else
-                {
-                    nestedSchemaRefs.Add((refPointer, refName));
-                }
             }
             else if (
                 attr.Is(_types.RivetDefault)
@@ -1004,72 +1290,59 @@ public sealed class TypeWalker
             }
         }
 
-        // Accessibility-derived asymmetry becomes readOnly/writeOnly on the shared
-        // component schema;
-        // explicit [RivetReadOnly]/[RivetWriteOnly] attributes take precedence
-        // (their assignment above wins because the derived marker only fills false).
-        if (!isReadOnly && memberSurface == JsonPropertySurface.ResponseOnly)
-        {
-            isReadOnly = true;
-        }
-        else if (!isWriteOnly && memberSurface == JsonPropertySurface.RequestOnly)
-        {
-            isWriteOnly = true;
-        }
+        type.RequirePrimitiveLeaf(schemaType, DescribeMember(member));
 
-        // DA format is a fallback — explicit [RivetFormat] takes precedence.
-        if (!isFormatSpecified)
-        {
-            format = daFormat;
-        }
-
-        // An explicit [RivetFormat] (even an empty one) replaces the inferred format;
-        // a DataAnnotations format only fills a leaf that has none.
-        tsType = tsType.WithLeaf(schemaType, isFormatSpecified ? format ?? "" : null);
-        if (
-            !isFormatSpecified
-            && format is not null
-            && tsType
-                is TsType.Primitive { Format: null }
-                    or TsType.Nullable { Inner: TsType.Primitive { Format: null } }
-        )
-        {
-            tsType = tsType.WithLeaf(null, format);
-        }
-
-        RefuseUnmodelledMemberSerialization(member, owner, tsType, context);
-
-        if (schemaRef is not null)
-        {
-            tsType = ApplyGeneratedSchemaRef(tsType, schemaRef, $"Property '{context}'");
-        }
-        foreach (var (refPointer, refName) in nestedSchemaRefs)
-        {
-            tsType = ApplyGeneratedSchemaRefAt(
-                tsType,
-                refPointer,
-                refName,
-                $"Property '{context}' at '{refPointer}'"
-            );
-        }
-
-        var generatedSchemaMetadata = ReadGeneratedSchemaMetadata(member);
-        tsType = ApplyGeneratedSchemaMetadata(tsType, "", generatedSchemaMetadata);
-
-        return new TsPropertyDefinition(
-            tsName,
-            tsType,
-            isOptional,
-            isDeprecated,
-            format,
+        return new MemberAnnotations(
+            member.HasAttribute(_types.Obsolete),
+            isFormatSpecified ? format : ReadDataAnnotationFormat(attributes),
+            isFormatSpecified,
+            schemaType,
             defaultValue,
-            constraints,
+            ReadConstraints(
+                attributes,
+                type is TsType.Array or TsType.Nullable { Inner: TsType.Array }
+            ),
             description,
             example,
             isReadOnly,
-            isWriteOnly,
-            generatedSchemaMetadata.GetValueOrDefault("")
+            isWriteOnly
         );
+    }
+
+    /// <summary>
+    /// <c>[RivetSchemaRef]</c> on a member: the generated schema it names for the whole
+    /// member, and any it names at a pointer inside the member's type.
+    /// </summary>
+    private (string? SchemaRef, List<(string Pointer, string Name)> Nested) ReadSchemaRefs(
+        ImmutableArray<AttributeData> attributes
+    )
+    {
+        string? schemaRef = null;
+        var nested = new List<(string Pointer, string Name)>();
+        foreach (var attr in attributes)
+        {
+            if (
+                attr.Is(_types.RivetSchemaRef)
+                && attr.ConstructorArguments.Length > 0
+                && attr.ConstructorArguments[0].Value is string refName
+            )
+            {
+                var refPointer =
+                    attr.ConstructorArguments.Length > 1
+                        ? attr.ConstructorArguments[1].Value as string ?? ""
+                        : "";
+                if (refPointer.Length == 0)
+                {
+                    schemaRef = refName;
+                }
+                else
+                {
+                    nested.Add((refPointer, refName));
+                }
+            }
+        }
+
+        return (schemaRef, nested);
     }
 
     private JsonPropertySurface GetJsonMemberSurface(ISymbol member, INamedTypeSymbol owner) =>
@@ -1110,6 +1383,28 @@ public sealed class TypeWalker
         return new TsTypeMetadata(componentId, provenance);
     }
 
+    /// <summary>
+    /// JSON inside a generated attribute the importer wrote; JSON that doesn't read is stale
+    /// or hand-edited generated code (RIV1122), not a crash.
+    /// </summary>
+    private static T? DeserializeGeneratedMetadata<T>(string json, string context)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(
+                json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
+            );
+        }
+        catch (JsonException exception)
+        {
+            throw Diagnostics.Error(
+                Diagnostics.MalformedGeneratedMetadata,
+                $"{context} isn't valid JSON ({exception.Message}). Re-import the OpenAPI document."
+            );
+        }
+    }
+
     private Dictionary<string, TsScalarMetadata> ReadGeneratedSchemaMetadata(ISymbol symbol)
     {
         var result = new Dictionary<string, TsScalarMetadata>(StringComparer.Ordinal);
@@ -1121,7 +1416,8 @@ public sealed class TypeWalker
         {
             if (attribute.ConstructorArguments is not [{ Value: string pointer }, ..])
             {
-                throw new RivetUserException(
+                throw Diagnostics.Error(
+                    Diagnostics.MalformedGeneratedMetadata,
                     "Invalid generated schema metadata in RivetGeneratedSchemaMetadataAttribute."
                 );
             }
@@ -1188,7 +1484,10 @@ public sealed class TypeWalker
                 IsReadOnly: BoolAt(26),
                 IsWriteOnly: BoolAt(27),
                 Required: StringAt(28) is { } requiredJson
-                    ? JsonSerializer.Deserialize<List<string>>(requiredJson)
+                    ? DeserializeGeneratedMetadata<List<string>>(
+                        requiredJson,
+                        $"RivetGeneratedSchemaMetadataAttribute required list at '{pointer}'"
+                    )
                     : null,
                 Enum: StringAt(32),
                 EnumListsNull: BoolAt(31)
@@ -1223,9 +1522,16 @@ public sealed class TypeWalker
             _ => type,
         };
 
-    public TsType MapPropertyType(IPropertySymbol property) =>
-        MapType(property.Type)
-            .WithLeaf(property.GetAttribute(_types.RivetSchemaType).StringArgument(), null);
+    /// <summary>A member as a diagnostic names it: where it's declared, and its C# type.</summary>
+    private static string DescribeMember(ISymbol member) =>
+        member switch
+        {
+            IParameterSymbol parameter =>
+                $"parameter '{parameter.Name}' (of type '{parameter.Type.ToDisplayString()}') of "
+                    + $"'{parameter.ContainingSymbol.ContainingType?.Name}.{parameter.ContainingSymbol.Name}'",
+            _ =>
+                $"'{member.ContainingType.Name}.{member.Name}' (of type '{GetMemberType(member).ToDisplayString()}')",
+        };
 
     /// <summary>
     /// Lowers a [RivetUnion] wrapper record to an undiscriminated union of its
@@ -1252,8 +1558,9 @@ public sealed class TypeWalker
 
         if (variants.Count == 0)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.RivetUnionNoVariants}: [RivetUnion] on '{name}' has no variant "
+            throw Diagnostics.Error(
+                Diagnostics.RivetUnionNoVariants,
+                $"[RivetUnion] on '{name}' has no variant "
                     + "properties, so there is no union to emit. Add one property per variant type, "
                     + "or remove [RivetUnion]."
             );
@@ -1280,8 +1587,9 @@ public sealed class TypeWalker
         // a payload the oneOf, admitting only the registered types, rejects.
         if (polymorphicAttr.NamedArgument("UnknownDerivedTypeHandling") is int and not 0)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.PolymorphicUnknownHandling}: [JsonPolymorphic] on '{name}' sets "
+            throw Diagnostics.Error(
+                Diagnostics.PolymorphicUnknownHandling,
+                $"[JsonPolymorphic] on '{name}' sets "
                     + "UnknownDerivedTypeHandling to a fallback, so the host writes a derived type it never "
                     + "registered as its base or nearest registered ancestor, and the spec's oneOf, which "
                     + "admits only the registered [JsonDerivedType]s, can't describe that payload. Remove the "
@@ -1294,8 +1602,9 @@ public sealed class TypeWalker
         // payload the oneOf, admitting only the registered tags, rejects.
         if (polymorphicAttr.NamedArgument("IgnoreUnrecognizedTypeDiscriminators") is true)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.PolymorphicUnknownHandling}: [JsonPolymorphic] on '{name}' sets "
+            throw Diagnostics.Error(
+                Diagnostics.PolymorphicUnknownHandling,
+                $"[JsonPolymorphic] on '{name}' sets "
                     + "IgnoreUnrecognizedTypeDiscriminators, so the host reads a body with a tag it never "
                     + "registered as the base type, and the spec's oneOf, which admits only the registered "
                     + "tags, rejects that body. Remove the setting so an unknown tag fails to read, and "
@@ -1307,8 +1616,9 @@ public sealed class TypeWalker
         // specify at least one derived type"), so no host can serve it.
         if (!definition.HasAttribute(_types.JsonDerivedType))
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.PolymorphicNoDerivedTypes}: [JsonPolymorphic] on '{name}' has no "
+            throw Diagnostics.Error(
+                Diagnostics.PolymorphicNoDerivedTypes,
+                $"[JsonPolymorphic] on '{name}' has no "
                     + "[JsonDerivedType] registrations, and System.Text.Json refuses to serialize such a "
                     + "type at all. Register each derived type with "
                     + "[JsonDerivedType(typeof(Derived), \"tag\")], or remove [JsonPolymorphic]."
@@ -1359,8 +1669,9 @@ public sealed class TypeWalker
                 // System.Text.Json throws on such a registration once options freeze, and
                 // the oneOf has no named schema to point at; dropping it would describe a
                 // union the host never serves.
-                throw new RivetUserException(
-                    $"error {Diagnostics.PolymorphicNonStringTag}: [JsonDerivedType] on '{name}' registers "
+                throw Diagnostics.Error(
+                    Diagnostics.PolymorphicNonStringTag,
+                    $"[JsonDerivedType] on '{name}' registers "
                         + $"'{(registered as ITypeSymbol)?.ToDisplayString() ?? "nothing"}', which isn't a named "
                         + "class, struct or record, so the oneOf has no variant schema to give it. Register "
                         + "only types that derive from the base, as in "
@@ -1376,8 +1687,9 @@ public sealed class TypeWalker
                 // int wire value would be a lie, and flattening the base describes a
                 // payload System.Text.Json never writes. A tagless registration is
                 // written with no discriminator at all and cannot be read back as the base.
-                throw new RivetUserException(
-                    $"error {Diagnostics.PolymorphicNonStringTag}: [JsonDerivedType] on '{name}' registers "
+                throw Diagnostics.Error(
+                    Diagnostics.PolymorphicNonStringTag,
+                    $"[JsonDerivedType] on '{name}' registers "
                         + $"'{derivedType.ToDisplayString()}' with "
                         + $"{(tagValue is null ? "no" : "a non-string")} discriminator tag, which a "
                         + "string-discriminated oneOf cannot represent. Give every registration a string tag, "
@@ -1399,7 +1711,7 @@ public sealed class TypeWalker
             // carries one). Then the derived type's members, each described exactly as its
             // own record describes it; a member STJ only reads or only writes stays in the
             // shared variant shape as writeOnly or readOnly.
-            var fields = new List<TsType.InlineObjectField>
+            var properties = new List<TsPropertyDefinition>
             {
                 new(discriminator, new TsType.StringUnion([tag])),
             };
@@ -1410,14 +1722,14 @@ public sealed class TypeWalker
                     { } property
                 )
                 {
-                    fields.Add(TsType.InlineObjectField.FromProperty(property));
+                    properties.Add(property);
                 }
             }
 
             variants.Add(
                 new TsType.TaggedUnionVariant(
                     tag,
-                    new TsType.InlineObject(fields),
+                    new TsType.InlineObject(properties, ReadAdditionalProperties(derivedType)),
                     GetTypeMetadata(derivedType),
                     GetTypeDescription(derivedType),
                     ReadGeneratedSchemaMetadata(derivedType).GetValueOrDefault(""),
@@ -1449,8 +1761,9 @@ public sealed class TypeWalker
 
         if (TsType.TaggedUnionVariant.TagSchemaProblem(json, tag) is { } problem)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.MalformedGeneratedMetadata}: [RivetGeneratedType] on "
+            throw Diagnostics.Error(
+                Diagnostics.MalformedGeneratedMetadata,
+                "[RivetGeneratedType] on "
                     + $"'{derivedType.ToDisplayString()}' sets DiscriminatorSchemaJson to '{json}', which "
                     + $"{problem}, so it can't be the schema of the tag '{tag}' the type is registered with. "
                     + "Re-import the OpenAPI document, or correct the JSON to a schema object that admits the tag."
@@ -1498,8 +1811,9 @@ public sealed class TypeWalker
             }
         }
 
-        throw new RivetUserException(
-            $"error {Diagnostics.MalformedGeneratedMetadata}: [RivetGeneratedType] on "
+        throw Diagnostics.Error(
+            Diagnostics.MalformedGeneratedMetadata,
+            "[RivetGeneratedType] on "
                 + $"'{definition.ToDisplayString()}' sets DiscriminatorSchemaJson, but no base registers "
                 + "the type with [JsonDerivedType], so there is no tag property for the schema to describe. "
                 + "Re-import the OpenAPI document, or remove DiscriminatorSchemaJson."
@@ -1525,12 +1839,19 @@ public sealed class TypeWalker
 
         var name = definition.Name;
         var display = definition.ToDisplayString();
-        if (_claimedNames.TryGetValue(name, out var claimant))
+        var annotatesBrand =
+            _generatedBrandSchemaNames.Remove(name) && definition.HasAttribute(_types.RivetScalar);
+        if (!annotatesBrand && _claimedNames.TryGetValue(name, out var claimant))
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.TypeNameCollision}: '{claimant}' and '{display}' would both emit "
-                    + $"the schema name '{name}', and schema names are global. Rename one of the two "
-                    + "types so every type the contract reaches has a unique simple name."
+            throw Diagnostics.Error(
+                Diagnostics.TypeNameCollision,
+                claimant.StartsWith(GeneratedClaimant, StringComparison.Ordinal)
+                    ? $"{claimant} and '{display}' would both emit the schema name '{name}', and "
+                        + "schema names are global: the type would replace the generated schema. Rename "
+                        + "the type, or re-import the OpenAPI document so the two get distinct names."
+                    : $"'{claimant}' and '{display}' would both emit "
+                        + $"the schema name '{name}', and schema names are global. Rename one of the two "
+                        + "types so every type the contract reaches has a unique simple name."
             );
         }
 
@@ -1673,8 +1994,9 @@ public sealed class TypeWalker
                                 != fields.Count
                         )
                         {
-                            throw new RivetUserException(
-                                $"error {Diagnostics.UnsupportedEnumConverter}: string enum '{namedType.Name}' contains flags or aliased values. Use distinct values without Flags, or a numeric enum."
+                            throw Diagnostics.Error(
+                                Diagnostics.UnsupportedEnumConverter,
+                                $"string enum '{namedType.Name}' contains flags or aliased values. Use distinct values without Flags, or a numeric enum."
                             );
                         }
                         var candidates = fields
@@ -1698,8 +2020,9 @@ public sealed class TypeWalker
                                     )
                                     .Select(f => f.Name)
                             );
-                            throw new RivetUserException(
-                                $"error {Diagnostics.EnumWireValueCollision}: enum '{namedType.Name}' members "
+                            throw Diagnostics.Error(
+                                Diagnostics.EnumWireValueCollision,
+                                $"enum '{namedType.Name}' members "
                                     + $"({collidingMembers}) produce the same wire value '{colliding}'. "
                                     + "Use distinct member names or explicit wire names."
                             );
@@ -1785,14 +2108,13 @@ public sealed class TypeWalker
         // ValueTuple → inline object { key: string; value: number }
         if (symbol is INamedTypeSymbol { IsTupleType: true } tupleType)
         {
-            var fields = tupleType
-                .TupleElements.Select(e =>
-                {
-                    var fieldType = MapTypeCore(e.Type, context);
-                    return new TsType.InlineObjectField(Naming.ToCamelCase(e.Name), fieldType);
-                })
+            var properties = tupleType
+                .TupleElements.Select(e => new TsPropertyDefinition(
+                    Naming.ToCamelCase(e.Name),
+                    MapTypeCore(e.Type, context)
+                ))
                 .ToList();
-            return new TsType.InlineObject(fields);
+            return new TsType.InlineObject(properties);
         }
 
         // BigInteger: System.Text.Json has no converter for it, so it serializes the
@@ -1800,8 +2122,9 @@ public sealed class TypeWalker
         // No schema describes that honestly, so refuse.
         if (SymbolEqualityComparer.Default.Equals(symbol, _bigIntegerType))
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnsupportedBigInteger}: '{symbol.ToDisplayString()}'{AtContext(context)} "
+            throw Diagnostics.Error(
+                Diagnostics.UnsupportedBigInteger,
+                $"'{symbol.ToDisplayString()}'{AtContext(context)} "
                     + "has no System.Text.Json converter: it serializes as an object of its IsZero/Sign/... "
                     + "properties and cannot be read back. Expose the value as a string of digits, or as "
                     + "long or decimal when the range allows."
@@ -1868,9 +2191,7 @@ public sealed class TypeWalker
         var (isString, policy, unsupported) = ReadEnumWireShape(types, type);
         return unsupported is null
             ? (isString, policy)
-            : throw new RivetUserException(
-                $"error {Diagnostics.UnsupportedEnumConverter}: {unsupported}"
-            );
+            : throw Diagnostics.Error(Diagnostics.UnsupportedEnumConverter, unsupported);
     }
 
     /// <summary>
@@ -2127,8 +2448,9 @@ public sealed class TypeWalker
             );
         if (converter is not null)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnmodelledJsonConverter}: type '{type.ToDisplayString()}' carries "
+            throw Diagnostics.Error(
+                Diagnostics.UnmodelledJsonConverter,
+                $"type '{type.ToDisplayString()}' carries "
                     + $"{DescribeConverter(converter)}, and Rivet cannot see what that converter writes, so "
                     + "the spec would describe the CLR shape instead of the wire. Make the type a "
                     + "[RivetScalar] wrapper (one Value property) or a [RivetUnion], or expose a DTO "
@@ -2165,8 +2487,9 @@ public sealed class TypeWalker
             .FirstOrDefault(a => IsJsonConverterAttribute(_types, a.AttributeClass));
         if (converter is not null)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnmodelledJsonConverter}: '{context}' carries "
+            throw Diagnostics.Error(
+                Diagnostics.UnmodelledJsonConverter,
+                $"'{context}' carries "
                     + $"{DescribeConverter(converter)}, and Rivet cannot see what that converter writes, so "
                     + "the spec would describe the CLR type instead of the wire. On a primitive-typed "
                     + "property, pin the wire with [RivetSchemaType(\"string\")] (or whichever JSON type it "
@@ -2177,8 +2500,9 @@ public sealed class TypeWalker
 
         if (StringsForNumbers(member, walkedType, GetMemberType(member)) is { } strings)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnmodelledNumberHandling}: '{context}' is serialized with "
+            throw Diagnostics.Error(
+                Diagnostics.UnmodelledNumberHandling,
+                $"'{context}' is serialized with "
                     + $"{strings}, or pin a primitive-typed property with [RivetSchemaType(\"string\")]."
             );
         }
@@ -2263,8 +2587,9 @@ public sealed class TypeWalker
             if (StringsForNumbers(declared, definition, memberType) is { } strings)
             {
                 var site = context is null ? "" : $"'{context}' uses ";
-                throw new RivetUserException(
-                    $"error {Diagnostics.UnmodelledNumberHandling}: {site}'{instantiation.ToDisplayString()}', "
+                throw Diagnostics.Error(
+                    Diagnostics.UnmodelledNumberHandling,
+                    $"{site}'{instantiation.ToDisplayString()}', "
                         + $"which binds '{definition.ToDisplayString()}.{declared.Name}' to "
                         + $"'{memberType.ToDisplayString()}'. That member is serialized with {strings}, "
                         + "or instantiate the type with a non-number type argument."
@@ -2351,8 +2676,9 @@ public sealed class TypeWalker
             )
         )
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.InvalidRivetScalarShape}: [RivetScalar] type "
+            throw Diagnostics.Error(
+                Diagnostics.InvalidRivetScalarShape,
+                "[RivetScalar] type "
                     + $"'{symbol.ToDisplayString()}' must be a non-generic class/struct/record "
                     + "with exactly one public readable non-indexer property "
                     + "named 'Value' and a public constructor accepting its type. Inheritance, competing converters and property-level JSON settings are unsupported."

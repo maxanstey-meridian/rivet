@@ -33,13 +33,13 @@ public static class MembersContract
             .Secure("admin");
 
     public static readonly RouteDefinition Remove =
-        Define.Delete("/api/members/{id}")
+        Define.Delete("/api/members/{id:guid}")
             .Returns<NotFoundDto>(404, "Member not found")
             .Secure("admin");
 
     // Input only, 204 — chain .Accepts<T>() from a void definition
     public static readonly InputRouteDefinition<UpdateRoleRequest> UpdateRole =
-        Define.Put("/api/members/{id}/role")
+        Define.Put("/api/members/{id:guid}/role")
             .Accepts<UpdateRoleRequest>()
             .Status(204)
             .Returns<NotFoundDto>(404, "Member not found");
@@ -62,6 +62,29 @@ form of a richer idea: pass scopes after the scheme name, chain `.Secure()` agai
 for another way in, `.AndSecure()` for a scheme the same caller also needs, and
 `.OrAnonymous()` when credentials are optional. The
 [Security section](/reference/endpoint-builder#security) walks through each.
+
+### Typing route tokens
+
+`{id}` in a route is a promise to every client about what goes in that segment, so
+Rivet wants to know its type. Give it one of three ways: a matching property on the
+input record (which then also carries its `[Range]`, `[RivetDescription]`, and the
+rest onto the parameter), a type constraint in the route (`{id:guid}`, `{page:int}`),
+or a declared `.Parameter<T>("id", "path", required: true)`. A token with none of them
+stops generation with `RIV1019`: the spec would have to say "any string", which is
+rarely what the handler binds, and Rivet would rather refuse than fib.
+
+```csharp
+public static readonly RouteDefinition Remove =
+    Define.Delete("/api/members/{id:guid}")   // typed by its constraint
+        .Returns<NotFoundDto>(404, "Member not found");
+```
+
+A constraint also tightens the schema (`{page:int:min(1)}` is an integer of at least
+1), and one that contradicts its property, like `{id:int}` over a `string Id`, stops
+generation with `RIV1125`. The [Route parameters](/reference/endpoint-builder#route-parameters)
+reference has the full table. Bear in mind a constraint changes routing as well as the
+spec: a request whose `{id}` isn't a GUID now gets a routing 404 instead of reaching
+your handler, so the endpoint should declare that 404.
 
 ## Implementing a contract
 

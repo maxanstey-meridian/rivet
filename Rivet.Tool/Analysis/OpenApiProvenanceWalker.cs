@@ -18,6 +18,19 @@ internal static class OpenApiProvenanceWalker
         "jsonSchemaDialect",
     ];
 
+    /// <summary>
+    /// A response header OpenAPI ignores (<c>Content-Type</c>) stays out of the contract and
+    /// comes back verbatim: under the response's headers, or as its whole <c>headers</c> when
+    /// it was the only one.
+    /// </summary>
+    private static bool IsIgnoredResponseHeader(OpenApiPreservedFieldProvenance field) =>
+        field.OwnerPointer.Contains("/responses/", StringComparison.Ordinal)
+        && (
+            field.Name == "headers"
+            || field.OwnerPointer.EndsWith("/headers", StringComparison.Ordinal)
+                && OpenApiStructure.IsReservedHeaderName(field.Name, isResponseHeader: true)
+        );
+
     public static OpenApiDocumentProvenance? Walk(Compilation compilation, TypeWalker typeWalker)
     {
         var attributes = compilation.Assembly.GetAttributes();
@@ -30,13 +43,13 @@ internal static class OpenApiProvenanceWalker
         }
         if (infoAttributes.Count != 1)
         {
-            throw new RivetUserException("Multiple Rivet document info declarations found.");
+            throw Malformed("Multiple Rivet document info declarations found.");
         }
 
         var infoArguments = infoAttributes[0].ConstructorArguments;
         if (infoArguments.Length != 11)
         {
-            throw new RivetUserException("Invalid Rivet document info metadata.");
+            throw Malformed("Invalid Rivet document info metadata.");
         }
 
         var contact = RequiredBool(infoArguments[7], "document contact presence")
@@ -87,9 +100,7 @@ internal static class OpenApiProvenanceWalker
             .ToList();
         if (externalDocsAttributes.Count > 1)
         {
-            throw new RivetUserException(
-                "Multiple Rivet document external-docs declarations found."
-            );
+            throw Malformed("Multiple Rivet document external-docs declarations found.");
         }
         var externalDocs =
             externalDocsAttributes.Count == 1
@@ -114,9 +125,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 6)
                 {
-                    throw new RivetUserException(
-                        "Invalid Rivet document component-example metadata."
-                    );
+                    throw Malformed("Invalid Rivet document component-example metadata.");
                 }
 
                 var name = RequiredString(args[1], "document component-example name");
@@ -124,7 +133,7 @@ internal static class OpenApiProvenanceWalker
                 var externalValue = StringValue(args[5]);
                 if ((jsonValue is null) == (externalValue is null))
                 {
-                    throw new RivetUserException(
+                    throw Malformed(
                         $"Rivet document component example '{name}' requires exactly one of JSON value or externalValue."
                     );
                 }
@@ -150,9 +159,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 10)
                 {
-                    throw new RivetUserException(
-                        "Invalid Rivet document request-body content metadata."
-                    );
+                    throw Malformed("Invalid Rivet document request-body content metadata.");
                 }
 
                 var schemaType = args[3].Value as ITypeSymbol;
@@ -193,9 +200,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 10)
                 {
-                    throw new RivetUserException(
-                        "Invalid Rivet document request-body example metadata."
-                    );
+                    throw Malformed("Invalid Rivet document request-body example metadata.");
                 }
                 var referencedComponentsJson = StringValue(args[7]);
                 return (
@@ -209,8 +214,9 @@ internal static class OpenApiProvenanceWalker
                         StringValue(args[6]),
                         referencedComponentsJson is null
                             ? null
-                            : JsonSerializer.Deserialize<Dictionary<string, string>>(
-                                referencedComponentsJson
+                            : DeserializeMetadata<Dictionary<string, string>>(
+                                referencedComponentsJson,
+                                "request-body example referenced-components"
                             ),
                         StringValue(args[8]),
                         StringValue(args[9])
@@ -225,7 +231,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 4)
                 {
-                    throw new RivetUserException("Invalid Rivet document request-body metadata.");
+                    throw Malformed("Invalid Rivet document request-body metadata.");
                 }
                 var order = RequiredInt(args[0], "request-body order");
                 return (
@@ -281,9 +287,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 2)
                 {
-                    throw new RivetUserException(
-                        "Invalid Rivet imported-source fingerprint metadata."
-                    );
+                    throw Malformed("Invalid Rivet imported-source fingerprint metadata.");
                 }
                 return new OpenApiImportedSourceFileProvenance(
                     RequiredString(args[0], "imported source path"),
@@ -299,7 +303,7 @@ internal static class OpenApiProvenanceWalker
                 var args = attribute.ConstructorArguments;
                 if (args.Length != 3)
                 {
-                    throw new RivetUserException("Invalid Rivet preserved-field metadata.");
+                    throw Malformed("Invalid Rivet preserved-field metadata.");
                 }
 
                 var field = new OpenApiPreservedFieldProvenance(
@@ -310,11 +314,10 @@ internal static class OpenApiProvenanceWalker
                 if (
                     !field.Name.StartsWith("x-", StringComparison.Ordinal)
                     && !_preservableDocumentationFields.Contains(field.Name)
+                    && !IsIgnoredResponseHeader(field)
                 )
                 {
-                    throw new RivetUserException(
-                        $"Invalid Rivet preserved-field name '{field.Name}'."
-                    );
+                    throw Malformed($"Invalid Rivet preserved-field name '{field.Name}'.");
                 }
                 try
                 {
@@ -322,7 +325,7 @@ internal static class OpenApiProvenanceWalker
                 }
                 catch (JsonException exception)
                 {
-                    throw new RivetUserException(
+                    throw Malformed(
                         $"Invalid Rivet preserved-field JSON for '{field.Name}': {exception.Message}"
                     );
                 }
@@ -381,9 +384,36 @@ internal static class OpenApiProvenanceWalker
         }
     }
 
+    /// <summary>
+    /// Provenance attributes are written by --from-openapi, so one Rivet can't read is stale or
+    /// hand-edited generated code (RIV1122), and re-importing writes it again.
+    /// </summary>
+    private static RivetUserException Malformed(string message) =>
+        Diagnostics.Error(
+            Diagnostics.MalformedGeneratedMetadata,
+            $"{message} Re-import the OpenAPI document to regenerate the provenance attributes."
+        );
+
+    private static T? DeserializeMetadata<T>(
+        string json,
+        string context,
+        JsonSerializerOptions? options = null
+    )
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, options);
+        }
+        catch (JsonException exception)
+        {
+            throw Malformed($"Invalid Rivet {context} JSON: {exception.Message}");
+        }
+    }
+
     private static RivetUserException ImportedSourceConflict(string path, string reason) =>
-        new(
-            $"error {Diagnostics.ImportedSchemaProvenanceConflict}: imported schema provenance conflicts with the current C# source because '{path}' {reason}; re-import the OpenAPI document or remove/update its raw schema provenance"
+        Diagnostics.Error(
+            Diagnostics.ImportedSchemaProvenanceConflict,
+            $"imported schema provenance conflicts with the current C# source because '{path}' {reason}; re-import the OpenAPI document or remove/update its raw schema provenance"
         );
 
     internal static OpenApiOperationProvenance? ReadOperation(
@@ -401,7 +431,7 @@ internal static class OpenApiProvenanceWalker
         }
         if (provenanceAttributes.Count != 1)
         {
-            throw new RivetUserException(
+            throw Malformed(
                 $"Multiple Rivet operation provenance declarations found on '{field.Name}'."
             );
         }
@@ -462,8 +492,9 @@ internal static class OpenApiProvenanceWalker
                 .Select(value => value.Reference)
                 .ToList(),
             StringValue(args[9]) is { } schemasJson
-                ? JsonSerializer.Deserialize<OpenApiOperationSchemaProvenance>(
+                ? DeserializeMetadata<OpenApiOperationSchemaProvenance>(
                     schemasJson,
+                    "operation schema provenance",
                     new JsonSerializerOptions { PropertyNameCaseInsensitive = true }
                 )
                 : null,
@@ -511,7 +542,7 @@ internal static class OpenApiProvenanceWalker
                 }
                 catch (JsonException exception)
                 {
-                    throw new RivetUserException(
+                    throw Malformed(
                         $"Invalid Rivet document component {kind} JSON for '{name}': {exception.Message}"
                     );
                 }
@@ -583,23 +614,19 @@ internal static class OpenApiProvenanceWalker
     private static string? StringValue(TypedConstant value) => value.Value as string;
 
     private static string RequiredString(TypedConstant value, string context) =>
-        StringValue(value) ?? throw new RivetUserException($"Invalid Rivet {context} metadata.");
+        StringValue(value) ?? throw Malformed($"Invalid Rivet {context} metadata.");
 
     private static int RequiredInt(TypedConstant value, string context) =>
-        value.Value is int result
-            ? result
-            : throw new RivetUserException($"Invalid Rivet {context} metadata.");
+        value.Value is int result ? result : throw Malformed($"Invalid Rivet {context} metadata.");
 
     private static bool RequiredBool(TypedConstant value, string context) =>
-        value.Value is bool result
-            ? result
-            : throw new RivetUserException($"Invalid Rivet {context} metadata.");
+        value.Value is bool result ? result : throw Malformed($"Invalid Rivet {context} metadata.");
 
     private static IReadOnlyList<string> StringArray(TypedConstant value, string context)
     {
         if (value.Kind != TypedConstantKind.Array || value.IsNull)
         {
-            throw new RivetUserException($"Invalid Rivet {context} metadata.");
+            throw Malformed($"Invalid Rivet {context} metadata.");
         }
 
         return value.Values.Select(item => RequiredString(item, context)).ToList();

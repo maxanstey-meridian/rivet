@@ -95,8 +95,9 @@ internal static class SchemaEnricher
         }
         catch (JsonException exception)
         {
-            throw new RivetUserException(
-                $"error: {what} must be a JSON literal, got '{json}' ({exception.Message})"
+            throw Diagnostics.Error(
+                Diagnostics.InvalidBuilderArgument,
+                $"{what} must be a JSON literal, got '{json}' ({exception.Message})"
             );
         }
     }
@@ -107,7 +108,10 @@ internal static class SchemaEnricher
     /// </summary>
     public static JsonArray ParseJsonArray(string json, string what) =>
         ParseJsonLiteral(json, what) as JsonArray
-        ?? throw new RivetUserException($"error: {what} must be a JSON array, got '{json}'");
+        ?? throw Diagnostics.Error(
+            Diagnostics.InvalidBuilderArgument,
+            $"{what} must be a JSON array, got '{json}'"
+        );
 
     /// <summary>
     /// A header's or parameter's <c>examples</c>: a map of Example objects by name, unlike a
@@ -122,8 +126,9 @@ internal static class SchemaEnricher
                 .Any(entry => entry.Value.ValueKind != JsonValueKind.Object)
         )
         {
-            throw new RivetUserException(
-                $"error: {what} must be a JSON object mapping names to Example objects, got '{examples.GetRawText()}'"
+            throw Diagnostics.Error(
+                Diagnostics.InvalidBuilderArgument,
+                $"{what} must be a JSON object mapping names to Example objects, got '{examples.GetRawText()}'"
             );
         }
         return JsonNode.Parse(examples.GetRawText())!.AsObject();

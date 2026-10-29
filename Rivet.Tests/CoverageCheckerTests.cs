@@ -25,16 +25,16 @@ public sealed class CoverageCheckerTests
                 Define.Post<TaskInput, TaskDto>("/api/tasks");
 
             public static readonly RouteDefinition RemoveTask =
-                Define.Delete("/api/tasks/{id}");
+                Define.Delete("/api/tasks/{id:guid}");
 
             public static readonly RouteDefinition UpdateTask =
-                Define.Put("/api/tasks/{id}");
+                Define.Put("/api/tasks/{id:guid}");
 
             public static readonly RouteDefinition PatchTask =
-                Define.Patch("/api/tasks/{id}");
+                Define.Patch("/api/tasks/{id:guid}");
 
             public static readonly FileRouteDefinition DownloadTask =
-                Define.File("/api/tasks/{id}/download");
+                Define.File("/api/tasks/{id:guid}/download");
 
             public static readonly RouteDefinition HeadTasks =
                 Define.Head("/api/tasks");
@@ -1455,6 +1455,200 @@ public sealed class CoverageCheckerTests
         Assert.Equal("/api/items", warning.Actual);
     }
 
+    // ---------------------------------------------------------------
+    // K.1: a Map* handler given as a method group, a local function or
+    // a local holding a lambda is the route handler, exactly as a
+    // lambda written in place is.
+    // ---------------------------------------------------------------
+
+    /// <summary>
+    /// A TaskEndpoints.Map that runs <paramref name="mapping"/>, beside a TaskHandlers class
+    /// holding <paramref name="handlers"/>; <c>handlers</c> is a TaskHandlers instance.
+    /// </summary>
+    private static string MappedTasks(string mapping, string handlers = "") =>
+        $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class TaskEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app, TaskHandlers handlers)
+                {
+                    {{mapping}}
+                }
+            }
+
+            public sealed class TaskHandlers
+            {
+                {{handlers}}
+            }
+            """;
+
+    private const string ListHandler =
+        "public static IResult List() => TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\")).ToResult();";
+
+    [Theory]
+    [InlineData("app.MapGet(\"/api/tasks\", TaskHandlers.List);", ListHandler)]
+    [InlineData(
+        "app.MapGet(\"/api/tasks\", handlers.Find);",
+        "public IResult Find() => TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\")).ToResult();"
+    )]
+    [InlineData(
+        "app.MapGet(\"/api/tasks\", TaskHandlers.Block);",
+        "public static IResult Block() { var endpoint = TasksContract.ListTasks; return endpoint.Success(new TaskDto(\"1\", \"Test\")).ToResult(); }"
+    )]
+    [InlineData(
+        "app.MapGet(\"/api/tasks\", List); static IResult List() => TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\")).ToResult();",
+        ""
+    )]
+    [InlineData(
+        "var list = () => TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\")).ToResult(); app.MapGet(\"/api/tasks\", list);",
+        ""
+    )]
+    [InlineData(
+        "System.Func<IResult> list = () => TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\")).ToResult(); app.MapGet(\"/api/tasks\", list);",
+        ""
+    )]
+    public void Map_handler_named_instead_of_written_in_place_is_coverage(
+        string mapping,
+        string handlers
+    )
+    {
+        var warnings = RunCheck(Contract, MappedTasks(mapping, handlers));
+
+        AssertCovered(warnings);
+    }
+
+    [Fact]
+    public void Method_group_handler_gets_its_map_calls_verb_and_route()
+    {
+        var warnings = RunCheck(
+            Contract,
+            MappedTasks("app.MapPost(\"/api/other\", TaskHandlers.List);", ListHandler)
+        );
+
+        AssertNoMissingWarning(warnings, "ListTasks");
+        Assert.Contains(
+            warnings,
+            warning =>
+                warning is { Kind: CoverageWarningKind.HttpMethodMismatch, Actual: "POST" }
+                && warning.FieldName == "ListTasks"
+        );
+        Assert.Contains(
+            warnings,
+            warning =>
+                warning is { Kind: CoverageWarningKind.RouteMismatch, Actual: "/api/other" }
+                && warning.FieldName == "ListTasks"
+        );
+    }
+
+    [Fact]
+    public void Method_group_handler_mapped_twice_is_checked_at_each_mapping()
+    {
+        var warnings = RunCheck(
+            Contract,
+            MappedTasks(
+                """
+                app.MapGet("/api/tasks", TaskHandlers.List);
+                app.MapGet("/api/tasks/all", TaskHandlers.List);
+                """,
+                ListHandler
+            )
+        );
+
+        var mismatch = Assert.Single(warnings, warning => warning.FieldName == "ListTasks");
+        Assert.Equal(CoverageWarningKind.RouteMismatch, mismatch.Kind);
+        Assert.Equal("/api/tasks/all", mismatch.Actual);
+    }
+
+    [Fact]
+    public void Method_group_handler_that_returns_the_terminal_raw_is_not_coverage()
+    {
+        var warnings = RunCheck(
+            Contract,
+            MappedTasks(
+                "app.MapGet(\"/api/tasks\", TaskHandlers.List);",
+                "public static RivetResult List() => TasksContract.ListTasks.Success(new TaskDto(\"1\", \"Test\"));"
+            )
+        );
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Method_group_to_a_method_without_source_covers_nothing()
+    {
+        // object.ToString has no body to read, so there is no terminal to find in it; the
+        // Map* call is simply not an implementation of anything.
+        var warnings = RunCheck(
+            Contract,
+            MappedTasks("app.MapGet(\"/api/tasks\", new object().ToString);")
+        );
+
+        AssertMissingWarning(warnings, "ListTasks");
+    }
+
+    [Fact]
+    public void Bind_in_a_method_group_handler_is_not_orphaned()
+    {
+        var warnings = RunCheck(
+            Contract,
+            MappedTasks(
+                "app.MapPost(\"/api/tasks\", TaskHandlers.Create);",
+                """
+                public static IResult Create([FromBody] TaskInput input)
+                {
+                    var endpoint = TasksContract.CreateTask.Bind(input);
+                    return input.Title == ""
+                        ? Refuse(endpoint)
+                        : endpoint.Success(new TaskDto("1", input.Title)).ToResult();
+                }
+
+                private static IResult Refuse(BoundRouteDefinitionBase endpoint) =>
+                    endpoint.Error(404).ToResult();
+                """
+            )
+        );
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "CreateTask");
+    }
+
+    [Fact]
+    public void Method_group_handler_parameters_are_what_RIV4006_compares()
+    {
+        var handler = """
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class NoteEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app) =>
+                    app.MapGet("/api/notes/{id}", NoteHandlers.Get);
+            }
+
+            public static class NoteHandlers
+            {
+                public static IResult Get(string id, [FromQuery] string? extra) =>
+                    NotesContract.Get.Success(new NoteDto(id)).ToResult();
+            }
+            """;
+
+        var mismatch = Assert.Single(InputMismatches(RunCheck(InputContract, handler), "Get"));
+
+        Assert.Equal("query parameter 'extra'", mismatch.Actual);
+        Assert.Equal("(not declared)", mismatch.Expected);
+    }
+
     [Fact]
     public void Isolated_function_route_and_method_are_recognized()
     {
@@ -1651,6 +1845,37 @@ public sealed class CoverageCheckerTests
                 public static void Map(IEndpointRouteBuilder app)
                 {
                     var group = app.MapGroup("/v2");
+                    group.MapGet("/items", () =>
+                        GroupedTasksContract.ListItems
+                            .Success(new GroupedTaskDto("1"))
+                            .ToResult());
+                }
+            }
+            """;
+
+        var warnings = RunCheck(GroupedTasksContract, implementation);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListItems");
+    }
+
+    [Theory]
+    [InlineData("var group = app.MapGroup(\"/v2\").AllowAnonymous();")]
+    [InlineData("var group = app.MapGroup(\"/v2\").RequireAuthorization().AllowAnonymous();")]
+    public void MapGroup_prefix_survives_conventions_applied_to_the_group(string group)
+    {
+        // A convention hands back the group it's given, so the local still names it.
+        var implementation = $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class GroupedEndpoints
+            {
+                public static void Map(IEndpointRouteBuilder app)
+                {
+                    {{group}}
                     group.MapGet("/items", () =>
                         GroupedTasksContract.ListItems
                             .Success(new GroupedTaskDto("1"))
@@ -2568,7 +2793,8 @@ public sealed class CoverageCheckerTests
 
     // ---------------------------------------------------------------
     // A binding handed to a helper on the returned path is used, so it
-    // isn't orphaned, but it covers nothing: coverage still needs a
+    // isn't orphaned. It covers the field only when the helper adapts
+    // the terminal it's handed (K.4); otherwise coverage still needs a
     // terminal the handler returns itself.
     // ---------------------------------------------------------------
 
@@ -2597,6 +2823,36 @@ public sealed class CoverageCheckerTests
 
             public static IResult AnswerResult(RivetResult result) => result.ToResult();
 
+            public static IActionResult Relay(RivetResult result) => Answer(result);
+
+            public static IResult RelayResult(RivetResult result) => AnswerResult(result);
+
+            public static IActionResult Loop(RivetResult result, int times) =>
+                times == 0 ? result.ToActionResult() : Loop(result, times - 1);
+
+            public static IResult LoopResult(RivetResult result, int times) =>
+                times == 0 ? result.ToResult() : LoopResult(result, times - 1);
+
+            public static IActionResult Answered(this RivetResult result) => result.ToActionResult();
+
+            public static IResult AnsweredResult(this RivetResult result) => result.ToResult();
+
+            public static IActionResult Other(RivetResult result, RivetResult other) =>
+                other.ToActionResult();
+
+            public static IResult OtherResult(RivetResult result, RivetResult other) =>
+                other.ToResult();
+
+            public static IActionResult Drop(RivetResult result) =>
+                throw new System.InvalidOperationException();
+
+            public static IResult DropResult(RivetResult result) =>
+                throw new System.InvalidOperationException();
+
+            public static IActionResult Spin(RivetResult result) => Spin(result);
+
+            public static IResult SpinResult(RivetResult result) => SpinResult(result);
+
             public static RivetResult NotFound(BoundRouteDefinitionBase endpoint) =>
                 endpoint.Error(404);
 
@@ -2608,12 +2864,21 @@ public sealed class CoverageCheckerTests
 
                 public IResult DenyResult(int status) => endpoint.Error(status).ToResult();
             }
+
+            extension(RivetResult result)
+            {
+                public IActionResult Adapted() => result.ToActionResult();
+
+                public IResult AdaptedResult() => result.ToResult();
+            }
         }
         """;
 
     /// <summary>
     /// A POST /api/tasks handler (see <see cref="TasksHandler"/>) whose body writes
-    /// <c>REFUSE</c>, <c>DONE</c> and <c>DENY</c> for the host's <c>Respond</c> helpers.
+    /// <c>REFUSE</c>, <c>DONE</c>, <c>DENY</c> and <c>ANSWER</c> for the host's <c>Respond</c>
+    /// helpers, and <c>@Name</c> for any other: <c>Name</c> on MVC, <c>NameResult</c> on a
+    /// minimal API.
     /// </summary>
     private static IReadOnlyList<CoverageWarning> RunWithHelpers(string host, string body)
     {
@@ -2626,7 +2891,14 @@ public sealed class CoverageCheckerTests
             body.Replace("REFUSE", refuse)
                 .Replace("DONE", done)
                 .Replace("DENY", deny)
-                .Replace("ANSWER", answer),
+                .Replace("ANSWER", answer)
+                .Replace("@Relay", host == "mvc" ? "Relay" : "RelayResult")
+                .Replace("@Loop", host == "mvc" ? "Loop" : "LoopResult")
+                .Replace("@Answered", host == "mvc" ? "Answered" : "AnsweredResult")
+                .Replace("@Adapted", host == "mvc" ? "Adapted" : "AdaptedResult")
+                .Replace("@Other", host == "mvc" ? "Other" : "OtherResult")
+                .Replace("@Drop", host == "mvc" ? "Drop" : "DropResult")
+                .Replace("@Spin", host == "mvc" ? "Spin" : "SpinResult"),
             verb: "Post"
         );
         return RunCheck(Contract, OutcomeTypes, BindingHelpers, handler);
@@ -2671,11 +2943,6 @@ public sealed class CoverageCheckerTests
     )]
     [InlineData("mvc", "return Respond.NotFound((BoundRouteDefinitionBase)endpoint).ADAPT();")]
     [InlineData("minimal", "return Respond.NotFound((BoundRouteDefinitionBase)endpoint).ADAPT();")]
-    [InlineData("mvc", "return Respond.ANSWER(endpoint.Success(new TaskDto(\"1\", input.Title)));")]
-    [InlineData(
-        "minimal",
-        "return Respond.ANSWER(endpoint.Success(new TaskDto(\"1\", input.Title)));"
-    )]
     [InlineData(
         "mvc",
         "return await Respond.DONE(endpoint.Success(new TaskDto(\"1\", input.Title)).ADAPT());"
@@ -2683,6 +2950,26 @@ public sealed class CoverageCheckerTests
     [InlineData(
         "minimal",
         "return await Respond.DONE(endpoint.Success(new TaskDto(\"1\", input.Title)).ADAPT());"
+    )]
+    // The helper is handed the terminal but adapts something else, throws, or only hands it
+    // back to itself: following it ends, and gives nothing.
+    [InlineData(
+        "mvc",
+        "return Respond.@Other(endpoint.Success(new TaskDto(\"1\", input.Title)), Respond.NotFound(endpoint));"
+    )]
+    [InlineData(
+        "minimal",
+        "return Respond.@Other(endpoint.Success(new TaskDto(\"1\", input.Title)), Respond.NotFound(endpoint));"
+    )]
+    [InlineData("mvc", "return Respond.@Drop(endpoint.Success(new TaskDto(\"1\", input.Title)));")]
+    [InlineData(
+        "minimal",
+        "return Respond.@Drop(endpoint.Success(new TaskDto(\"1\", input.Title)));"
+    )]
+    [InlineData("mvc", "return Respond.@Spin(endpoint.Success(new TaskDto(\"1\", input.Title)));")]
+    [InlineData(
+        "minimal",
+        "return Respond.@Spin(endpoint.Success(new TaskDto(\"1\", input.Title)));"
     )]
     public void Bind_passed_to_a_returned_helper_is_not_orphaned_but_is_not_coverage(
         string host,
@@ -2699,6 +2986,60 @@ public sealed class CoverageCheckerTests
 
         Assert.DoesNotContain(warnings, IsCreateTaskOrphan);
         AssertMissingWarning(warnings, "CreateTask");
+    }
+
+    [Theory]
+    [InlineData("mvc", "return Respond.ANSWER(endpoint.Success(new TaskDto(\"1\", input.Title)));")]
+    [InlineData(
+        "minimal",
+        "return Respond.ANSWER(endpoint.Success(new TaskDto(\"1\", input.Title)));"
+    )]
+    [InlineData("mvc", "return Respond.@Relay(endpoint.Success(new TaskDto(\"1\", input.Title)));")]
+    [InlineData(
+        "minimal",
+        "return Respond.@Relay(endpoint.Success(new TaskDto(\"1\", input.Title)));"
+    )]
+    [InlineData(
+        "mvc",
+        "return Respond.@Loop(endpoint.Success(new TaskDto(\"1\", input.Title)), 3);"
+    )]
+    [InlineData(
+        "minimal",
+        "return Respond.@Loop(endpoint.Success(new TaskDto(\"1\", input.Title)), 3);"
+    )]
+    [InlineData("mvc", "return endpoint.Success(new TaskDto(\"1\", input.Title)).@Answered();")]
+    [InlineData("minimal", "return endpoint.Success(new TaskDto(\"1\", input.Title)).@Answered();")]
+    [InlineData("mvc", "return endpoint.Success(new TaskDto(\"1\", input.Title)).@Adapted();")]
+    [InlineData("minimal", "return endpoint.Success(new TaskDto(\"1\", input.Title)).@Adapted();")]
+    [InlineData(
+        "mvc",
+        "var answer = endpoint.Success(new TaskDto(\"1\", input.Title)); return Respond.ANSWER(answer);"
+    )]
+    [InlineData(
+        "minimal",
+        "var answer = endpoint.Success(new TaskDto(\"1\", input.Title)); return Respond.ANSWER(answer);"
+    )]
+    [InlineData(
+        "mvc",
+        "IActionResult Done(RivetResult result) => result.ADAPT(); return Done(endpoint.Success(new TaskDto(\"1\", input.Title)));"
+    )]
+    [InlineData(
+        "minimal",
+        "Microsoft.AspNetCore.Http.IResult Done(RivetResult result) => result.ADAPT(); return Done(endpoint.Success(new TaskDto(\"1\", input.Title)));"
+    )]
+    public void Terminal_passed_to_a_helper_that_adapts_it_is_coverage(string host, string returned)
+    {
+        // Done(endpoint.Success(x)) answers with the terminal when Done adapts the parameter
+        // it lands in, however many helpers it passes through first.
+        var body = $$"""
+            var input = new TaskInput("Test");
+            var endpoint = TasksContract.CreateTask.Bind(input);
+            {{returned}}
+            """;
+
+        var warnings = RunWithHelpers(host, body);
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "CreateTask");
     }
 
     [Theory]
@@ -2909,7 +3250,7 @@ public sealed class CoverageCheckerTests
     [Theory]
     [InlineData("mvc")]
     [InlineData("minimal")]
-    public void Helper_call_inside_a_lambda_arm_is_not_coverage(string host)
+    public void Helper_adapting_a_lambda_arms_terminal_is_coverage(string host)
     {
         var helper = """
             using Microsoft.AspNetCore.Http;
@@ -2934,10 +3275,7 @@ public sealed class CoverageCheckerTests
             );
             """;
 
-        AssertMissingWarning(
-            RunCheck(Contract, OutcomeTypes, helper, TasksHandler(host, body)),
-            "ListTasks"
-        );
+        AssertCovered(RunCheck(Contract, OutcomeTypes, helper, TasksHandler(host, body)));
     }
 
     [Theory]
@@ -3031,7 +3369,9 @@ public sealed class CoverageCheckerTests
     // ---------------------------------------------------------------
 
     private const string InputContract = """
+        using System.Runtime.Serialization;
         using System.Text.Json.Serialization;
+        using Microsoft.AspNetCore.Mvc;
         using Rivet;
 
         namespace Test;
@@ -3055,7 +3395,7 @@ public sealed class CoverageCheckerTests
         [RivetType]
         public sealed record NoteForm(
             string Title,
-            [property: JsonPropertyName("note_body")] string? Body
+            [property: DataMember(Name = "note_body")] [FromForm(Name = "note_body")] string? Body
         );
 
         [RivetType]
@@ -3070,7 +3410,7 @@ public sealed class CoverageCheckerTests
                 Define.Get<NoteSearch, NoteDto>("/api/notes");
 
             public static readonly RouteDefinition<NoteDto> Get =
-                Define.Get<NoteDto>("/api/notes/{id}");
+                Define.Get<NoteDto>("/api/notes/{id:guid}");
 
             public static readonly RouteDefinition<NoteInput, NoteDto> Create =
                 Define.Post<NoteInput, NoteDto>("/api/notes");
@@ -3192,7 +3532,9 @@ public sealed class CoverageCheckerTests
         string parameters,
         string terminal,
         bool apiController = true,
-        string body = ""
+        string body = "",
+        string members = "",
+        string baseType = "ControllerBase"
     ) =>
         $$"""
             using Microsoft.AspNetCore.Http;
@@ -3203,7 +3545,7 @@ public sealed class CoverageCheckerTests
 
             {{(apiController ? "[ApiController]" : "")}}
             [Route("api/notes")]
-            public sealed class NotesController : ControllerBase
+            public sealed class NotesController : {{baseType}}
             {
                 [Http{{verb}}("{{route}}")]
                 public IActionResult Handle({{parameters}})
@@ -3211,6 +3553,8 @@ public sealed class CoverageCheckerTests
                     {{body}}
                     return {{terminal}}.ToActionResult();
                 }
+
+                {{members}}
             }
             """;
 
@@ -3517,6 +3861,83 @@ public sealed class CoverageCheckerTests
         Assert.Empty(InputMismatches(RunCheck(InputContract, BindingTypes, handler), "Get"));
     }
 
+    // K.4: a method or property the action calls on this (its own type's or a base's) reads
+    // the same Request, so it's followed, transitively and each once.
+    [Theory]
+    [InlineData(
+        "var id = RouteId();",
+        "private string? RouteId() => Request.RouteValues[\"id\"] as string;"
+    )]
+    [InlineData(
+        "var id = this.RouteId();",
+        "private string? RouteId() => Request.RouteValues[\"id\"] as string;"
+    )]
+    [InlineData(
+        "var id = RouteId;",
+        "private string? RouteId => Request.RouteValues[\"id\"] as string;"
+    )]
+    [InlineData(
+        "var id = RouteId;",
+        "private string? RouteId { get { return RouteData.Values[\"id\"] as string; } }"
+    )]
+    [InlineData(
+        "var id = Outer();",
+        "private string? Outer() => Inner(); private string? Inner() => Request.RouteValues[\"id\"] as string;"
+    )]
+    [InlineData(
+        "var id = Echo(3);",
+        "private string? Echo(int times) => times == 0 ? Request.RouteValues[\"id\"] as string : Echo(times - 1);"
+    )]
+    [InlineData("var id = BaseRouteId();", "", "NotesControllerBase")]
+    public void Handler_reading_the_request_through_its_own_helper_is_not_told_an_input_is_unbound(
+        string body,
+        string members,
+        string baseType = "ControllerBase"
+    )
+    {
+        const string terminal = "NotesContract.Get.Success(new NoteDto(\"1\"))";
+        const string controllerBase = """
+            using Microsoft.AspNetCore.Mvc;
+
+            namespace Test;
+
+            public abstract class NotesControllerBase : ControllerBase
+            {
+                protected string? BaseRouteId() => Request.RouteValues["id"] as string;
+            }
+            """;
+        var handler = MvcNotes(
+            "Get",
+            "{id}",
+            "",
+            terminal,
+            body: body,
+            members: members,
+            baseType: baseType
+        );
+
+        Assert.Empty(InputMismatches(RunCheck(InputContract, controllerBase, handler), "Get"));
+    }
+
+    // A helper on this that never reads the request, or only names itself, still leaves the
+    // route value unbound.
+    [Theory]
+    [InlineData("var id = Spin();", "private string? Spin() => Spin();")]
+    [InlineData("var status = Status();", "private int Status() => Response.StatusCode;")]
+    public void Handler_helper_that_reads_no_request_is_told_an_input_is_unbound(
+        string body,
+        string members
+    )
+    {
+        const string terminal = "NotesContract.Get.Success(new NoteDto(\"1\"))";
+        var handler = MvcNotes("Get", "{id}", "", terminal, body: body, members: members);
+
+        var mismatch = Assert.Single(InputMismatches(RunCheck(InputContract, handler), "Get"));
+
+        Assert.Equal("route value 'id'", mismatch.Expected);
+        Assert.Equal("(not bound)", mismatch.Actual);
+    }
+
     // The HttpContext's User, RequestAborted and Response carry no input, so touching them
     // doesn't excuse an input the handler never binds.
     [Theory]
@@ -3787,23 +4208,63 @@ public sealed class CoverageCheckerTests
     [Theory]
     [InlineData("minimal")]
     [InlineData("mvc")]
-    public void Form_encoded_body_field_bound_under_another_name_is_reported(string host)
+    public void Form_encoded_body_bound_by_the_contracts_own_record_is_clean(string host)
     {
-        // The spec's form field is note_body (the [JsonPropertyName]); the [FromForm] record
-        // binds its member by its C# name, Body.
+        // The spec names each form field as both hosts' binders read the record, so a
+        // handler binding the contract's own input type binds every field: note_body by the
+        // [DataMember] the form mapper reads and the [FromForm] MVC reads.
         var handler = SubmitHandler(host, "[FromForm] NoteForm form");
 
-        var mismatches = InputMismatches(RunCheck(InputContract, handler), "Submit");
+        Assert.Empty(InputMismatches(RunCheck(InputContract, handler), "Submit"));
+    }
 
-        Assert.Equal(2, mismatches.Count);
-        Assert.Contains(
-            mismatches,
-            warning => warning is { Expected: "(not declared)", Actual: "form field 'Body'" }
-        );
-        Assert.Contains(
-            mismatches,
-            warning => warning is { Expected: "form field 'note_body'", Actual: "(not bound)" }
-        );
+    [Theory]
+    [InlineData("mvc", "[FromForm(Name = \"note_body\")]", false)]
+    [InlineData("minimal", "[FromForm(Name = \"note_body\")]", true)]
+    [InlineData("minimal", "[DataMember(Name = \"note_body\")]", false)]
+    [InlineData("mvc", "[DataMember(Name = \"note_body\")]", true)]
+    public void Form_record_member_is_renamed_only_by_its_hosts_attribute(
+        string host,
+        string rename,
+        bool reported
+    )
+    {
+        // MVC's model binder reads a member's [FromForm(Name =)]; the minimal-API form mapper
+        // ignores it and reads [DataMember(Name =)] instead (MinimalApiBindingHostTests).
+        var binding = $$"""
+            using System.Runtime.Serialization;
+            using Microsoft.AspNetCore.Mvc;
+
+            namespace Test
+            {
+                public sealed class NoteFormBinding
+                {
+                    public string Title { get; set; } = "";
+
+                    {{rename}}
+                    public string? Body { get; set; }
+                }
+            }
+            """;
+        var handler = SubmitHandler(host, "[FromForm] NoteFormBinding form");
+
+        var mismatches = InputMismatches(RunCheck(InputContract, binding, handler), "Submit");
+
+        if (reported)
+        {
+            Assert.Contains(
+                mismatches,
+                warning => warning is { Expected: "(not declared)", Actual: "form field 'Body'" }
+            );
+            Assert.Contains(
+                mismatches,
+                warning => warning is { Expected: "form field 'note_body'", Actual: "(not bound)" }
+            );
+        }
+        else
+        {
+            Assert.Empty(mismatches);
+        }
     }
 
     // [RivetRequestBody] makes NoteFormFields the form body, so its fields are the form
@@ -3944,11 +4405,21 @@ public sealed class CoverageCheckerTests
         Assert.Contains(mismatches, warning => warning.Expected == "form field 'title'");
     }
 
-    [Fact]
-    public void Functions_handler_inputs_are_not_compared()
+    /// <summary>A Function answering contract field <paramref name="field"/> of NotesContract.</summary>
+    private static string NoteFunction(
+        string route,
+        string parameters,
+        string field,
+        string verb = "get"
+    )
     {
-        // Functions read the query, headers and body from the request by hand.
-        var implementation = """
+        var bind = field switch
+        {
+            "Search" => ".Bind(new NoteSearch(null, null, null))",
+            "Create" => ".Bind(new NoteInput(\"t\"))",
+            _ => "",
+        };
+        return $$"""
             using Microsoft.AspNetCore.Mvc;
             using Microsoft.Azure.Functions.Worker;
             using Rivet;
@@ -3957,17 +4428,96 @@ public sealed class CoverageCheckerTests
 
             public sealed class NoteFunctions
             {
-                [Function("search-notes")]
+                [Function("notes")]
                 public IActionResult Run(
-                    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "notes")] object request
-                ) => NotesContract.Search.Bind(new NoteSearch(null, null, null))
-                    .Success(new NoteDto("1"))
-                    .ToActionResult();
+                    [HttpTrigger(AuthorizationLevel.Anonymous, "{{verb}}", Route = "{{route}}")] object request{{parameters}}
+                ) => NotesContract.{{field}}{{bind}}.Success(new NoteDto("1")).ToActionResult();
             }
             """;
+    }
 
-        var warnings = RunCheck(InputContract, AzureAttributes, implementation);
+    [Theory]
+    // The worker fills a parameter by its name, ignoring case: a route value first, then the
+    // query (tools/test_functions_host.py).
+    [InlineData("notes/{id}", "", "Get", "get")]
+    [InlineData("notes/{id}", ", string id", "Get", "get")]
+    [InlineData("notes/{id}", ", string ID", "Get", "get")]
+    [InlineData("notes", ", string? search, string? q", "Search", "get")]
+    // A JSON body's top-level properties reach it too (decision 32: the contract carries
+    // their names), ignoring case.
+    [InlineData("notes", ", string? title", "Create", "post")]
+    [InlineData("notes", ", string? TITLE", "Create", "post")]
+    public void Functions_handler_binding_declared_inputs_by_name_is_clean(
+        string route,
+        string parameters,
+        string field,
+        string verb
+    )
+    {
+        var handler = NoteFunction(route, parameters, field, verb);
 
-        Assert.DoesNotContain(warnings, warning => warning.FieldName == "Search");
+        var warnings = RunCheck(InputContract, AzureAttributes, handler);
+
+        Assert.Empty(InputMismatches(warnings, field));
+        AssertNoMissingWarning(warnings, field);
+    }
+
+    [Fact]
+    public void Functions_handler_parameter_named_after_no_route_token_is_reported()
+    {
+        // The trigger's route is notes/{id}, so the worker looks noteId up in the query, which
+        // no client sends it in: the parameter is always null.
+        var handler = NoteFunction("notes/{id}", ", string noteId", "Get");
+
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(InputContract, AzureAttributes, handler), "Get")
+        );
+
+        Assert.Equal("(not declared)", mismatch.Expected);
+        Assert.Equal("query parameter 'noteId'", mismatch.Actual);
+        Assert.Contains("always null", mismatch.Message);
+    }
+
+    [Fact]
+    public void Functions_handler_parameter_named_after_no_json_body_property_is_reported()
+    {
+        // NoteInput's only property is title: the worker finds titel in no route value, no
+        // query parameter and no property of the body, so the parameter is always null.
+        var handler = NoteFunction("notes", ", string? titel", "Create", "post");
+
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(InputContract, AzureAttributes, handler), "Create")
+        );
+
+        Assert.Equal("(not declared)", mismatch.Expected);
+        Assert.Equal("query parameter 'titel'", mismatch.Actual);
+        Assert.Contains("always null", mismatch.Message);
+    }
+
+    [Fact]
+    public void Functions_handler_query_parameter_the_contract_lacks_is_reported()
+    {
+        var handler = NoteFunction("notes", ", string? search, string? text", "Search");
+
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(InputContract, AzureAttributes, handler), "Search")
+        );
+
+        Assert.Equal("query parameter 'text'", mismatch.Actual);
+    }
+
+    [Fact]
+    public void Functions_handler_parameter_for_a_cookie_is_reported_as_the_query()
+    {
+        // The worker never reads a cookie (or a header, or a form field) into a parameter.
+        var handler = NoteFunction("notes/session", ", string? session", "Session");
+
+        var mismatch = Assert.Single(
+            InputMismatches(RunCheck(InputContract, AzureAttributes, handler), "Session")
+        );
+
+        Assert.Equal("cookie 'session'", mismatch.Expected);
+        Assert.Equal("query parameter 'session'", mismatch.Actual);
+        Assert.Contains("Read it from the trigger's request", mismatch.Message);
     }
 }

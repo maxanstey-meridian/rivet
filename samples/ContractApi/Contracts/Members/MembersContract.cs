@@ -18,7 +18,6 @@ public static class MembersContract
     public const string RemoveRoute = "/api/members/{id:guid}";
     public const string UpdateRoleRoute = "/api/members/{id:guid}/role";
     public const string HealthRoute = "/api/health";
-    public const string MinimalRoutePrefix = "/minimal";
     public const string AvatarRoute = "/api/members/{id:guid}/avatar";
 
     /// TS: list(): Promise<PagedResult<MemberDto>>
@@ -64,5 +63,6 @@ public static class MembersContract
         .File(AvatarRoute)
         .ProducesFile("image/jpeg")
         .QueryAuth()
-        .Description("Download a member's avatar");
+        .Description("Download a member's avatar")
+        .Secure("bearer");
 }

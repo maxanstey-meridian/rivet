@@ -10,7 +10,11 @@ namespace Rivet.Tool.Analysis;
 public sealed class WellKnownTypes(Compilation c)
 {
     private const string Mvc = "Microsoft.AspNetCore.Mvc.";
+
+    /// <summary>The compilation these symbols were resolved from.</summary>
+    public Compilation Compilation { get; } = c;
     private const string HttpResults = "Microsoft.AspNetCore.Http.HttpResults.";
+    private const string Authorization = "Microsoft.AspNetCore.Authorization.";
 
     private static readonly (string MetadataName, string Verb)[] _httpMethodTable =
     [
@@ -123,6 +127,16 @@ public sealed class WellKnownTypes(Compilation c)
     public INamedTypeSymbol? JsonNumberHandling { get; } = Stj(c, "JsonNumberHandlingAttribute");
     public INamedTypeSymbol? JsonStringEnumMemberName { get; } =
         Stj(c, "JsonStringEnumMemberNameAttribute");
+    public INamedTypeSymbol? JsonUnmappedMemberHandling { get; } =
+        Stj(c, "JsonUnmappedMemberHandlingAttribute");
+    public INamedTypeSymbol? JsonRequired { get; } = Stj(c, "JsonRequiredAttribute");
+
+    // A [JsonExtensionData] bag is a JsonObject or an IDictionary<string, object> or
+    // IDictionary<string, JsonElement>.
+    public INamedTypeSymbol? JsonElement { get; } =
+        c.GetTypeByMetadataName("System.Text.Json.JsonElement");
+    public INamedTypeSymbol? IDictionaryOfTKeyTValue { get; } =
+        c.GetTypeByMetadataName("System.Collections.Generic.IDictionary`2");
 
     // DataAnnotations
     public INamedTypeSymbol? MinLength { get; } = DataAnnotation(c, "MinLengthAttribute");
@@ -178,6 +192,71 @@ public sealed class WellKnownTypes(Compilation c)
         c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.FunctionAttribute");
     public INamedTypeSymbol? HttpTrigger { get; } =
         c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.HttpTriggerAttribute");
+
+    // Contract security on controllers (K.3)
+    public INamedTypeSymbol? RivetSecure { get; } = RivetType(c, "RivetSecureAttribute");
+    public INamedTypeSymbol? RivetAndSecure { get; } = RivetType(c, "RivetAndSecureAttribute");
+    public INamedTypeSymbol? RivetOrAnonymous { get; } = RivetType(c, "RivetOrAnonymousAttribute");
+    public INamedTypeSymbol? RivetAnonymous { get; } = RivetType(c, "RivetAnonymousAttribute");
+
+    // ASP.NET authorization (K.5): the attributes and the metadata interfaces they implement,
+    // the options and builder a fallback policy is set on, the static classes declaring
+    // AddAuthorization/AddAuthorizationBuilder and AddAuthorizationCore, the endpoint
+    // builders' RequireAuthorization/AllowAnonymous extensions, and MapGroup's builder. They
+    // span assemblies: Microsoft.AspNetCore.Authorization (attributes, options, builder,
+    // AddAuthorizationCore), Microsoft.AspNetCore.Metadata (the two interfaces) and
+    // Microsoft.AspNetCore.Authorization.Policy (AddAuthorization and the endpoint extensions).
+    public INamedTypeSymbol? Authorize { get; } =
+        c.GetTypeByMetadataName(Authorization + "AuthorizeAttribute");
+    public INamedTypeSymbol? AllowAnonymous { get; } =
+        c.GetTypeByMetadataName(Authorization + "AllowAnonymousAttribute");
+    public INamedTypeSymbol? IAuthorizeData { get; } =
+        c.GetTypeByMetadataName(Authorization + "IAuthorizeData");
+    public INamedTypeSymbol? IAllowAnonymous { get; } =
+        c.GetTypeByMetadataName(Authorization + "IAllowAnonymous");
+    public INamedTypeSymbol? AuthorizationOptions { get; } =
+        c.GetTypeByMetadataName(Authorization + "AuthorizationOptions");
+    public INamedTypeSymbol? AuthorizationBuilder { get; } =
+        c.GetTypeByMetadataName(Authorization + "AuthorizationBuilder");
+    public INamedTypeSymbol? AuthorizationEndpointConventionBuilderExtensions { get; } =
+        c.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Builder.AuthorizationEndpointConventionBuilderExtensions"
+        );
+    public INamedTypeSymbol? PolicyServiceCollectionExtensions { get; } =
+        c.GetTypeByMetadataName(
+            "Microsoft.Extensions.DependencyInjection.PolicyServiceCollectionExtensions"
+        );
+    public INamedTypeSymbol? AuthorizationServiceCollectionExtensions { get; } =
+        c.GetTypeByMetadataName(
+            "Microsoft.Extensions.DependencyInjection.AuthorizationServiceCollectionExtensions"
+        );
+    public INamedTypeSymbol? RouteGroupBuilder { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.RouteGroupBuilder");
+    public INamedTypeSymbol? FunctionsAuthorizationLevel { get; } =
+        c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.AuthorizationLevel");
+
+    // ...and what K.5 reads authorization from beyond them: an MVC AuthorizeFilter and the
+    // FilterCollection it's added to, MapControllers()' declaring class and the convention
+    // builder it returns, a minimal API's RouteHandlerBuilder, and a policy, built or
+    // passed whole.
+    public INamedTypeSymbol? AuthorizeFilter { get; } =
+        c.GetTypeByMetadataName(Mvc + "Authorization.AuthorizeFilter");
+    public INamedTypeSymbol? FilterCollection { get; } =
+        c.GetTypeByMetadataName(Mvc + "Filters.FilterCollection");
+    public INamedTypeSymbol? ControllerEndpointRouteBuilderExtensions { get; } =
+        c.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Builder.ControllerEndpointRouteBuilderExtensions"
+        );
+    public INamedTypeSymbol? ControllerActionEndpointConventionBuilder { get; } =
+        c.GetTypeByMetadataName(
+            "Microsoft.AspNetCore.Builder.ControllerActionEndpointConventionBuilder"
+        );
+    public INamedTypeSymbol? RouteHandlerBuilder { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Builder.RouteHandlerBuilder");
+    public INamedTypeSymbol? AuthorizationPolicy { get; } =
+        c.GetTypeByMetadataName(Authorization + "AuthorizationPolicy");
+    public INamedTypeSymbol? AuthorizationPolicyBuilder { get; } =
+        c.GetTypeByMetadataName(Authorization + "AuthorizationPolicyBuilder");
 
     /// <summary>HTTP method attribute symbol → verb ("GET", "POST", …).</summary>
     public ImmutableDictionary<INamedTypeSymbol, string> HttpMethodAttributes { get; } =

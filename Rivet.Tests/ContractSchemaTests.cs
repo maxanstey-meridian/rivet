@@ -94,8 +94,8 @@ public sealed class ContractSchemaTests
                     new(
                         "inline",
                         new TsType.InlineObject([
-                            ("key", new TsType.Primitive("string")),
-                            ("val", new TsType.Primitive("number")),
+                            new("key", new TsType.Primitive("string")),
+                            new("val", new TsType.Primitive("number")),
                         ]),
                         false
                     ),
@@ -107,15 +107,15 @@ public sealed class ContractSchemaTests
                                 new TsType.TaggedUnionVariant(
                                     "hidden",
                                     new TsType.InlineObject([
-                                        ("kind", new TsType.StringUnion(["hidden"])),
-                                        ("message", new TsType.Primitive("string")),
+                                        new("kind", new TsType.StringUnion(["hidden"])),
+                                        new("message", new TsType.Primitive("string")),
                                     ])
                                 ),
                                 new TsType.TaggedUnionVariant(
                                     "shown",
                                     new TsType.InlineObject([
-                                        ("kind", new TsType.StringUnion(["shown"])),
-                                        ("summary", new TsType.TypeRef("Summary")),
+                                        new("kind", new TsType.StringUnion(["shown"])),
+                                        new("summary", new TsType.TypeRef("Summary")),
                                     ])
                                 ),
                             ]
@@ -431,6 +431,35 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
+    public void Document_Security_Validates_And_Reads()
+    {
+        // G.7: the document's own requirement, the C# path's [assembly: RivetGlobalSecurity*].
+        var json = """
+            {"types":[],"enums":[],"endpoints":[],
+             "security":{"alternatives":[{"schemes":[{"name":"oauth","scopes":["read"]}]}]}}
+            """;
+
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+        var scheme = Assert.Single(
+            Assert.Single(JsonContractReader.Read(json).Security!.Alternatives).Schemes
+        );
+        Assert.Equal("oauth", scheme.Name);
+        Assert.Equal(["read"], scheme.Scopes);
+    }
+
+    [Fact]
+    public void Document_Security_In_The_Retired_Shape_Is_Rejected()
+    {
+        var json = """
+            {"types":[],"enums":[],"endpoints":[],"security":{"isAnonymous":false,"scheme":"oauth"}}
+            """;
+
+        Assert.False(Validate(json).IsValid);
+        Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+    }
+
+    [Fact]
     public void Missing_Required_Endpoint_Field_Rejected()
     {
         var json =
@@ -466,10 +495,6 @@ public sealed class ContractSchemaTests
     [InlineData("$defs/tsType/oneOf/9", typeof(TsType.IntUnion))]
     [InlineData("$defs/tsType/oneOf/10", typeof(TsType.Literal))]
     [InlineData("$defs/tsType/oneOf/11", typeof(TsType.InlineObject))]
-    [InlineData(
-        "$defs/tsType/oneOf/11/properties/properties/items",
-        typeof(TsType.InlineObjectField)
-    )]
     [InlineData("$defs/tsType/oneOf/12", typeof(TsType.TaggedUnion))]
     [InlineData(
         "$defs/tsType/oneOf/12/properties/variants/items",
@@ -628,8 +653,8 @@ public sealed class ContractSchemaTests
                         new TsType.TaggedUnionVariant(
                             "hidden",
                             new TsType.InlineObject([
-                                ("kind", new TsType.StringUnion(["hidden"])),
-                                (
+                                new("kind", new TsType.StringUnion(["hidden"])),
+                                new(
                                     "workspaceKey",
                                     new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))
                                 ),
@@ -638,8 +663,8 @@ public sealed class ContractSchemaTests
                         new TsType.TaggedUnionVariant(
                             "shown",
                             new TsType.InlineObject([
-                                ("kind", new TsType.StringUnion(["shown"])),
-                                ("summary", new TsType.TypeRef("Summary")),
+                                new("kind", new TsType.StringUnion(["shown"])),
+                                new("summary", new TsType.TypeRef("Summary")),
                             ])
                         ),
                     ]
@@ -653,13 +678,42 @@ public sealed class ContractSchemaTests
     }
 
     [Fact]
-    public void Property_Missing_Required_Fields_Rejected()
+    public void Property_Missing_Name_Rejected()
     {
-        // Missing "optional" field
         var json =
-            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"primitive","type":"string"}}]}],"enums":[],"endpoints":[]}""";
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"type":{"kind":"primitive","type":"string"},"optional":false}]}],"enums":[],"endpoints":[]}""";
         var result = Validate(json);
         Assert.False(result.IsValid);
+    }
+
+    // One property definition serves a type and an inline object, and rivet-ts leaves
+    // "optional" off an inline field: absent, it means required, in the schema and the reader.
+    [Fact]
+    public void Property_Without_Optional_Is_Required()
+    {
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"properties":[{"name":"x","type":{"kind":"inlineObject","properties":[{"name":"y","type":{"kind":"primitive","type":"string"}}]}}]}],"enums":[],"endpoints":[]}""";
+        var result = Validate(json);
+        Assert.True(result.IsValid, FormatErrors(result));
+
+        var property = Assert.Single(Assert.Single(JsonContractReader.Read(json).Types).Properties);
+        Assert.False(property.IsOptional);
+        Assert.False(
+            Assert.Single(Assert.IsType<TsType.InlineObject>(property.Type).Properties).IsOptional
+        );
+    }
+
+    // additionalProperties says whether an object type's properties are all its members; an
+    // alias has none, so the schema and the reader both refuse it there.
+    [Fact]
+    public void AdditionalProperties_On_An_Alias_Is_Rejected()
+    {
+        var json =
+            """{"types":[{"name":"T","typeParameters":[],"type":{"kind":"primitive","type":"string"},"additionalProperties":true}],"enums":[],"endpoints":[]}""";
+
+        Assert.False(Validate(json).IsValid);
+        var refusal = Assert.Throws<JsonException>(() => JsonContractReader.Read(json));
+        Assert.Contains("'additionalProperties'", refusal.Message);
     }
 
     [Fact]
@@ -1135,28 +1189,31 @@ public sealed class ContractSchemaTests
             new TsType.Literal(JsonDocument.Parse("\"x\"").RootElement.Clone()),
             new TsType.Generic("Page", [new TsType.Primitive("string")]),
             new TsType.Brand("Email", new TsType.Primitive("string"), component, "d"),
-            new TsType.InlineObject([
-                new TsType.InlineObjectField(
-                    "f",
-                    new TsType.Primitive("string"),
-                    Optional: true,
-                    IsDeprecated: true,
-                    Format: "f",
-                    DefaultValue: "\"x\"",
-                    Constraints: new TsPropertyConstraints(MinLength: 1),
-                    Description: "d",
-                    Example: "\"x\"",
-                    IsReadOnly: true,
-                    IsWriteOnly: true,
-                    ScalarMetadata: scalar
-                ),
-            ]),
+            new TsType.InlineObject(
+                [
+                    new TsPropertyDefinition(
+                        "f",
+                        new TsType.Primitive("string"),
+                        IsOptional: true,
+                        IsDeprecated: true,
+                        Format: "f",
+                        DefaultValue: "\"x\"",
+                        Constraints: new TsPropertyConstraints(MinLength: 1),
+                        Description: "d",
+                        Example: "\"x\"",
+                        IsReadOnly: true,
+                        IsWriteOnly: true,
+                        ScalarMetadata: scalar
+                    ),
+                ],
+                AdditionalProperties: false
+            ),
             new TsType.TaggedUnion(
                 "kind",
                 [
                     new TsType.TaggedUnionVariant(
                         "a",
-                        new TsType.InlineObject([("kind", new TsType.StringUnion(["a"]))]),
+                        new TsType.InlineObject([new("kind", new TsType.StringUnion(["a"]))]),
                         component,
                         "d",
                         scalar,
@@ -1188,7 +1245,8 @@ public sealed class ContractSchemaTests
                 ],
                 "d",
                 component,
-                scalar
+                scalar,
+                AdditionalProperties: true
             ),
             ["Alias"] = new("Alias", [], new TsType.Primitive("string"), "d", component, scalar),
         };

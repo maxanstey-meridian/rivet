@@ -80,7 +80,10 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         return new GeneratedRecord(
             name,
             merged,
-            HasExtensionData: allOfList.All(schema => schema.AdditionalPropertiesAllowed)
+            HasExtensionData: allOfList.All(schema => schema.AdditionalPropertiesAllowed),
+            DeclaresAdditionalProperties: allOfList.Any(
+                SchemaClassifier.DeclaresAdditionalProperties
+            )
         );
     }
 
@@ -255,7 +258,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                         WireName: wireName,
                         IsFormatSpecified: isFormatSpecified,
                         SchemaType: scalarReference is null
-                            ? mapper.ResolveSchemaType(propSchema)
+                            ? mapper.ResolveLeafSchemaType(propSchema, csharpType)
                             : null,
                         SchemaRef: scalarReference,
                         SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(propSchema),
@@ -300,6 +303,9 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             {
                 Name = name,
                 HasExtensionData = record.HasExtensionData && schema.AdditionalPropertiesAllowed,
+                DeclaresAdditionalProperties =
+                    record.DeclaresAdditionalProperties
+                    || SchemaClassifier.DeclaresAdditionalProperties(schema),
             };
         }
 
@@ -319,6 +325,9 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             Name = name,
             Properties = merged,
             HasExtensionData = record.HasExtensionData && schema.AdditionalPropertiesAllowed,
+            DeclaresAdditionalProperties =
+                record.DeclaresAdditionalProperties
+                || SchemaClassifier.DeclaresAdditionalProperties(schema),
         };
     }
 
@@ -346,7 +355,8 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             properties,
             Description: description,
             SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(schema),
-            HasExtensionData: schema.AdditionalPropertiesAllowed
+            HasExtensionData: schema.AdditionalPropertiesAllowed,
+            DeclaresAdditionalProperties: SchemaClassifier.DeclaresAdditionalProperties(schema)
         );
     }
 
@@ -394,7 +404,10 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             templateName,
             templateProps,
             info.TypeParams,
-            HasExtensionData: firstInstance.AdditionalPropertiesAllowed
+            HasExtensionData: firstInstance.AdditionalPropertiesAllowed,
+            DeclaresAdditionalProperties: SchemaClassifier.DeclaresAdditionalProperties(
+                firstInstance
+            )
         );
     }
 

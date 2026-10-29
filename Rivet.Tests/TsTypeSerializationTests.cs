@@ -234,8 +234,8 @@ public sealed class TsTypeSerializationTests
     public void InlineObject_Serializes_Fields_As_Properties()
     {
         var type = new TsType.InlineObject([
-            ("key", new TsType.Primitive("string")),
-            ("value", new TsType.Primitive("number")),
+            new("key", new TsType.Primitive("string")),
+            new("value", new TsType.Primitive("number")),
         ]);
         var json = JsonSerializer.Serialize<TsType>(type, _options);
         using var doc = JsonDocument.Parse(json);
@@ -258,8 +258,8 @@ public sealed class TsTypeSerializationTests
                 new TsType.TaggedUnionVariant(
                     "hidden",
                     new TsType.InlineObject([
-                        ("kind", new TsType.StringUnion(["hidden"])),
-                        ("message", new TsType.Primitive("string")),
+                        new("kind", new TsType.StringUnion(["hidden"])),
+                        new("message", new TsType.Primitive("string")),
                     ])
                 ),
             ]
@@ -284,15 +284,18 @@ public sealed class TsTypeSerializationTests
                 new TsType.TaggedUnionVariant(
                     "hidden",
                     new TsType.InlineObject([
-                        ("kind", new TsType.StringUnion(["hidden"])),
-                        ("workspaceKey", new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))),
+                        new("kind", new TsType.StringUnion(["hidden"])),
+                        new(
+                            "workspaceKey",
+                            new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))
+                        ),
                     ])
                 ),
                 new TsType.TaggedUnionVariant(
                     "shown",
                     new TsType.InlineObject([
-                        ("kind", new TsType.StringUnion(["shown"])),
-                        ("summary", new TsType.TypeRef("Summary")),
+                        new("kind", new TsType.StringUnion(["shown"])),
+                        new("summary", new TsType.TypeRef("Summary")),
                     ])
                 ),
             ]
@@ -316,14 +319,14 @@ public sealed class TsTypeSerializationTests
     public void InlineObject_RoundTrips()
     {
         var original = new TsType.InlineObject([
-            ("key", new TsType.Primitive("string")),
-            ("value", new TsType.Primitive("number")),
+            new("key", new TsType.Primitive("string")),
+            new("value", new TsType.Primitive("number")),
         ]);
         var json = JsonSerializer.Serialize<TsType>(original, _options);
         var result = Assert.IsType<TsType.InlineObject>(
             JsonSerializer.Deserialize<TsType>(json, _options)
         );
-        Assert.Equal(original.Fields, result.Fields);
+        Assert.Equal(original.Properties, result.Properties);
     }
 
     [Fact]

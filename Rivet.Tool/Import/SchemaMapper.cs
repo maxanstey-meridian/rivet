@@ -617,7 +617,13 @@ internal sealed class SchemaMapper
 
                 if (propertyless)
                 {
-                    if (schema.AdditionalProperties is null)
+                    // An empty record with a [JsonExtensionData] bag is emitted with
+                    // additionalProperties: {} beside Rivet's empty-record marker; the marker
+                    // says it's a record, not a dictionary.
+                    if (
+                        schema.AdditionalProperties is null
+                        || SchemaClassifier.HasExtension(schema, "x-rivet-empty-record")
+                    )
                     {
                         records.Add(
                             new GeneratedRecord(
@@ -625,7 +631,10 @@ internal sealed class SchemaMapper
                                 [],
                                 Description: schemaDescription,
                                 SchemaMetadata: CollectGeneratedSchemaMetadata(schema),
-                                HasExtensionData: schema.AdditionalPropertiesAllowed
+                                HasExtensionData: schema.AdditionalPropertiesAllowed,
+                                DeclaresAdditionalProperties: SchemaClassifier.DeclaresAdditionalProperties(
+                                    schema
+                                )
                             )
                         );
                     }
@@ -1313,6 +1322,78 @@ internal sealed class SchemaMapper
 
     internal string? ResolveFormat(IOpenApiSchema schema) =>
         schema.Format ?? (Unwrap(schema) is { } inner ? ResolveFormat(inner) : null);
+
+    /// <summary>
+    /// The <c>[RivetSchemaType]</c> a member of C# type <paramref name="csharpType"/> keeps: the
+    /// walker re-types only a built-in scalar's primitive leaf and refuses the attribute on
+    /// anything else (RIV1117). An enum, a record, a brand or a collection carries its schema
+    /// type in its own schema, so it gets none.
+    /// </summary>
+    internal string? ResolveLeafSchemaType(IOpenApiSchema schema, string csharpType) =>
+        IsBuiltInScalar(csharpType) ? ResolveSchemaType(schema) : null;
+
+    private static readonly HashSet<string> _keywordScalars =
+    [
+        "string",
+        "bool",
+        "sbyte",
+        "byte",
+        "short",
+        "ushort",
+        "int",
+        "uint",
+        "long",
+        "ulong",
+        "float",
+        "double",
+        "decimal",
+        "char",
+        "object",
+        "byte[]",
+    ];
+
+    private static readonly HashSet<string> _frameworkScalars =
+    [
+        "System.DateTime",
+        "System.DateTimeOffset",
+        "System.DateOnly",
+        "System.TimeOnly",
+        "System.TimeSpan",
+        "System.Guid",
+        "System.Uri",
+        "System.Int128",
+        "System.UInt128",
+        "System.Half",
+        "System.Text.Json.JsonElement",
+        "System.Text.Json.JsonDocument",
+        "System.Text.Json.Nodes.JsonNode",
+        "System.Text.Json.Nodes.JsonValue",
+        "Microsoft.AspNetCore.Http.IFormFile",
+    ];
+
+    /// <summary>
+    /// Whether the walker maps <paramref name="csharpType"/> to a primitive. A bare framework
+    /// name is the framework type only while no generated type shadows it
+    /// (<see cref="QualifyFrameworkScalarIfShadowed"/> qualifies it otherwise).
+    /// </summary>
+    private bool IsBuiltInScalar(string csharpType)
+    {
+        var name = csharpType.TrimEnd('?');
+        if (_keywordScalars.Contains(name))
+        {
+            return true;
+        }
+
+        name = name.StartsWith("global::", StringComparison.Ordinal)
+            ? name["global::".Length..]
+            : name;
+        return _frameworkScalars.Contains(name)
+            || !name.Contains('.')
+                && !_ctx.ReservedTypeNames.Contains(name)
+                && _frameworkScalars.Any(scalar =>
+                    scalar.EndsWith($".{name}", StringComparison.Ordinal)
+                );
+    }
 
     internal string? ResolveSchemaType(IOpenApiSchema schema) =>
         (schema.Type is { } type ? SchemaClassifier.TypeKeyword(type) : null)

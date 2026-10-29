@@ -143,7 +143,7 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
 
         var (exitCode, output) = await CliRunner.RunAsync(
             _fixture.BinaryPath,
-            $"--project \"{sample}\" --security bearer --output \"{outputDir.FullName}\""
+            $"--project \"{sample}\" --output \"{outputDir.FullName}\""
         );
 
         Assert.True(exitCode == 0, $"--project failed (exit {exitCode}):\n{output}");
@@ -171,7 +171,7 @@ public sealed class SelfContainedPublishTests : IClassFixture<PublishFixture>
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly RouteDefinition<TaskDto> Get = Define.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<TaskDto> Get = Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """
         );

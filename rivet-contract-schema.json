@@ -6,7 +6,11 @@
   "properties": {
     "types": { "type": "array", "items": { "$ref": "#/$defs/typeDefinition" } },
     "enums": { "type": "array", "items": { "$ref": "#/$defs/contractEnum" } },
-    "endpoints": { "type": "array", "items": { "$ref": "#/$defs/endpointDefinition" } }
+    "endpoints": { "type": "array", "items": { "$ref": "#/$defs/endpointDefinition" } },
+    "security": {
+      "$ref": "#/$defs/securityRequirements",
+      "description": "The document's security: what every operation without its own security needs, written as the document's root security. Absent leaves the default to --security (its first scheme); no alternatives is security: []. The schemes themselves are defined with --security."
+    }
   },
   "required": ["types", "enums", "endpoints"],
   "additionalProperties": false,
@@ -134,27 +138,10 @@
           "type": "object",
           "properties": {
             "kind": { "const": "inlineObject" },
-            "properties": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "type": { "$ref": "#/$defs/tsType" },
-                  "optional": { "type": "boolean" },
-                  "deprecated": { "type": "boolean" },
-                  "format": { "type": "string" },
-                  "defaultValue": { "type": "string" },
-                  "constraints": { "$ref": "#/$defs/tsPropertyConstraints" },
-                  "description": { "type": "string" },
-                  "example": { "type": "string" },
-                  "readOnly": { "type": "boolean" },
-                  "writeOnly": { "type": "boolean" },
-                  "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
-                },
-                "required": ["name", "type"],
-                "additionalProperties": false
-              }
+            "properties": { "type": "array", "items": { "$ref": "#/$defs/tsPropertyDefinition" } },
+            "additionalProperties": {
+              "type": "boolean",
+              "description": "Whether the object takes members beyond its properties: true for an extension-data bag (emitted as additionalProperties: {}), false when unknown members are refused (additionalProperties: false). Absent says neither."
             }
           },
           "required": ["kind", "properties"],
@@ -267,7 +254,7 @@
       "properties": {
         "name": { "type": "string" },
         "type": { "$ref": "#/$defs/tsType" },
-        "optional": { "type": "boolean" },
+        "optional": { "type": "boolean", "description": "Whether a writer may leave the property out. Absent reads as false: the property is required, and a nullable type alone never makes it optional." },
         "deprecated": { "type": "boolean" },
         "format": { "type": "string" },
         "defaultValue": { "type": "string" },
@@ -278,7 +265,7 @@
         "writeOnly": { "type": "boolean" },
         "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
       },
-      "required": ["name", "type", "optional"],
+      "required": ["name", "type"],
       "additionalProperties": false
     },
     "typeDefinition": {
@@ -290,13 +277,20 @@
         "type": { "$ref": "#/$defs/tsType" },
         "description": { "type": "string" },
         "metadata": { "$ref": "#/$defs/typeMetadata" },
-        "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
+        "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" },
+        "additionalProperties": {
+          "type": "boolean",
+          "description": "Whether an object type takes members beyond its properties: true for an extension-data bag (emitted as additionalProperties: {}), false when unknown members are refused (additionalProperties: false). Absent says neither. Object types only, never an alias."
+        }
       },
       "required": ["name", "typeParameters"],
       "oneOf": [
         { "required": ["properties"] },
         { "required": ["type"] }
       ],
+      "dependentSchemas": {
+        "additionalProperties": { "required": ["properties"] }
+      },
       "additionalProperties": false
     },
     "contractEnum": {
@@ -337,7 +331,7 @@
         "type": { "$ref": "#/$defs/tsType" },
         "source": { "type": "string", "enum": ["route", "body", "query", "file", "formField", "header", "cookie"] },
         "isOptional": { "type": "boolean" },
-        "bodyPropertyName": { "type": "string" },
+        "bodyPropertyName": { "type": "string", "description": "The input type's property this param carries: on a route param, the body property the route value replaces; on a file or formField param, the property the form part is." },
         "description": { "type": "string" },
         "deprecated": { "type": "boolean" },
         "defaultValue": { "type": "string" },
@@ -623,7 +617,7 @@
       "properties": {
         "name": { "type": "string" },
         "httpMethod": { "type": "string", "enum": ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"] },
-        "routeTemplate": { "type": "string" },
+        "routeTemplate": { "type": "string", "description": "The OpenAPI path key, written as is: each token is bare ({id}) and typed by its path param. ASP.NET routing syntax in a token (a constraint {id:int}, the optional marker {id?}, a default {page=1} or a catch-all {*path}) is refused with RIV2017." },
         "params": { "type": "array", "items": { "$ref": "#/$defs/endpointParam" } },
         "returnType": { "$ref": "#/$defs/tsType" },
         "controllerName": { "type": "string" },
@@ -632,7 +626,7 @@
         "description": { "type": "string" },
         "security": { "$ref": "#/$defs/securityRequirements" },
         "fileContentType": { "type": "string" },
-        "inputTypeName": { "type": "string" },
+        "inputTypeName": { "type": "string", "description": "The name of the endpoint's input type. When types carries its definition and every file and formField param names its property (bodyPropertyName), the form body is a $ref to it if its request properties are exactly those params under the same names, and is otherwise inline with each part taking its property's schema. When the params name no properties, a multipart body is a $ref to the definition; without one, the name is only a hint for the inline body built from params (rivet-ts deliberately ships no multipart input type)." },
         "isFormEncoded": { "type": "boolean" },
         "requestType": { "$ref": "#/$defs/tsType" },
         "requestExamples": { "type": "array", "items": { "$ref": "#/$defs/endpointExample" } },

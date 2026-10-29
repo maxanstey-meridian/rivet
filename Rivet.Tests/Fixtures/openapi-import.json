@@ -93,6 +93,14 @@
         "operationId": "tasks_update",
         "tags": ["Tasks"],
         "summary": "Update a task",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -124,6 +132,14 @@
         "operationId": "tasks_patch",
         "tags": ["Tasks"],
         "summary": "Partially update a task",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -147,6 +163,14 @@
         "operationId": "tasks_delete",
         "tags": ["Tasks"],
         "summary": "Delete a task",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
         "responses": {
           "204": { "description": "No Content" }
         }
@@ -157,6 +181,14 @@
         "operationId": "tasks_attach",
         "tags": ["Tasks"],
         "summary": "Attach a file to a task",
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {

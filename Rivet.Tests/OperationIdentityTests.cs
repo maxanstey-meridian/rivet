@@ -213,7 +213,7 @@ public sealed class OperationIdentityTests
             public static class ItemsContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/contract-items/{id}");
+                    Define.Get<ItemDto>("/api/contract-items/{id:guid}");
             }
 
             [RivetClient]
@@ -638,7 +638,7 @@ public sealed class OperationIdentityTests
                 public static class ReportsContract
                 {
                     public static readonly RouteDefinition Download =
-                        Define.Get("/api/reports/{id}")
+                        Define.Get("/api/reports/{id:guid}")
                             .ProducesFile("application/pdf");
                 }
 
@@ -646,7 +646,7 @@ public sealed class OperationIdentityTests
                 public static class ReportsContractDuplicate
                 {
                     public static readonly RouteDefinition GetReportPdf =
-                        Define.Get("/api/reports/{id}")
+                        Define.Get("/api/reports/{id:guid}")
                             .ProducesFile("application/pdf");
                 }
                 """;

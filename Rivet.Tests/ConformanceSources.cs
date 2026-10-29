@@ -101,7 +101,7 @@ internal static class ConformanceSources
         public static class ItemsContract
         {
             public static readonly RouteDefinition<KitchenSinkDto> GetItem =
-                Define.Get<KitchenSinkDto>("/api/items/{id}")
+                Define.Get<KitchenSinkDto>("/api/items/{id:guid}")
                     .Description("Retrieve a single item by its unique ID");
 
             public static readonly RouteDefinition<SearchInput, PagedResult<KitchenSinkDto>> SearchItems =
@@ -113,15 +113,15 @@ internal static class ConformanceSources
                     .Returns<ValidationError>(422, "Validation failed");
 
             public static readonly RouteDefinition<CreateItemInput, KitchenSinkDto> UpdateItem =
-                Define.Put<CreateItemInput, KitchenSinkDto>("/api/items/{id}");
+                Define.Put<CreateItemInput, KitchenSinkDto>("/api/items/{id:guid}");
 
             public static readonly RouteDefinition DeleteItem =
-                Define.Delete("/api/items/{id}")
+                Define.Delete("/api/items/{id:guid}")
                     .Status(204)
                     .Returns<NotFoundError>(404, "Item not found");
 
             public static readonly RouteDefinition<CreateItemInput> PatchItem =
-                Define.Patch<CreateItemInput>("/api/items/{id}")
+                Define.Patch<CreateItemInput>("/api/items/{id:guid}")
                     .Status(204);
         }
 
@@ -133,7 +133,7 @@ internal static class ConformanceSources
                     .Description("List all users with pagination");
 
             public static readonly RouteDefinition<UserDto> GetUser =
-                Define.Get<UserDto>("/api/users/{userId}")
+                Define.Get<UserDto>("/api/users/{userId:guid}")
                     .Returns<NotFoundError>(404, "User not found");
         }
 

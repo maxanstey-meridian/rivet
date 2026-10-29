@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using Rivet.Tool.Analysis;
 
 namespace Rivet.Tests;
 
@@ -231,6 +233,201 @@ public sealed class MvcBindingHostTests : IDisposable
         Assert.True(pathParam.GetProperty("required").GetBoolean());
     }
 
+    public static TheoryData<string, string, bool, string[]> NamedMembers() =>
+        new()
+        {
+            // Without a Name =, MVC falls back to the empty prefix, the key clients send.
+            {
+                "/prefix/mvc/query",
+                nameof(NamePrefixController.Query),
+                true,
+                ["Plain", "alias", "bp", "X-Alias", "Inner", "Inner.Value", "Inner.deep"]
+            },
+            // A Name = on the parameter prefixes every member, a renamed one included; a
+            // header member is read by its own name, never prefixed.
+            {
+                "/prefix/mvc/query-named",
+                nameof(NamePrefixController.QueryNamed),
+                true,
+                [
+                    "p.Plain",
+                    "p.alias",
+                    "p.bp",
+                    "X-Alias",
+                    "p.Inner",
+                    "p.Inner.Value",
+                    "p.Inner.deep",
+                ]
+            },
+            {
+                "/prefix/mvc/form",
+                nameof(NamePrefixController.Form),
+                true,
+                ["Plain", "alias", "Inner", "Inner.Value", "Inner.deep"]
+            },
+            {
+                "/prefix/mvc/form-named",
+                nameof(NamePrefixController.FormNamed),
+                true,
+                ["p.Plain", "p.alias", "p.Inner", "p.Inner.Value", "p.Inner.deep"]
+            },
+            // A member with a source of its own keeps the parameter's prefix: ?p.alias=.
+            {
+                "/prefix/mvc/mixed",
+                nameof(NamePrefixController.Mixed),
+                true,
+                ["p.Plain", "p.alias", "X-Alias"]
+            },
+            // [Bind(Prefix =)] names the model just as Name = does, on a parameter or its type.
+            {
+                "/prefix/mvc/bind",
+                nameof(NamePrefixController.Bind),
+                true,
+                [
+                    "p.Plain",
+                    "p.alias",
+                    "p.bp",
+                    "X-Alias",
+                    "p.Inner",
+                    "p.Inner.Value",
+                    "p.Inner.deep",
+                ]
+            },
+            { "/prefix/mvc/bind-type", nameof(NamePrefixController.BindType), true, ["c.Plain"] },
+            { "/prefix/mvc/bind-simple", nameof(NamePrefixController.BindSimple), true, ["q"] },
+            {
+                "/prefix/plain/bind",
+                nameof(PlainNamePrefixController.Bind),
+                false,
+                [
+                    "p.Plain",
+                    "p.alias",
+                    "p.bp",
+                    "X-Alias",
+                    "p.Inner",
+                    "p.Inner.Value",
+                    "p.Inner.deep",
+                ]
+            },
+            {
+                "/prefix/plain/bind-simple",
+                nameof(PlainNamePrefixController.BindSimple),
+                false,
+                ["q"]
+            },
+        };
+
+    [Theory]
+    [MemberData(nameof(NamedMembers))]
+    public async Task Host_Binds_Each_Member_Under_The_Key_The_Checker_Reads(
+        string path,
+        string action,
+        bool apiController,
+        string[] wireNames
+    )
+    {
+        // An in-process host over this file's controllers: each pinned key is sent on its own
+        // and must reach its member, and the checker must read the same keys.
+        await using var host = await BindingHost.StartAsync(mvc: true);
+        var inputs = BindingHost.CheckerInputs(
+            apiController ? typeof(NamePrefixController) : typeof(PlainNamePrefixController),
+            action,
+            ParameterBindingHost.Mvc,
+            infersBody: apiController,
+            route: path
+        );
+
+        await host.AssertBindsUnder(
+            path.Contains("form") || path.Contains("mixed") ? HttpMethod.Post : HttpMethod.Get,
+            path,
+            inputs,
+            wireNames
+        );
+    }
+
+    [Theory]
+    [InlineData("/prefix/mvc/query-named", "Plain", "Plain")]
+    [InlineData("/prefix/mvc/query-named", "alias", "Renamed")]
+    [InlineData("/prefix/mvc/bind", "alias", "Renamed")]
+    [InlineData("/prefix/mvc/bind-type", "Plain", "Plain")]
+    public async Task Host_Ignores_A_Member_Without_The_Parameters_Prefix(
+        string path,
+        string key,
+        string member
+    )
+    {
+        await using var host = await BindingHost.StartAsync(mvc: true);
+
+        Assert.Null(
+            await host.BoundAsync(HttpMethod.Get, path, [(InputSource.Query, key)], member)
+        );
+    }
+
+    [Fact]
+    public async Task Host_Never_Prefixes_A_Header_Member()
+    {
+        await using var host = await BindingHost.StartAsync(mvc: true);
+
+        Assert.Null(
+            await host.BoundAsync(
+                HttpMethod.Get,
+                "/prefix/mvc/query-named",
+                [(InputSource.Header, "p.X-Alias")],
+                "Header"
+            )
+        );
+    }
+
+    [Fact]
+    public async Task Host_Reads_Route_Members_Only_Without_A_Prefix()
+    {
+        // Route tokens can't carry the prefix, so a Name = on a [FromRoute] complex parameter
+        // leaves every member unbound, and the checker's p.Plain matches no token.
+        await using var host = await BindingHost.StartAsync(mvc: true);
+
+        foreach (
+            var (path, action, plain, renamed, bound) in new[]
+            {
+                (
+                    "/prefix/mvc/route/{Plain}/{alias}",
+                    nameof(NamePrefixController.Route),
+                    "Plain",
+                    "alias",
+                    true
+                ),
+                (
+                    "/prefix/mvc/route-named/{Plain}/{alias}",
+                    nameof(NamePrefixController.RouteNamed),
+                    "p.Plain",
+                    "p.alias",
+                    false
+                ),
+            }
+        )
+        {
+            var inputs = BindingHost.CheckerInputs(
+                typeof(NamePrefixController),
+                action,
+                ParameterBindingHost.Mvc,
+                infersBody: true,
+                route: path
+            );
+            Assert.Equal([plain, renamed], inputs.Select(input => input.WireName));
+            Assert.All(inputs, input => Assert.Equal(InputSource.Route, input.Source));
+
+            var request = path.Replace("{Plain}", BindingHost.Value)
+                .Replace("{alias}", BindingHost.Value);
+            Assert.Equal(
+                bound ? BindingHost.Value : null,
+                await host.BoundAsync(HttpMethod.Get, request, [], "Plain")
+            );
+            Assert.Equal(
+                bound ? BindingHost.Value : null,
+                await host.BoundAsync(HttpMethod.Get, request, [], "Renamed")
+            );
+        }
+    }
+
     /// <summary>
     /// Resolves a schema reference through the emitted document's components,
     /// returning the target component and its name; inline schemas are returned
@@ -259,4 +456,116 @@ public sealed class MvcBindingHostTests : IDisposable
 
         return (schema, null);
     }
+}
+
+public sealed class PrefixQuery
+{
+    public string? Plain { get; set; }
+
+    [FromQuery(Name = "alias")]
+    public string? Renamed { get; set; }
+
+    [BindProperty(Name = "bp")]
+    public string? Bound { get; set; }
+
+    [FromHeader(Name = "X-Alias")]
+    public string? Header { get; set; }
+
+    public PrefixQueryInner? Inner { get; set; }
+}
+
+public sealed class PrefixQueryInner
+{
+    public string? Value { get; set; }
+
+    [FromQuery(Name = "deep")]
+    public string? Renamed { get; set; }
+}
+
+public sealed class PrefixForm
+{
+    public string? Plain { get; set; }
+
+    [FromForm(Name = "alias")]
+    public string? Renamed { get; set; }
+
+    public PrefixFormInner? Inner { get; set; }
+}
+
+public sealed class PrefixFormInner
+{
+    public string? Value { get; set; }
+
+    [FromForm(Name = "deep")]
+    public string? Renamed { get; set; }
+}
+
+public sealed class PrefixRoute
+{
+    public string? Plain { get; set; }
+
+    [FromRoute(Name = "alias")]
+    public string? Renamed { get; set; }
+}
+
+public sealed class PrefixMixed
+{
+    public string? Plain { get; set; }
+
+    [FromQuery(Name = "alias")]
+    public string? Renamed { get; set; }
+
+    [FromHeader(Name = "X-Alias")]
+    public string? Header { get; set; }
+}
+
+[Bind(Prefix = "c")]
+public sealed class PrefixedByType
+{
+    public string? Plain { get; set; }
+}
+
+/// <summary>The MVC handlers <see cref="BindingHost"/> serves for the Name = pins.</summary>
+[ApiController]
+public sealed class NamePrefixController : ControllerBase
+{
+    [HttpGet("/prefix/mvc/query")]
+    public string Query([FromQuery] PrefixQuery f) => BindingHost.Echo(f);
+
+    [HttpGet("/prefix/mvc/query-named")]
+    public string QueryNamed([FromQuery(Name = "p")] PrefixQuery f) => BindingHost.Echo(f);
+
+    [HttpPost("/prefix/mvc/form")]
+    public string Form([FromForm] PrefixForm f) => BindingHost.Echo(f);
+
+    [HttpPost("/prefix/mvc/form-named")]
+    public string FormNamed([FromForm(Name = "p")] PrefixForm f) => BindingHost.Echo(f);
+
+    [HttpGet("/prefix/mvc/route/{Plain}/{alias}")]
+    public string Route([FromRoute] PrefixRoute f) => BindingHost.Echo(f);
+
+    [HttpGet("/prefix/mvc/route-named/{Plain}/{alias}")]
+    public string RouteNamed([FromRoute(Name = "p")] PrefixRoute f) => BindingHost.Echo(f);
+
+    [HttpPost("/prefix/mvc/mixed")]
+    public string Mixed([FromForm(Name = "p")] PrefixMixed f) => BindingHost.Echo(f);
+
+    [HttpGet("/prefix/mvc/bind")]
+    public string Bind([FromQuery, Bind(Prefix = "p")] PrefixQuery f) => BindingHost.Echo(f);
+
+    [HttpGet("/prefix/mvc/bind-type")]
+    public string BindType([FromQuery] PrefixedByType f) => BindingHost.Echo(f);
+
+    [HttpGet("/prefix/mvc/bind-simple")]
+    public string BindSimple([Bind(Prefix = "q")] string? term) => BindingHost.Echo(term);
+}
+
+/// <summary>A controller without [ApiController]: no inferred sources, value providers only.</summary>
+public sealed class PlainNamePrefixController : Controller
+{
+    [HttpGet("/prefix/plain/bind")]
+    public string Bind([Bind(Prefix = "p")] PrefixQuery f) => BindingHost.Echo(f);
+
+    [HttpGet("/prefix/plain/bind-simple")]
+    public string BindSimple([Bind(Prefix = "q")] string? term) => BindingHost.Echo(term);
 }

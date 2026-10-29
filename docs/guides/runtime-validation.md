@@ -73,6 +73,9 @@ normally, and constructs a contract-owned response:
   on `HttpContext.Response.Headers` before returning; a file's own arguments
   (`entityTag:`, `lastModified:`, `downloadName:`, `inline:`, `enableRangeProcessing:`)
   count for the headers they produce. A range status (`4XX`) holds every status in it.
+  `Content-Type` is the one name you can't declare: OpenAPI ignores a response header
+  by that name, so the builder throws rather than hold handlers to a header no spec
+  carries. The media type is the response's content (`.ProducesContentType(...)`).
   The [endpoint builder](/reference/endpoint-builder#runtime-responses) has the details.
 - **The host's JSON options are the ones the spec describes.** The spec assumes
   System.Text.Json's web defaults: camelCase names, every member written, numbers as
@@ -143,6 +146,17 @@ normally, and constructs a contract-owned response:
   far: System.Text.Json won't read or write it on any runtime, so generation refuses
   it (`RIV1015`).
 
+- **An extension-data bag can't repeat a member.** System.Text.Json writes a
+  `[JsonExtensionData]` bag's entries after the declared members without looking at
+  them, so a bag holding `"name"` on a type that has a `Name` property puts `"name"` in
+  the JSON twice. The spec can't describe that object, and clients disagree about which
+  value wins. So before writing a JSON body, the adapter walks the payload the way the
+  serializer will (through properties, list items, dictionary values, polymorphic
+  variants and objects a bag holds) and throws `RivetContractViolationException` if a
+  bag key equals a declared member's wire name, or the discriminator a variant is written
+  with, naming the type, where it sits (`items[1]`) and the key. A payload whose type
+  can't reach a bag at all is never walked; that's decided once per type.
+
   Want snake_case, or enums as strings everywhere? Say it on the types:
   `[JsonPropertyName]`, `[JsonIgnore]`, `[JsonConverter(typeof(RivetCamelCaseEnumConverter<T>))]`
   and `[JsonPolymorphic]` all go into the spec, so the wire and the spec move together.
@@ -171,12 +185,14 @@ A violation then returns
 Do not rely on Rivet for any of the following — none of it happens:
 
 - **Serialized JSON shape.** The runtime checks are type-identity checks on the CLR
-  value and a comparison of the host's options, never inspection of serialized
-  output. A derived instance is rejected, wire-changing host options are refused
+  value, the bag-key check above, and a comparison of the host's options, never
+  inspection of serialized output. A derived instance is rejected, wire-changing host options are refused
   (see above), and a converter Rivet can't model never gets past generation. What's
   left is taken on trust: a member pinned with `[RivetSchemaType]` is whatever its
   converter writes, the pin is your word for it; whatever a `[JsonExtensionData]`
-  dictionary holds goes out as extra members; and `null` in a required,
+  dictionary holds goes out as extra members (the spec says so, with
+  `additionalProperties: {}`, and only a key that repeats a declared member is
+  refused); and `null` in a required,
   non-nullable member is written as `null`, not caught.
 - **Validation constraints.** Rivet's response terminals perform no constraint
   validation on requests or responses. Enforcement is the host framework's job —

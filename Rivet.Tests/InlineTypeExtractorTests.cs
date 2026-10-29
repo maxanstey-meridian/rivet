@@ -55,12 +55,12 @@ public sealed class InlineTypeExtractorTests
     public void IdenticalInlineObjects_SameHash()
     {
         var a = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var b = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
 
         Assert.Equal(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(b));
@@ -70,12 +70,12 @@ public sealed class InlineTypeExtractorTests
     public void DifferentFieldOrder_SameHash()
     {
         var a = new TsType.InlineObject([
-            ("name", new TsType.Primitive("string")),
-            ("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
         ]);
         var b = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
 
         Assert.Equal(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(b));
@@ -84,8 +84,8 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void DifferentFieldNames_DifferentHash()
     {
-        var a = new TsType.InlineObject([("name", new TsType.Primitive("string"))]);
-        var b = new TsType.InlineObject([("label", new TsType.Primitive("string"))]);
+        var a = new TsType.InlineObject([new("name", new TsType.Primitive("string"))]);
+        var b = new TsType.InlineObject([new("label", new TsType.Primitive("string"))]);
 
         Assert.NotEqual(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(b));
     }
@@ -93,8 +93,8 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void DifferentFieldTypes_DifferentHash()
     {
-        var a = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
-        var b = new TsType.InlineObject([("id", new TsType.Primitive("string"))]);
+        var a = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
+        var b = new TsType.InlineObject([new("id", new TsType.Primitive("string"))]);
 
         Assert.NotEqual(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(b));
     }
@@ -103,26 +103,26 @@ public sealed class InlineTypeExtractorTests
     public void NestedInlineObjects_HashRecursively()
     {
         var inner = new TsType.InlineObject([
-            ("street", new TsType.Primitive("string")),
-            ("city", new TsType.Primitive("string")),
+            new("street", new TsType.Primitive("string")),
+            new("city", new TsType.Primitive("string")),
         ]);
-        var a = new TsType.InlineObject([("address", inner)]);
+        var a = new TsType.InlineObject([new("address", inner)]);
 
         var inner2 = new TsType.InlineObject([
-            ("city", new TsType.Primitive("string")),
-            ("street", new TsType.Primitive("string")),
+            new("city", new TsType.Primitive("string")),
+            new("street", new TsType.Primitive("string")),
         ]);
-        var b = new TsType.InlineObject([("address", inner2)]);
+        var b = new TsType.InlineObject([new("address", inner2)]);
 
         // Same structure, different field order in inner — should match
         Assert.Equal(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(b));
 
         // Different inner field name — should differ
         var inner3 = new TsType.InlineObject([
-            ("road", new TsType.Primitive("string")),
-            ("city", new TsType.Primitive("string")),
+            new("road", new TsType.Primitive("string")),
+            new("city", new TsType.Primitive("string")),
         ]);
-        var c = new TsType.InlineObject([("address", inner3)]);
+        var c = new TsType.InlineObject([new("address", inner3)]);
 
         Assert.NotEqual(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(c));
     }
@@ -130,14 +130,16 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void ArrayOfInlineObject_HashesCorrectly()
     {
-        var inner = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inner = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var arr = new TsType.Array(inner);
 
         // Deterministic
         Assert.Equal(
             InlineTypeExtractor.CanonicalHash(arr),
             InlineTypeExtractor.CanonicalHash(
-                new TsType.Array(new TsType.InlineObject([("id", new TsType.Primitive("number"))]))
+                new TsType.Array(
+                    new TsType.InlineObject([new("id", new TsType.Primitive("number"))])
+                )
             )
         );
 
@@ -151,7 +153,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void NullableInlineObject_DiffersFromNonNullable()
     {
-        var inner = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inner = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var nullable = new TsType.Nullable(inner);
 
         Assert.NotEqual(
@@ -181,8 +183,8 @@ public sealed class InlineTypeExtractorTests
     public void CollectsFromReturnType()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoint = MakeEndpoint("Buyers", "find", returnType: inline);
 
@@ -196,7 +198,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void CollectsFromNestedArray()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var endpoint = MakeEndpoint("Items", "list", returnType: new TsType.Array(inline));
 
         var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
@@ -209,7 +211,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void CollectsFromNullable()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var endpoint = MakeEndpoint("Items", "find", returnType: new TsType.Nullable(inline));
 
         var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
@@ -221,8 +223,8 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void MultipleEndpoints_CollectsAll()
     {
-        var inline1 = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
-        var inline2 = new TsType.InlineObject([("name", new TsType.Primitive("string"))]);
+        var inline1 = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
+        var inline2 = new TsType.InlineObject([new("name", new TsType.Primitive("string"))]);
         var endpoints = new[]
         {
             MakeEndpoint("Buyers", "find", returnType: inline1),
@@ -239,7 +241,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void ContextString_IncludesControllerAndEndpoint()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
 
         // Return type context
         var ep1 = MakeEndpoint("Products", "getById", returnType: inline);
@@ -247,7 +249,7 @@ public sealed class InlineTypeExtractorTests
         Assert.Equal("Products.getById.return", r1[0].Context);
 
         // Param context
-        var paramInline = new TsType.InlineObject([("title", new TsType.Primitive("string"))]);
+        var paramInline = new TsType.InlineObject([new("title", new TsType.Primitive("string"))]);
         var ep2 = MakeEndpoint(
             "Products",
             "create",
@@ -275,7 +277,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void CollectsFromResponseDataType()
     {
-        var inline = new TsType.InlineObject([("total", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("total", new TsType.Primitive("number"))]);
         var endpoint = MakeEndpoint("Orders", "list", responses: [new TsResponseType(200, inline)]);
 
         var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
@@ -387,7 +389,7 @@ public sealed class InlineTypeExtractorTests
     {
         var a = new TsType.InlineObject([]);
         var b = new TsType.InlineObject([]);
-        var c = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var c = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
 
         Assert.Equal(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(b));
         Assert.NotEqual(InlineTypeExtractor.CanonicalHash(a), InlineTypeExtractor.CanonicalHash(c));
@@ -398,7 +400,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void CollectsFromDictionary()
     {
-        var inline = new TsType.InlineObject([("key", new TsType.Primitive("string"))]);
+        var inline = new TsType.InlineObject([new("key", new TsType.Primitive("string"))]);
         var endpoint = MakeEndpoint("Items", "map", returnType: new TsType.Dictionary(inline));
 
         var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
@@ -410,7 +412,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void CollectsFromGenericTypeArguments()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var endpoint = MakeEndpoint(
             "Items",
             "paged",
@@ -426,7 +428,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void CollectsFromBrandInner()
     {
-        var inline = new TsType.InlineObject([("value", new TsType.Primitive("string"))]);
+        var inline = new TsType.InlineObject([new("value", new TsType.Primitive("string"))]);
         var endpoint = MakeEndpoint("Items", "get", returnType: new TsType.Brand("Tagged", inline));
 
         var result = InlineTypeExtractor.CollectInlineObjects([endpoint]);
@@ -438,10 +440,10 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void CollectsNestedInlineObjectsFromFields()
     {
-        var inner = new TsType.InlineObject([("street", new TsType.Primitive("string"))]);
+        var inner = new TsType.InlineObject([new("street", new TsType.Primitive("string"))]);
         var outer = new TsType.InlineObject([
-            ("name", new TsType.Primitive("string")),
-            ("address", inner),
+            new("name", new TsType.Primitive("string")),
+            new("address", inner),
         ]);
         var endpoint = MakeEndpoint("Buyers", "find", returnType: outer);
 
@@ -509,8 +511,8 @@ public sealed class InlineTypeExtractorTests
     public void GenerateName_FromControllerName()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -531,7 +533,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_AlreadySingular()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Order.list.return"),
@@ -551,7 +553,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_NestedField()
     {
-        var inner = new TsType.InlineObject([("street", new TsType.Primitive("string"))]);
+        var inner = new TsType.InlineObject([new("street", new TsType.Primitive("string"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inner, "Buyers.find.return.field.lines"),
@@ -571,11 +573,11 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_Collision_UsesSummaryDisambiguation()
     {
-        var smallType = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var smallType = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var largeType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -601,17 +603,44 @@ public sealed class InlineTypeExtractorTests
         Assert.True(nameTypes.ContainsKey("BuyerFindSummaryDto"));
     }
 
+    // An open or closed object (G.3, G.9) is another shape than one that says neither, and
+    // the named type it's extracted to stays open or closed.
+    [Fact]
+    public void AdditionalProperties_Splits_Identity_And_Survives_Extraction()
+    {
+        TsType.InlineObject Shape(bool? additionalProperties) =>
+            new([new("id", new TsType.Primitive("number"))], additionalProperties);
+
+        Assert.Equal(
+            3,
+            new[] { Shape(null), Shape(true), Shape(false) }
+                .Select(InlineTypeExtractor.CanonicalHash)
+                .Distinct()
+                .Count()
+        );
+
+        var result = InlineTypeExtractor.Extract(
+            [
+                MakeEndpoint("Buyers", "find", returnType: Shape(false)),
+                MakeEndpoint("Buyers", "list", returnType: Shape(false)),
+            ],
+            []
+        );
+
+        Assert.False(Assert.Single(result.ExtractedTypes).AdditionalProperties);
+    }
+
     // --- Extract tests ---
 
     [Fact]
     public void DuplicateInlineObjects_ExtractedToNamedType()
     {
         var inline1 = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
+            new("id", new TsType.Primitive("number")),
             new("name", new TsType.Primitive("string"), Description: "Shown on the invoice."),
         ]);
         var inline2 = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
+            new("id", new TsType.Primitive("number")),
             new("name", new TsType.Primitive("string"), Description: "Shown on the invoice."),
         ]);
         var endpoints = new[]
@@ -649,8 +678,8 @@ public sealed class InlineTypeExtractorTests
             Description: "An email"
         );
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("email", email),
+            new("id", new TsType.Primitive("number")),
+            new("email", email),
         ]);
         var endpoints = new[]
         {
@@ -670,11 +699,11 @@ public sealed class InlineTypeExtractorTests
     public void LargeInlineObject_ExtractedEvenIfSingle()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
-            ("phone", new TsType.Primitive("string")),
-            ("address", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
+            new("phone", new TsType.Primitive("string")),
+            new("address", new TsType.Primitive("string")),
         ]);
         var endpoints = new[] { MakeEndpoint("Buyers", "find", returnType: inline) };
 
@@ -693,18 +722,18 @@ public sealed class InlineTypeExtractorTests
     public void Tagged_Union_Variant_Object_Stays_Inline_While_Its_Fields_Are_Extracted()
     {
         var address = new TsType.InlineObject([
-            ("line1", new TsType.Primitive("string")),
-            ("line2", new TsType.Primitive("string")),
-            ("city", new TsType.Primitive("string")),
-            ("region", new TsType.Primitive("string")),
-            ("postcode", new TsType.Primitive("string")),
+            new("line1", new TsType.Primitive("string")),
+            new("line2", new TsType.Primitive("string")),
+            new("city", new TsType.Primitive("string")),
+            new("region", new TsType.Primitive("string")),
+            new("postcode", new TsType.Primitive("string")),
         ]);
         var cat = new TsType.InlineObject([
-            ("kind", new TsType.StringUnion(["cat"])),
-            ("name", new TsType.Primitive("string")),
-            ("colour", new TsType.Primitive("string")),
-            ("lives", new TsType.Primitive("number")),
-            ("home", address),
+            new("kind", new TsType.StringUnion(["cat"])),
+            new("name", new TsType.Primitive("string")),
+            new("colour", new TsType.Primitive("string")),
+            new("lives", new TsType.Primitive("number")),
+            new("home", address),
         ]);
         var union = new TsType.TaggedUnion(
             "kind",
@@ -726,7 +755,9 @@ public sealed class InlineTypeExtractorTests
             );
             Assert.Equal("A cat.", variant.Description);
             var own = Assert.IsType<TsType.InlineObject>(variant.Type);
-            Assert.IsType<TsType.TypeRef>(own.Fields.Single(field => field.Name == "home").Type);
+            Assert.IsType<TsType.TypeRef>(
+                own.Properties.Single(field => field.Name == "home").Type
+            );
         }
 
         // The bare occurrence of the same shape is still extracted.
@@ -737,9 +768,9 @@ public sealed class InlineTypeExtractorTests
     public void SmallSingleOccurrence_NotExtracted()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var endpoints = new[] { MakeEndpoint("Buyers", "find", returnType: inline) };
 
@@ -753,8 +784,8 @@ public sealed class InlineTypeExtractorTests
     public void ReplacementIsRecursive()
     {
         var inner = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -764,8 +795,8 @@ public sealed class InlineTypeExtractorTests
                 "list",
                 returnType: new TsType.Array(
                     new TsType.InlineObject([
-                        ("id", new TsType.Primitive("number")),
-                        ("name", new TsType.Primitive("string")),
+                        new("id", new TsType.Primitive("number")),
+                        new("name", new TsType.Primitive("string")),
                     ])
                 )
             ),
@@ -787,8 +818,8 @@ public sealed class InlineTypeExtractorTests
     public void ResponseDataTypes_AlsoReplaced()
     {
         var inline = new TsType.InlineObject([
-            ("total", new TsType.Primitive("number")),
-            ("items", new TsType.Primitive("string")),
+            new("total", new TsType.Primitive("number")),
+            new("items", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -801,8 +832,8 @@ public sealed class InlineTypeExtractorTests
                     new TsResponseType(
                         200,
                         new TsType.InlineObject([
-                            ("total", new TsType.Primitive("number")),
-                            ("items", new TsType.Primitive("string")),
+                            new("total", new TsType.Primitive("number")),
+                            new("items", new TsType.Primitive("string")),
                         ])
                     ),
                 ]
@@ -820,7 +851,10 @@ public sealed class InlineTypeExtractorTests
     public void Content_And_Response_Header_Schemas_Are_Collected_And_Replaced()
     {
         static TsType.InlineObject Shape() =>
-            new([("id", new TsType.Primitive("string")), ("name", new TsType.Primitive("string"))]);
+            new([
+                new("id", new TsType.Primitive("string")),
+                new("name", new TsType.Primitive("string")),
+            ]);
 
         var endpoint = MakeEndpoint(
             "Items",
@@ -855,8 +889,8 @@ public sealed class InlineTypeExtractorTests
     public void ExistingDefinitions_NoNameCollision()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -865,8 +899,8 @@ public sealed class InlineTypeExtractorTests
                 "Buyers",
                 "list",
                 returnType: new TsType.InlineObject([
-                    ("id", new TsType.Primitive("number")),
-                    ("name", new TsType.Primitive("string")),
+                    new("id", new TsType.Primitive("number")),
+                    new("name", new TsType.Primitive("string")),
                 ])
             ),
         };
@@ -882,8 +916,8 @@ public sealed class InlineTypeExtractorTests
     public void ExtractedTypeProperties_PreserveNullability()
     {
         var inline = new TsType.InlineObject([
-            ("name", new TsType.Primitive("string")),
-            new("nickname", new TsType.Nullable(new TsType.Primitive("string")), Optional: true),
+            new("name", new TsType.Primitive("string")),
+            new("nickname", new TsType.Nullable(new TsType.Primitive("string")), IsOptional: true),
         ]);
         var endpoints = new[]
         {
@@ -892,11 +926,11 @@ public sealed class InlineTypeExtractorTests
                 "Buyers",
                 "list",
                 returnType: new TsType.InlineObject([
-                    ("name", new TsType.Primitive("string")),
+                    new("name", new TsType.Primitive("string")),
                     new(
                         "nickname",
                         new TsType.Nullable(new TsType.Primitive("string")),
-                        Optional: true
+                        IsOptional: true
                     ),
                 ])
             ),
@@ -927,13 +961,13 @@ public sealed class InlineTypeExtractorTests
     public void NestedInlineObjects_BothExtracted()
     {
         var inner = new TsType.InlineObject([
-            ("street", new TsType.Primitive("string")),
-            ("city", new TsType.Primitive("string")),
+            new("street", new TsType.Primitive("string")),
+            new("city", new TsType.Primitive("string")),
         ]);
         var outer = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("address", inner),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("address", inner),
         ]);
         // Duplicate both outer and inner across two endpoints
         var endpoints = new[]
@@ -943,13 +977,13 @@ public sealed class InlineTypeExtractorTests
                 "Buyers",
                 "list",
                 returnType: new TsType.InlineObject([
-                    ("id", new TsType.Primitive("number")),
-                    ("name", new TsType.Primitive("string")),
-                    (
+                    new("id", new TsType.Primitive("number")),
+                    new("name", new TsType.Primitive("string")),
+                    new(
                         "address",
                         new TsType.InlineObject([
-                            ("street", new TsType.Primitive("string")),
-                            ("city", new TsType.Primitive("string")),
+                            new("street", new TsType.Primitive("string")),
+                            new("city", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -979,8 +1013,8 @@ public sealed class InlineTypeExtractorTests
     public void ParamInlineObjects_Replaced()
     {
         var inline = new TsType.InlineObject([
-            ("title", new TsType.Primitive("string")),
-            ("body", new TsType.Primitive("string")),
+            new("title", new TsType.Primitive("string")),
+            new("body", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -997,8 +1031,8 @@ public sealed class InlineTypeExtractorTests
                     new TsEndpointParam(
                         "data",
                         new TsType.InlineObject([
-                            ("title", new TsType.Primitive("string")),
-                            ("body", new TsType.Primitive("string")),
+                            new("title", new TsType.Primitive("string")),
+                            new("body", new TsType.Primitive("string")),
                         ]),
                         ParamSource.Body
                     ),
@@ -1018,8 +1052,8 @@ public sealed class InlineTypeExtractorTests
     public void ReplaceInType_Dictionary()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("label", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("label", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1029,8 +1063,8 @@ public sealed class InlineTypeExtractorTests
                 "index",
                 returnType: new TsType.Dictionary(
                     new TsType.InlineObject([
-                        ("id", new TsType.Primitive("number")),
-                        ("label", new TsType.Primitive("string")),
+                        new("id", new TsType.Primitive("number")),
+                        new("label", new TsType.Primitive("string")),
                     ])
                 )
             ),
@@ -1049,8 +1083,8 @@ public sealed class InlineTypeExtractorTests
     public void ReplaceInType_Generic()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("value", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("value", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1062,8 +1096,8 @@ public sealed class InlineTypeExtractorTests
                     "PagedResult",
                     [
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("value", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("value", new TsType.Primitive("string")),
                         ]),
                     ]
                 )
@@ -1083,8 +1117,8 @@ public sealed class InlineTypeExtractorTests
     public void ReplaceInType_Brand()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("tag", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("tag", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1095,8 +1129,8 @@ public sealed class InlineTypeExtractorTests
                 returnType: new TsType.Brand(
                     "Tagged",
                     new TsType.InlineObject([
-                        ("id", new TsType.Primitive("number")),
-                        ("tag", new TsType.Primitive("string")),
+                        new("id", new TsType.Primitive("number")),
+                        new("tag", new TsType.Primitive("string")),
                     ])
                 )
             ),
@@ -1116,12 +1150,12 @@ public sealed class InlineTypeExtractorTests
     {
         // Inner appears in two endpoints (extracted), outer is unique with 2 fields (not extracted)
         var inner = new TsType.InlineObject([
-            ("street", new TsType.Primitive("string")),
-            ("city", new TsType.Primitive("string")),
+            new("street", new TsType.Primitive("string")),
+            new("city", new TsType.Primitive("string")),
         ]);
         var outer = new TsType.InlineObject([
-            ("name", new TsType.Primitive("string")),
-            ("address", inner),
+            new("name", new TsType.Primitive("string")),
+            new("address", inner),
         ]);
         var endpoints = new[]
         {
@@ -1131,12 +1165,12 @@ public sealed class InlineTypeExtractorTests
                 "Sellers",
                 "find",
                 returnType: new TsType.InlineObject([
-                    ("company", new TsType.Primitive("string")),
-                    (
+                    new("company", new TsType.Primitive("string")),
+                    new(
                         "address",
                         new TsType.InlineObject([
-                            ("street", new TsType.Primitive("string")),
-                            ("city", new TsType.Primitive("string")),
+                            new("street", new TsType.Primitive("string")),
+                            new("city", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -1150,11 +1184,11 @@ public sealed class InlineTypeExtractorTests
 
         // Outers remain InlineObject but their address field is now a TypeRef
         var ret0 = Assert.IsType<TsType.InlineObject>(result.Endpoints[0].ReturnType);
-        var addressField0 = ret0.Fields.First(f => f.Name == "address");
+        var addressField0 = ret0.Properties.First(f => f.Name == "address");
         Assert.IsType<TsType.TypeRef>(addressField0.Type);
 
         var ret1 = Assert.IsType<TsType.InlineObject>(result.Endpoints[1].ReturnType);
-        var addressField1 = ret1.Fields.First(f => f.Name == "address");
+        var addressField1 = ret1.Properties.First(f => f.Name == "address");
         Assert.IsType<TsType.TypeRef>(addressField1.Type);
     }
 
@@ -1162,12 +1196,12 @@ public sealed class InlineTypeExtractorTests
     public void MultipleDistinctTypes_AllExtracted()
     {
         var buyerShape = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var orderShape = new TsType.InlineObject([
-            ("orderId", new TsType.Primitive("number")),
-            ("total", new TsType.Primitive("number")),
+            new("orderId", new TsType.Primitive("number")),
+            new("total", new TsType.Primitive("number")),
         ]);
         var endpoints = new[]
         {
@@ -1176,8 +1210,8 @@ public sealed class InlineTypeExtractorTests
                 "Buyers",
                 "list",
                 returnType: new TsType.InlineObject([
-                    ("id", new TsType.Primitive("number")),
-                    ("name", new TsType.Primitive("string")),
+                    new("id", new TsType.Primitive("number")),
+                    new("name", new TsType.Primitive("string")),
                 ])
             ),
             MakeEndpoint("Orders", "get", returnType: orderShape),
@@ -1185,8 +1219,8 @@ public sealed class InlineTypeExtractorTests
                 "Orders",
                 "list",
                 returnType: new TsType.InlineObject([
-                    ("orderId", new TsType.Primitive("number")),
-                    ("total", new TsType.Primitive("number")),
+                    new("orderId", new TsType.Primitive("number")),
+                    new("total", new TsType.Primitive("number")),
                 ])
             ),
         };
@@ -1203,9 +1237,9 @@ public sealed class InlineTypeExtractorTests
     public void CustomFieldThreshold_ExtractsSmaller()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var endpoints = new[] { MakeEndpoint("Buyers", "find", returnType: inline) };
 
@@ -1224,8 +1258,8 @@ public sealed class InlineTypeExtractorTests
     {
         // Same InlineObject appears in both ReturnType and a Response on the same endpoint
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1238,8 +1272,8 @@ public sealed class InlineTypeExtractorTests
                     new TsResponseType(
                         200,
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
                         ])
                     ),
                 ]
@@ -1266,8 +1300,8 @@ public sealed class InlineTypeExtractorTests
     public void Extract_RequestTypeNull_NoEffect()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1288,12 +1322,12 @@ public sealed class InlineTypeExtractorTests
     public void Extract_DeduplicatesRequestTypeInlineObjects()
     {
         var inline1 = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var inline2 = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1324,8 +1358,8 @@ public sealed class InlineTypeExtractorTests
     public void CollectInlineObjects_WalksRequestType()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoint = MakeEndpoint("Buyers", "create") with { RequestType = inline };
 
@@ -1339,7 +1373,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_NestedSnakeCaseField_ProducesPascalCase()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Buyers.find.return.field.mix_types"),
@@ -1373,7 +1407,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_ResponseContext_UsesMethodName()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Orders.list.response.200"),
@@ -1393,7 +1427,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_ParamContext_UsesMethodName()
     {
-        var inline = new TsType.InlineObject([("name", new TsType.Primitive("string"))]);
+        var inline = new TsType.InlineObject([new("name", new TsType.Primitive("string"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Products.create.param.data"),
@@ -1413,7 +1447,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_TopLevel_MultipleOccurrences()
     {
-        var inline = new TsType.InlineObject([("token", new TsType.Primitive("string"))]);
+        var inline = new TsType.InlineObject([new("token", new TsType.Primitive("string"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Auth.login.return"),
@@ -1434,7 +1468,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_TopLevel_UsesMethodName()
     {
-        var inline = new TsType.InlineObject([("token", new TsType.Primitive("string"))]);
+        var inline = new TsType.InlineObject([new("token", new TsType.Primitive("string"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Auth.login.return"),
@@ -1454,7 +1488,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_DataFieldSkipped_UsesMethodName()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Buyers.find.return.field.data"),
@@ -1474,7 +1508,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_SnakeCaseController_UsesMethodName()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "order_items.find.return"),
@@ -1494,7 +1528,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_SnakeCaseMethod_UsesMethodName()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Orders.find_all.return"),
@@ -1514,7 +1548,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_DataFieldWithDeeperNesting_UsesInnerField()
     {
-        var inline = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var inline = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Buyers.find.return.field.data.field.items"),
@@ -1534,7 +1568,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void GenerateName_NonDataField_StillUsesFieldName()
     {
-        var inline = new TsType.InlineObject([("street", new TsType.Primitive("string"))]);
+        var inline = new TsType.InlineObject([new("street", new TsType.Primitive("string"))]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
             (inline, "Buyers.find.return.field.location"),
@@ -1555,15 +1589,15 @@ public sealed class InlineTypeExtractorTests
     public void Extract_DataWrapperFromDifferentMethods_DistinctNames()
     {
         var inner1 = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
-        var outer1 = new TsType.InlineObject([("data", inner1)]);
+        var outer1 = new TsType.InlineObject([new("data", inner1)]);
         var inner2 = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
-        var outer2 = new TsType.InlineObject([("data", inner2)]);
+        var outer2 = new TsType.InlineObject([new("data", inner2)]);
         var endpoints = new[]
         {
             MakeEndpoint("Buyers", "find", returnType: outer1),
@@ -1587,7 +1621,7 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void DeriveStructuralName_SingleField()
     {
-        var inline = new TsType.InlineObject([("message", new TsType.Primitive("string"))]);
+        var inline = new TsType.InlineObject([new("message", new TsType.Primitive("string"))]);
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
 
@@ -1598,8 +1632,8 @@ public sealed class InlineTypeExtractorTests
     public void DeriveStructuralName_TwoFields()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
@@ -1611,11 +1645,11 @@ public sealed class InlineTypeExtractorTests
     public void DeriveStructuralName_ThreeOrMoreFields()
     {
         var inline = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
-            ("phone", new TsType.Primitive("string")),
-            ("location", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
+            new("phone", new TsType.Primitive("string")),
+            new("location", new TsType.Primitive("string")),
         ]);
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
@@ -1631,17 +1665,23 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Auth",
                 "login",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             MakeEndpoint(
                 "Orders",
                 "list",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             MakeEndpoint(
                 "Products",
                 "create",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
         };
 
@@ -1659,12 +1699,16 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Auth",
                 "login",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             MakeEndpoint(
                 "Orders",
                 "list",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
         };
 
@@ -1678,8 +1722,8 @@ public sealed class InlineTypeExtractorTests
     public void Extract_MultiFieldSharedShape_StructuralName()
     {
         var shape = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1687,24 +1731,24 @@ public sealed class InlineTypeExtractorTests
                 "Auth",
                 "login",
                 returnType: new TsType.InlineObject([
-                    ("id", new TsType.Primitive("number")),
-                    ("name", new TsType.Primitive("string")),
+                    new("id", new TsType.Primitive("number")),
+                    new("name", new TsType.Primitive("string")),
                 ])
             ),
             MakeEndpoint(
                 "Orders",
                 "list",
                 returnType: new TsType.InlineObject([
-                    ("id", new TsType.Primitive("number")),
-                    ("name", new TsType.Primitive("string")),
+                    new("id", new TsType.Primitive("number")),
+                    new("name", new TsType.Primitive("string")),
                 ])
             ),
             MakeEndpoint(
                 "Products",
                 "get",
                 returnType: new TsType.InlineObject([
-                    ("id", new TsType.Primitive("number")),
-                    ("name", new TsType.Primitive("string")),
+                    new("id", new TsType.Primitive("number")),
+                    new("name", new TsType.Primitive("string")),
                 ])
             ),
         };
@@ -1718,14 +1762,14 @@ public sealed class InlineTypeExtractorTests
     [Fact]
     public void Extract_LargeSharedShape_TruncatesName()
     {
-        TsType.InlineObjectField[] fields =
-        {
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
-            ("phone", new TsType.Primitive("string")),
-            ("location", new TsType.Primitive("string")),
-        };
+        TsPropertyDefinition[] fields =
+        [
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
+            new("phone", new TsType.Primitive("string")),
+            new("location", new TsType.Primitive("string")),
+        ];
         var endpoints = new[]
         {
             MakeEndpoint("Auth", "login", returnType: new TsType.InlineObject(fields)),
@@ -1748,11 +1792,11 @@ public sealed class InlineTypeExtractorTests
                 "Auth",
                 "login",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "data",
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -1761,11 +1805,11 @@ public sealed class InlineTypeExtractorTests
                 "Orders",
                 "list",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "data",
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -1774,11 +1818,11 @@ public sealed class InlineTypeExtractorTests
                 "Products",
                 "create",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "data",
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -1811,33 +1855,45 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Auth",
                 "login",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             MakeEndpoint(
                 "Orders",
                 "list",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             MakeEndpoint(
                 "Products",
                 "create",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             // { message: number } across 3 different controllers
             MakeEndpoint(
                 "Users",
                 "get",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("number"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("number")),
+                ])
             ),
             MakeEndpoint(
                 "Teams",
                 "find",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("number"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("number")),
+                ])
             ),
             MakeEndpoint(
                 "Roles",
                 "list",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("number"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("number")),
+                ])
             ),
         };
 
@@ -1853,13 +1909,13 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_ArrayElement_AppendsRef()
     {
         var type = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var existingType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -1888,13 +1944,13 @@ public sealed class InlineTypeExtractorTests
         // Both get context "*.field.items" → base name "Item" → collision on "ItemDto"
         // The array-wrapped one should get "ItemRefDto"
         var directShape = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var arrayShape = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("label", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("label", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -1902,18 +1958,18 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Buyers",
                 "find",
-                returnType: new TsType.InlineObject([("items", directShape)])
+                returnType: new TsType.InlineObject([new("items", directShape)])
             ),
             MakeEndpoint(
                 "Buyers",
                 "list",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "items",
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
-                            ("email", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
+                            new("email", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -1922,18 +1978,18 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Orders",
                 "find",
-                returnType: new TsType.InlineObject([("items", new TsType.Array(arrayShape))])
+                returnType: new TsType.InlineObject([new("items", new TsType.Array(arrayShape))])
             ),
             MakeEndpoint(
                 "Orders",
                 "list",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "items",
                         new TsType.Array(
                             new TsType.InlineObject([
-                                ("id", new TsType.Primitive("number")),
-                                ("label", new TsType.Primitive("string")),
+                                new("id", new TsType.Primitive("number")),
+                                new("label", new TsType.Primitive("string")),
                             ])
                         )
                     ),
@@ -1955,13 +2011,13 @@ public sealed class InlineTypeExtractorTests
     {
         // Same scenario but type is NOT an array element — should fall through to Summary
         var type = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var existingType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -1985,15 +2041,15 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_FewerFields_AppendsSummary()
     {
         var smallType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var largeType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
-            ("phone", new TsType.Primitive("string")),
-            ("address", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
+            new("phone", new TsType.Primitive("string")),
+            new("address", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -2016,15 +2072,15 @@ public sealed class InlineTypeExtractorTests
     {
         // Two shapes both from field context "items" — collision on "ItemDto"
         var smallItems = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var largeItems = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
-            ("phone", new TsType.Primitive("string")),
-            ("address", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
+            new("phone", new TsType.Primitive("string")),
+            new("address", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -2032,17 +2088,17 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Buyers",
                 "find",
-                returnType: new TsType.InlineObject([("items", smallItems)])
+                returnType: new TsType.InlineObject([new("items", smallItems)])
             ),
             MakeEndpoint(
                 "Buyers",
                 "list",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "items",
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -2051,20 +2107,20 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Buyers",
                 "search",
-                returnType: new TsType.InlineObject([("items", largeItems)])
+                returnType: new TsType.InlineObject([new("items", largeItems)])
             ),
             MakeEndpoint(
                 "Buyers",
                 "export",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "items",
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
-                            ("email", new TsType.Primitive("string")),
-                            ("phone", new TsType.Primitive("string")),
-                            ("address", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
+                            new("email", new TsType.Primitive("string")),
+                            new("phone", new TsType.Primitive("string")),
+                            new("address", new TsType.Primitive("string")),
                         ])
                     ),
                 ])
@@ -2089,7 +2145,7 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_NameNotInNameTypes_FallsBackToNumeric()
     {
         // Simulates collision with existingDefinitions (no type info tracked)
-        var type = new TsType.InlineObject([("id", new TsType.Primitive("number"))]);
+        var type = new TsType.InlineObject([new("id", new TsType.Primitive("number"))]);
         var usedNames = new HashSet<string> { "BuyerFindDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>(); // empty — name came from existingDefs
 
@@ -2108,12 +2164,12 @@ public sealed class InlineTypeExtractorTests
     {
         // Same count, same field names, different types — no semantic strategy applies
         var typeA = new TsType.InlineObject([
-            ("id", new TsType.Primitive("string")),
-            ("name", new TsType.Primitive("number")),
+            new("id", new TsType.Primitive("string")),
+            new("name", new TsType.Primitive("number")),
         ]);
         var typeB = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = typeB };
@@ -2132,14 +2188,14 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_DistinguishingField()
     {
         var typeA = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("customer_name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("customer_name", new TsType.Primitive("string")),
         ]);
         var typeB = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject> { ["BuyerFindDto"] = typeB };
@@ -2158,17 +2214,17 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_MoreFields_AppendsDetail()
     {
         var largeType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
-            ("phone", new TsType.Primitive("string")),
-            ("address", new TsType.Primitive("string")),
-            ("notes", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
+            new("phone", new TsType.Primitive("string")),
+            new("address", new TsType.Primitive("string")),
+            new("notes", new TsType.Primitive("string")),
         ]);
         var smallType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -2190,8 +2246,8 @@ public sealed class InlineTypeExtractorTests
     public void DeriveStructuralName_SnakeCaseFields_ProducesPascalCase()
     {
         var inline = new TsType.InlineObject([
-            ("user_id", new TsType.Primitive("number")),
-            ("first_name", new TsType.Primitive("string")),
+            new("user_id", new TsType.Primitive("number")),
+            new("first_name", new TsType.Primitive("string")),
         ]);
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
@@ -2209,17 +2265,23 @@ public sealed class InlineTypeExtractorTests
             MakeEndpoint(
                 "Auth",
                 "list",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             MakeEndpoint(
                 "Orders",
                 "list",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
             MakeEndpoint(
                 "Products",
                 "list",
-                returnType: new TsType.InlineObject([("message", new TsType.Primitive("string"))])
+                returnType: new TsType.InlineObject([
+                    new("message", new TsType.Primitive("string")),
+                ])
             ),
         };
 
@@ -2239,8 +2301,8 @@ public sealed class InlineTypeExtractorTests
     public void IsResponseWrapper_TopLevelReturn_WithDataField_True()
     {
         var type = new TsType.InlineObject([
-            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
-            ("message", new TsType.Primitive("string")),
+            new("data", new TsType.InlineObject([new("id", new TsType.Primitive("number"))])),
+            new("message", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2254,7 +2316,7 @@ public sealed class InlineTypeExtractorTests
     public void IsResponseWrapper_FieldContext_False()
     {
         var type = new TsType.InlineObject([
-            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+            new("data", new TsType.InlineObject([new("id", new TsType.Primitive("number"))])),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2268,8 +2330,8 @@ public sealed class InlineTypeExtractorTests
     public void GenerateName_ResponseWrapper_GetsResponseSuffix()
     {
         var type = new TsType.InlineObject([
-            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
-            ("message", new TsType.Primitive("string")),
+            new("data", new TsType.InlineObject([new("id", new TsType.Primitive("number"))])),
+            new("message", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2291,8 +2353,8 @@ public sealed class InlineTypeExtractorTests
     public void GenerateName_TopLevelWithoutWrapperFields_GetsDtoSuffix()
     {
         var type = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2314,8 +2376,8 @@ public sealed class InlineTypeExtractorTests
     public void GenerateName_NestedType_GetsDtoSuffix()
     {
         var type = new TsType.InlineObject([
-            ("street", new TsType.Primitive("string")),
-            ("city", new TsType.Primitive("string")),
+            new("street", new TsType.Primitive("string")),
+            new("city", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2337,15 +2399,15 @@ public sealed class InlineTypeExtractorTests
     public void GenerateName_ResponseWrapperCollision_UsesSummaryResponse()
     {
         var smallType = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
         ]);
         var largeType = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
-            ("error", new TsType.Primitive("string")),
-            ("status", new TsType.Primitive("number")),
-            ("timestamp", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
+            new("error", new TsType.Primitive("string")),
+            new("status", new TsType.Primitive("number")),
+            new("timestamp", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2372,12 +2434,12 @@ public sealed class InlineTypeExtractorTests
     public void Extract_ResponseWrapperAndInnerDto()
     {
         var inner = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var outer = new TsType.InlineObject([
-            ("data", inner),
-            ("message", new TsType.Primitive("string")),
+            new("data", inner),
+            new("message", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -2386,14 +2448,14 @@ public sealed class InlineTypeExtractorTests
                 "Orders",
                 "search",
                 returnType: new TsType.InlineObject([
-                    (
+                    new(
                         "data",
                         new TsType.InlineObject([
-                            ("id", new TsType.Primitive("number")),
-                            ("name", new TsType.Primitive("string")),
+                            new("id", new TsType.Primitive("number")),
+                            new("name", new TsType.Primitive("string")),
                         ])
                     ),
-                    ("message", new TsType.Primitive("string")),
+                    new("message", new TsType.Primitive("string")),
                 ])
             ),
         };
@@ -2421,17 +2483,17 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_MoreFields_ResponseSuffix_AppendsDetailResponse()
     {
         var largeType = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
-            ("error", new TsType.Primitive("string")),
-            ("status", new TsType.Primitive("number")),
-            ("timestamp", new TsType.Primitive("string")),
-            ("trace", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
+            new("error", new TsType.Primitive("string")),
+            new("status", new TsType.Primitive("number")),
+            new("timestamp", new TsType.Primitive("string")),
+            new("trace", new TsType.Primitive("string")),
         ]);
         var smallType = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
-            ("error", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
+            new("error", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindResponse" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -2453,14 +2515,14 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_DistinguishingField_ResponseSuffix()
     {
         var typeA = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
-            ("customer_name", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
+            new("customer_name", new TsType.Primitive("string")),
         ]);
         var typeB = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindResponse" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -2482,13 +2544,13 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_ArrayElement_ResponseSuffix_AppendsRefResponse()
     {
         var type = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
         ]);
         var existingType = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
-            ("error", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
+            new("error", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindResponse" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -2514,8 +2576,8 @@ public sealed class InlineTypeExtractorTests
     public void IsResponseWrapper_ResponseStatusContext_WithDataField_True()
     {
         var type = new TsType.InlineObject([
-            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
-            ("message", new TsType.Primitive("string")),
+            new("data", new TsType.InlineObject([new("id", new TsType.Primitive("number"))])),
+            new("message", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2531,8 +2593,8 @@ public sealed class InlineTypeExtractorTests
     public void IsResponseWrapper_MixedContexts_ReturnsFalse()
     {
         var type = new TsType.InlineObject([
-            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
-            ("message", new TsType.Primitive("string")),
+            new("data", new TsType.InlineObject([new("id", new TsType.Primitive("number"))])),
+            new("message", new TsType.Primitive("string")),
         ]);
         var occurrences = new List<(TsType.InlineObject Type, string Context)>
         {
@@ -2549,15 +2611,15 @@ public sealed class InlineTypeExtractorTests
     public void DisambiguateCollision_RefCandidateTaken_CascadesToSummary()
     {
         var type = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
         ]);
         var existingType = new TsType.InlineObject([
-            ("id", new TsType.Primitive("number")),
-            ("name", new TsType.Primitive("string")),
-            ("email", new TsType.Primitive("string")),
-            ("phone", new TsType.Primitive("string")),
-            ("address", new TsType.Primitive("string")),
+            new("id", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("email", new TsType.Primitive("string")),
+            new("phone", new TsType.Primitive("string")),
+            new("address", new TsType.Primitive("string")),
         ]);
         var usedNames = new HashSet<string> { "BuyerFindDto", "BuyerFindRefDto" };
         var nameTypes = new Dictionary<string, TsType.InlineObject>
@@ -2584,7 +2646,7 @@ public sealed class InlineTypeExtractorTests
     public void DeriveStructuralName_OnlyDataField_ReturnsObject()
     {
         var inline = new TsType.InlineObject([
-            ("data", new TsType.InlineObject([("id", new TsType.Primitive("number"))])),
+            new("data", new TsType.InlineObject([new("id", new TsType.Primitive("number"))])),
         ]);
 
         var result = InlineTypeExtractor.DeriveStructuralName(inline);
@@ -2600,15 +2662,15 @@ public sealed class InlineTypeExtractorTests
         // Two different response wrapper shapes, both top-level returns with data+message
         // Both derive base name "OrderList" → both get Response suffix → collision on "OrderListResponse"
         var smallWrapper = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
         ]);
         var largeWrapper = new TsType.InlineObject([
-            ("data", new TsType.Primitive("string")),
-            ("message", new TsType.Primitive("string")),
-            ("error", new TsType.Primitive("string")),
-            ("status", new TsType.Primitive("number")),
-            ("trace", new TsType.Primitive("string")),
+            new("data", new TsType.Primitive("string")),
+            new("message", new TsType.Primitive("string")),
+            new("error", new TsType.Primitive("string")),
+            new("status", new TsType.Primitive("number")),
+            new("trace", new TsType.Primitive("string")),
         ]);
         var endpoints = new[]
         {
@@ -2622,8 +2684,8 @@ public sealed class InlineTypeExtractorTests
                     new TsResponseType(
                         200,
                         new TsType.InlineObject([
-                            ("data", new TsType.Primitive("string")),
-                            ("message", new TsType.Primitive("string")),
+                            new("data", new TsType.Primitive("string")),
+                            new("message", new TsType.Primitive("string")),
                         ])
                     ),
                 ]
@@ -2638,11 +2700,11 @@ public sealed class InlineTypeExtractorTests
                     new TsResponseType(
                         202,
                         new TsType.InlineObject([
-                            ("data", new TsType.Primitive("string")),
-                            ("message", new TsType.Primitive("string")),
-                            ("error", new TsType.Primitive("string")),
-                            ("status", new TsType.Primitive("number")),
-                            ("trace", new TsType.Primitive("string")),
+                            new("data", new TsType.Primitive("string")),
+                            new("message", new TsType.Primitive("string")),
+                            new("error", new TsType.Primitive("string")),
+                            new("status", new TsType.Primitive("number")),
+                            new("trace", new TsType.Primitive("string")),
                         ])
                     ),
                 ]

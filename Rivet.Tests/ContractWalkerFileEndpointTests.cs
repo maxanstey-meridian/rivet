@@ -84,7 +84,7 @@ public sealed class ContractWalkerFileEndpointTests
             public static class ItemsContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/items/{id}");
+                    Define.Get<ItemDto>("/api/items/{id:guid}");
             }
             """;
 
@@ -175,7 +175,7 @@ public sealed class ContractWalkerFileEndpointTests
             public static class FilesContract
             {
                 public static readonly FileRouteDefinition Download =
-                    Define.File("/api/files/{id}/download");
+                    Define.File("/api/files/{id:guid}/download");
             }
             """;
 

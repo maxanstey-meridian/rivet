@@ -34,4 +34,12 @@ public sealed class RivetGeneratedTypeAttribute : Attribute
     /// <c>[JsonDerivedType]</c>; anything else stops generation (RIV1122).
     /// </summary>
     public string? DiscriminatorSchemaJson { get; set; }
+
+    /// <summary>
+    /// The source schema wrote <c>additionalProperties</c> (<c>{}</c> or a schema), so the
+    /// type's <c>[JsonExtensionData]</c> bag is emitted as <c>additionalProperties: {}</c>.
+    /// Without it, an imported type's bag is the importer's carrier for a schema that left the
+    /// keyword out (which admits extra members all the same), and the spec leaves it out too.
+    /// </summary>
+    public bool DeclaresAdditionalProperties { get; set; }
 }

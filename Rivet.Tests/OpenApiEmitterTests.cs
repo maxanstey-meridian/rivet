@@ -100,7 +100,7 @@ public sealed class OpenApiEmitterTests
         );
 
     [Fact]
-    public void Authored_Component_Examples_Merge_With_Endpoint_Examples_Without_Clobbering()
+    public void Authored_Component_Examples_Merge_With_Equal_Endpoint_Examples()
     {
         var endpoints = new List<TsEndpointDefinition>
         {
@@ -121,7 +121,8 @@ public sealed class OpenApiEmitterTests
                                 "application/json",
                                 Name: "shared",
                                 ComponentExampleId: "shared",
-                                ResolvedJson: "{\"source\":\"endpoint\"}"
+                                // The same value, spelled differently: JSON equality, not text.
+                                ResolvedJson: "{ \"source\": \"authored\" }"
                             ),
                             new TsEndpointExample(
                                 "application/json",
@@ -331,7 +332,7 @@ public sealed class OpenApiEmitterTests
             public static class MembersContract
             {
                 public static readonly InputRouteDefinition<UpdateRoleInput> UpdateRole =
-                    Define.Put("/api/members/{id}/role")
+                    Define.Put("/api/members/{id:guid}/role")
                         .Accepts<UpdateRoleInput>();
             }
             """;
@@ -706,7 +707,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
             """;
@@ -801,7 +802,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition DeleteTask =
-                    Define.Delete("/api/tasks/{id}")
+                    Define.Delete("/api/tasks/{id:guid}")
                         .Status(204);
             }
             """;
@@ -1696,7 +1697,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<ProblemDto>(422)
                         .ResponseExampleJson(
                             422,
@@ -1776,7 +1777,7 @@ public sealed class OpenApiEmitterTests
             public static class DocumentsContract
             {
                 public static readonly RouteDefinition Download =
-                    Define.Get("/api/documents/{id}")
+                    Define.Get("/api/documents/{id:guid}")
                         .ProducesFile("application/pdf")
                         .ResponseExampleRef(200, "document-example", "{\"href\":\"/api/documents/123\"}", name: "document");
             }
@@ -1943,7 +1944,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -1979,7 +1980,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -2022,7 +2023,7 @@ public sealed class OpenApiEmitterTests
             public static class PeopleContract
             {
                 public static readonly RouteDefinition<PersonDto> GetPerson =
-                    Define.Get<PersonDto>("/api/people/{id}");
+                    Define.Get<PersonDto>("/api/people/{id:guid}");
             }
             """;
 
@@ -2514,6 +2515,162 @@ public sealed class OpenApiEmitterTests
         Assert.Equal("#/components/examples/thing", example.GetProperty("$ref").GetString());
         Assert.Equal("A shared thing", example.GetProperty("summary").GetString());
         Assert.Equal("Points at the component", example.GetProperty("description").GetString());
+
+        // The component carries them too: it is the example the $ref names.
+        var component = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("examples")
+            .GetProperty("thing");
+        Assert.Equal("A shared thing", component.GetProperty("summary").GetString());
+        Assert.Equal("Points at the component", component.GetProperty("description").GetString());
+        Assert.Equal("value", component.GetProperty("value").GetString());
+    }
+
+    private static TsEndpointDefinition EndpointWithComponentExample(
+        string name,
+        TsEndpointExample example
+    ) =>
+        new(
+            name,
+            "GET",
+            $"/{name}",
+            [],
+            null,
+            "things",
+            [new TsResponseType(200, new TsType.Primitive("string"), Examples: [example])]
+        );
+
+    private static TsEndpointExample ComponentExample(
+        string resolvedJson,
+        string? summary = null,
+        string? description = null,
+        IReadOnlyDictionary<string, string>? referencedComponents = null
+    ) =>
+        new(
+            "application/json",
+            Name: "shared",
+            ComponentExampleId: "thing",
+            ResolvedJson: resolvedJson,
+            ReferencedComponents: referencedComponents,
+            Summary: summary,
+            Description: description
+        );
+
+    private static JsonDocument EmitEndpoints(
+        IReadOnlyList<TsEndpointDefinition> endpoints,
+        OpenApiDocumentProvenance? provenance = null
+    ) =>
+        EmitOpenApiFromModel(
+            endpoints,
+            new Dictionary<string, TsTypeDefinition>(),
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>(),
+            documentInfo: new OpenApiDocumentInfo(Provenance: provenance)
+        );
+
+    [Fact]
+    public void Two_Endpoints_Pinning_One_Component_Example_With_Different_Values_Fail_With_RIV2015()
+    {
+        // The second value used to be dropped, and its $ref pointed at the first.
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitEndpoints([
+                EndpointWithComponentExample("first", ComponentExample("\"one\"")),
+                EndpointWithComponentExample("second", ComponentExample("\"two\"")),
+            ])
+        );
+
+        Assert.StartsWith("error RIV2015:", exception.Message);
+        Assert.Contains("'thing'", exception.Message);
+        Assert.Contains("endpoint 'things.first'", exception.Message);
+        Assert.Contains("endpoint 'things.second'", exception.Message);
+        Assert.Contains("a different value", exception.Message);
+    }
+
+    [Fact]
+    public void Two_Endpoints_Pinning_One_Component_Example_With_Equal_Examples_Share_It()
+    {
+        using var doc = EmitEndpoints([
+            EndpointWithComponentExample("first", ComponentExample("{\"a\":1}")),
+            EndpointWithComponentExample(
+                "second",
+                ComponentExample("{ \"a\": 1 }", summary: "Stated once")
+            ),
+        ]);
+
+        var examples = doc.RootElement.GetProperty("components").GetProperty("examples");
+        Assert.Single(examples.EnumerateObject());
+        var component = examples.GetProperty("thing");
+        // One example stating the summary is enough; the other left it unstated.
+        Assert.Equal("Stated once", component.GetProperty("summary").GetString());
+        Assert.Equal(1, component.GetProperty("value").GetProperty("a").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("summary")]
+    [InlineData("description")]
+    public void Two_Endpoints_Stating_Different_Documentation_For_One_Component_Example_Fail_With_RIV2015(
+        string field
+    )
+    {
+        TsEndpointExample Stating(string text) =>
+            field == "summary"
+                ? ComponentExample("1", summary: text)
+                : ComponentExample("1", description: text);
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitEndpoints([
+                EndpointWithComponentExample("first", Stating("One")),
+                EndpointWithComponentExample("second", Stating("Two")),
+            ])
+        );
+
+        Assert.StartsWith("error RIV2015:", exception.Message);
+        Assert.Contains($"a different {field} ('One' against 'Two')", exception.Message);
+    }
+
+    [Fact]
+    public void An_Endpoint_Example_Disagreeing_With_An_Authored_Component_Fails_With_RIV2015()
+    {
+        var provenance = new OpenApiDocumentProvenance(
+            new OpenApiInfoProvenance("Examples", "1.0.0"),
+            [],
+            null,
+            [],
+            [new OpenApiComponentExampleProvenance("thing", null, null, "\"authored\"", null)]
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitEndpoints(
+                [EndpointWithComponentExample("edited", ComponentExample("\"edited\""))],
+                provenance
+            )
+        );
+
+        Assert.StartsWith("error RIV2015:", exception.Message);
+        Assert.Contains("the document's components.examples", exception.Message);
+        Assert.Contains("endpoint 'things.edited'", exception.Message);
+    }
+
+    [Fact]
+    public void Embedded_Component_Examples_With_Different_Values_Fail_With_RIV2015()
+    {
+        // ReferencedComponents are the components an example value $refs inside itself.
+        TsEndpointExample Embedding(string value) =>
+            new(
+                "application/json",
+                Json: "{\"$ref\":\"#/components/examples/inner\"}",
+                ReferencedComponents: new Dictionary<string, string> { ["inner"] = value }
+            );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            EmitEndpoints([
+                EndpointWithComponentExample("first", Embedding("1")),
+                EndpointWithComponentExample("second", Embedding("2")),
+            ])
+        );
+
+        Assert.StartsWith("error RIV2015:", exception.Message);
+        Assert.Contains("'inner'", exception.Message);
     }
 
     [Fact]
@@ -2543,7 +2700,7 @@ public sealed class OpenApiEmitterTests
             public static class ProductsContract
             {
                 public static readonly RouteDefinition<ProductDto> GetProduct =
-                    Define.Get<ProductDto>("/api/products/{id}");
+                    Define.Get<ProductDto>("/api/products/{id:guid}");
             }
             """;
 
@@ -2581,7 +2738,7 @@ public sealed class OpenApiEmitterTests
             public static class PeopleContract
             {
                 public static readonly RouteDefinition<PersonDto> GetPerson =
-                    Define.Get<PersonDto>("/api/people/{id}");
+                    Define.Get<PersonDto>("/api/people/{id:guid}");
             }
             """;
 
@@ -2688,7 +2845,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -2874,10 +3031,10 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> Get =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
 
                 public static readonly RouteDefinition Delete =
-                    Define.Delete("/api/tasks/{taskId}").Status(204);
+                    Define.Delete("/api/tasks/{taskId:guid}").Status(204);
             }
             """;
 
@@ -2943,7 +3100,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -2978,7 +3135,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Description("Get a task")
                         .Returns<NotFoundDto>(404, "Task not found");
             }
@@ -3213,7 +3370,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .Returns<NotFoundDto>(404, "Not found");
             }
             """;
@@ -3296,7 +3453,7 @@ public sealed class OpenApiEmitterTests
                         .Description("List all users");
 
                 public static readonly RouteDefinition<UserDto> GetUser =
-                    Define.Get<UserDto>("/api/users/{id}")
+                    Define.Get<UserDto>("/api/users/{id:guid}")
                         .Returns<NotFoundDto>(404, "User not found");
 
                 public static readonly RouteDefinition<CreateUserRequest, UserDto> CreateUser =
@@ -3305,7 +3462,7 @@ public sealed class OpenApiEmitterTests
                         .Returns<ErrorDto>(400, "Validation error");
 
                 public static readonly RouteDefinition DeleteUser =
-                    Define.Delete("/api/users/{id}")
+                    Define.Delete("/api/users/{id:guid}")
                         .Returns<NotFoundDto>(404, "Not found");
             }
 
@@ -3313,12 +3470,12 @@ public sealed class OpenApiEmitterTests
             public static class FilesContract
             {
                 public static readonly RouteDefinition DownloadFile =
-                    Define.Get("/api/files/{id}")
+                    Define.Get("/api/files/{id:guid}")
                         .ProducesFile("application/pdf")
                         .Returns<NotFoundDto>(404, "File not found");
 
                 public static readonly RouteDefinition DownloadRaw =
-                    Define.Get("/api/files/{id}/raw")
+                    Define.Get("/api/files/{id:guid}/raw")
                         .ProducesFile("application/octet-stream");
             }
             """;
@@ -3449,8 +3606,8 @@ public sealed class OpenApiEmitterTests
     {
         var doc = ResponseSchemaOf(
             new TsType.InlineObject([
-                ("key", new TsType.Primitive("string")),
-                ("value", new TsType.Primitive("number")),
+                new("key", new TsType.Primitive("string")),
+                new("value", new TsType.Primitive("number")),
             ])
         );
 
@@ -3725,11 +3882,11 @@ public sealed class OpenApiEmitterTests
         // "Wrapper_Value" and silently overwrote one schema with the other).
         var wrapperOfString = new TsType.Generic(
             "Wrapper",
-            [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
+            [new TsType.InlineObject([new("value", new TsType.Primitive("string"))])]
         );
         var wrapperOfNumber = new TsType.Generic(
             "Wrapper",
-            [new TsType.InlineObject([("value", new TsType.Primitive("number"))])]
+            [new TsType.InlineObject([new("value", new TsType.Primitive("number"))])]
         );
 
         var refString = ResponseSchemaOf(wrapperOfString, wrapper).GetProperty("$ref").GetString();
@@ -3743,7 +3900,7 @@ public sealed class OpenApiEmitterTests
         var refStringAgain = ResponseSchemaOf(
                 new TsType.Generic(
                     "Wrapper",
-                    [new TsType.InlineObject([("value", new TsType.Primitive("string"))])]
+                    [new TsType.InlineObject([new("value", new TsType.Primitive("string"))])]
                 ),
                 wrapper
             )
@@ -3883,6 +4040,26 @@ public sealed class OpenApiEmitterTests
                         new TsType.Primitive("number"),
                         ParamSource.FormField
                     ),
+                    // Decision 31: a form field's annotations reach its property schema.
+                    new TsEndpointParam(
+                        "caption",
+                        new TsType.Primitive("string"),
+                        ParamSource.FormField,
+                        Description: "Shown under the file",
+                        IsDeprecated: true,
+                        DefaultValue: "\"untitled\"",
+                        Constraints: new TsPropertyConstraints(MaxLength: 80),
+                        SchemaExamples: JsonDocument.Parse("[\"Holiday\"]").RootElement,
+                        Example: JsonDocument.Parse("\"Beach\"").RootElement
+                    ),
+                    new TsEndpointParam(
+                        "revision",
+                        new TsType.Primitive("number"),
+                        ParamSource.FormField,
+                        SchemaType: "integer",
+                        Format: "int64",
+                        IsFormatSpecified: true
+                    ),
                 ],
                 new TsType.TypeRef("UploadResult"),
                 "files",
@@ -3927,6 +4104,19 @@ public sealed class OpenApiEmitterTests
         Assert.True(schema.TryGetProperty("categoryId", out var catProp));
         Assert.Equal("number", catProp.GetProperty("type").GetString());
 
+        var caption = schema.GetProperty("caption");
+        Assert.Equal("Shown under the file", caption.GetProperty("description").GetString());
+        Assert.True(caption.GetProperty("deprecated").GetBoolean());
+        Assert.Equal("untitled", caption.GetProperty("default").GetString());
+        Assert.Equal(80, caption.GetProperty("maxLength").GetInt32());
+        Assert.Equal(
+            ["Holiday", "Beach"],
+            caption.GetProperty("examples").EnumerateArray().Select(value => value.GetString())
+        );
+        var revision = schema.GetProperty("revision");
+        Assert.Equal("integer", revision.GetProperty("type").GetString());
+        Assert.Equal("int64", revision.GetProperty("format").GetString());
+
         // Response 201 DataType → UploadResult
         var resp201 = doc
             .RootElement.GetProperty("paths")
@@ -3964,7 +4154,7 @@ public sealed class OpenApiEmitterTests
             public static class UsersContract
             {
                 public static readonly RouteDefinition<UserDto> GetUser =
-                    Define.Get<UserDto>("/api/users/{id}");
+                    Define.Get<UserDto>("/api/users/{id:guid}");
             }
             """;
 
@@ -4395,8 +4585,8 @@ public sealed class OpenApiEmitterTests
                 "buyers",
                 [new TsResponseType(200, null)],
                 RequestType: new TsType.InlineObject([
-                    ("name", new TsType.Primitive("string")),
-                    ("tags", new TsType.Generic("TagList", [new TsType.TypeRef("TagDto")])),
+                    new("name", new TsType.Primitive("string")),
+                    new("tags", new TsType.Generic("TagList", [new TsType.TypeRef("TagDto")])),
                 ])
             ),
         };
@@ -4515,8 +4705,8 @@ public sealed class OpenApiEmitterTests
                 "buyers",
                 [new TsResponseType(200, null)],
                 RequestType: new TsType.InlineObject([
-                    ("id", new TsType.Primitive("number")),
-                    ("name", new TsType.Primitive("string")),
+                    new("id", new TsType.Primitive("number")),
+                    new("name", new TsType.Primitive("string")),
                 ])
             ),
         };
@@ -4610,7 +4800,7 @@ public sealed class OpenApiEmitterTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/items/{id}")
+                    Define.Get<ItemDto>("/api/items/{id:guid}")
                         .Description("Retrieves an item by ID");
             }
             """;
@@ -5021,8 +5211,8 @@ public sealed class OpenApiEmitterTests
                         new TsType.TaggedUnionVariant(
                             "hidden",
                             new TsType.InlineObject([
-                                ("kind", new TsType.StringUnion(["hidden"])),
-                                (
+                                new("kind", new TsType.StringUnion(["hidden"])),
+                                new(
                                     "workspaceKey",
                                     new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))
                                 ),
@@ -5031,8 +5221,8 @@ public sealed class OpenApiEmitterTests
                         new TsType.TaggedUnionVariant(
                             "shown",
                             new TsType.InlineObject([
-                                ("kind", new TsType.StringUnion(["shown"])),
-                                ("summary", new TsType.TypeRef("Summary")),
+                                new("kind", new TsType.StringUnion(["shown"])),
+                                new("summary", new TsType.TypeRef("Summary")),
                             ])
                         ),
                     ]
@@ -5099,8 +5289,8 @@ public sealed class OpenApiEmitterTests
         new(
             tag,
             new TsType.InlineObject([
-                ("kind", new TsType.StringUnion([tag])),
-                (field, new TsType.Primitive("string")),
+                new("kind", new TsType.StringUnion([tag])),
+                new(field, new TsType.Primitive("string")),
             ]),
             metadata
         );
@@ -5178,6 +5368,104 @@ public sealed class OpenApiEmitterTests
         );
         Assert.Equal("first", PropertyOf("open", 1));
         Assert.Equal("second", PropertyOf("Open", 1));
+    }
+
+    [Fact]
+    public void A_Generic_Only_A_Template_Reaches_Claims_Its_Name_Before_A_Variant_Does()
+    {
+        // G.12: PageUnion<Item> surfaces only when Wrapper<Item>'s template is resolved, so
+        // the pre-pass never claimed PageUnion_Item. The inline union's variant took that
+        // name too, and RIV2001 blamed a pinned id nobody wrote.
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["Item"] = new(
+                "Item",
+                [],
+                [new TsPropertyDefinition("id", new TsType.Primitive("string"), false)]
+            ),
+            ["PageUnion"] = new(
+                "PageUnion",
+                ["T"],
+                [new TsPropertyDefinition("value", new TsType.TypeParam("T"), false)]
+            ),
+            ["Wrapper"] = new(
+                "Wrapper",
+                ["T"],
+                [
+                    new TsPropertyDefinition(
+                        "inner",
+                        new TsType.Generic("PageUnion", [new TsType.TypeParam("T")]),
+                        false
+                    ),
+                ]
+            ),
+        };
+        var union = new TsType.TaggedUnion(
+            "page",
+            [
+                new TsType.TaggedUnionVariant(
+                    "item",
+                    new TsType.InlineObject([
+                        new("page", new TsType.StringUnion(["item"])),
+                        new("title", new TsType.Primitive("string")),
+                    ])
+                ),
+            ]
+        );
+
+        using var doc = EmitOpenApiFromModel(
+            [
+                new TsEndpointDefinition(
+                    "getWrapped",
+                    "GET",
+                    "/wrapped",
+                    [],
+                    null,
+                    "things",
+                    [
+                        new TsResponseType(
+                            200,
+                            new TsType.Generic("Wrapper", [new TsType.TypeRef("Item")])
+                        ),
+                    ]
+                ),
+                new TsEndpointDefinition(
+                    "getUnion",
+                    "GET",
+                    "/union",
+                    [],
+                    null,
+                    "things",
+                    [new TsResponseType(200, union)]
+                ),
+            ],
+            definitions,
+            new Dictionary<string, TsType.Brand>(),
+            new Dictionary<string, TsType>()
+        );
+
+        var schemas = doc.RootElement.GetProperty("components").GetProperty("schemas");
+        Assert.True(
+            schemas
+                .GetProperty("PageUnion_Item")
+                .GetProperty("properties")
+                .TryGetProperty("value", out _)
+        );
+        Assert.Equal(
+            "#/components/schemas/PageUnion_Item",
+            schemas
+                .GetProperty("Wrapper_Item")
+                .GetProperty("properties")
+                .GetProperty("inner")
+                .GetProperty("$ref")
+                .GetString()
+        );
+        Assert.True(
+            schemas
+                .GetProperty("PageUnion_Item2")
+                .GetProperty("properties")
+                .TryGetProperty("title", out _)
+        );
     }
 
     [Fact]
@@ -5455,7 +5743,7 @@ public sealed class OpenApiEmitterTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}");
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
 
             [RivetContract]
@@ -5576,13 +5864,13 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
-    public void FromContract_Multipart_With_Undefined_InputType_Builds_Inline_Schema_And_Diagnostic()
+    public void FromContract_Multipart_With_Undefined_InputType_Builds_Inline_Schema_Silently()
     {
         // BUG-2 (FABLE_GAPS §3): the TS lowerer decomposes the multipart input into
-        // params and never ships the input type definition, but the emitter $ref'd
-        // ep.InputTypeName with no existence check — a schema nobody defines. The fix
-        // mirrors the E6 generic fallback: warn loudly and build the multipart request
-        // schema inline from the endpoint's params.
+        // params and deliberately never ships the input type definition, so a $ref to
+        // ep.InputTypeName would name a schema nobody defines. The schema is built inline
+        // from the endpoint's params, and inputTypeName is only a name hint for it: there
+        // is nothing for the producer to fix, so no warning (RIV2004 is retired).
         var json = Fixture.Text("contract-ts-multipart.json");
 
         var spec = string.Empty;
@@ -5590,9 +5878,8 @@ public sealed class OpenApiEmitterTests
             spec = CompilationHelper.EmitOpenApiFromJson(json)
         );
 
-        // 1. Loud, named diagnostic — never a silent dangling $ref.
-        Assert.Contains("multipart input type 'UploadAvatarInput'", stderr);
-        Assert.Contains("users.uploadAvatar", stderr);
+        // 1. No diagnostic: the missing definition is how rivet-ts works, not a defect.
+        Assert.DoesNotContain("warning", stderr);
 
         using var doc = JsonDocument.Parse(spec);
         var schema = doc
@@ -5658,7 +5945,7 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<TaskDto> GetTask = Define.Get<TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -5743,8 +6030,8 @@ public sealed class OpenApiEmitterTests
             [RivetContract]
             public static class TasksContract
             {
-                public static readonly RouteDefinition<PatchRequest?, TaskDto> Patch = Define.Patch<PatchRequest?, TaskDto>("/api/tasks/{id}");
-                public static readonly RouteDefinition<PatchRequest, TaskDto> Update = Define.Put<PatchRequest, TaskDto>("/api/tasks/{id}");
+                public static readonly RouteDefinition<PatchRequest?, TaskDto> Patch = Define.Patch<PatchRequest?, TaskDto>("/api/tasks/{id:guid}");
+                public static readonly RouteDefinition<PatchRequest, TaskDto> Update = Define.Put<PatchRequest, TaskDto>("/api/tasks/{id:guid}");
             }
             """;
 
@@ -5867,7 +6154,7 @@ public sealed class OpenApiEmitterTests
             public static class ItemsContract
             {
                 public static readonly RouteDefinition<ItemDto> GetItem =
-                    Define.Get<ItemDto>("/api/items/{id}");
+                    Define.Get<ItemDto>("/api/items/{id:guid}");
             }
             """;
 

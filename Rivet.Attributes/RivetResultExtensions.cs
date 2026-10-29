@@ -64,6 +64,7 @@ public static class RivetResultExtensions
     )
     {
         RivetTerminal.EnsureDeclaredRuntimeType(body, options);
+        RivetTerminal.EnsureExtensionDataKeysAreFree(body, options);
         return httpContext.Response.WriteAsJsonAsync(
             body.Value,
             body.PayloadType!,
@@ -139,8 +140,9 @@ public static class RivetResultExtensions
 
     /// <summary>
     /// Headers the handler sets on the response before returning count, and so do the ones
-    /// the result itself writes: the content type, a text body's length, and for a file the
-    /// validators, disposition, range support and length its arguments ask for. JSON goes out
+    /// the result itself writes: a text body's length, and for a file the validators,
+    /// disposition, range support and length its arguments ask for. (Content-Type can't be a
+    /// declared response header: the builder refuses it, as OpenAPI ignores it.) JSON goes out
     /// unbuffered, so it carries no length. A header a middleware
     /// adds in <c>OnStarting</c> arrives after this check and doesn't count.
     /// </summary>
@@ -175,12 +177,9 @@ public static class RivetResultExtensions
         result switch
         {
             RivetBodyResult body => body.HasBody
-                && (
-                    Is(name, HeaderNames.ContentType)
-                    || Is(name, HeaderNames.ContentLength) && !body.IsJson
-                ),
-            RivetFileResult file => Is(name, HeaderNames.ContentType)
-                || Is(name, HeaderNames.ETag) && file.EntityTag is not null
+                && Is(name, HeaderNames.ContentLength)
+                && !body.IsJson,
+            RivetFileResult file => Is(name, HeaderNames.ETag) && file.EntityTag is not null
                 || Is(name, HeaderNames.LastModified) && file.LastModified is not null
                 || Is(name, HeaderNames.ContentDisposition) && file.DownloadName is not null
                 || Is(name, HeaderNames.AcceptRanges) && file.EnableRangeProcessing

@@ -31,6 +31,28 @@ public sealed class RequiredResponseHeaderTests
     }
 
     [Theory]
+    [InlineData("Content-Type", true)]
+    [InlineData("content-type", false)]
+    public void A_response_header_named_Content_Type_is_refused(string name, bool required)
+    {
+        // OpenAPI ignores it, so generation refuses it (RIV2009) and the runtime would hold
+        // handlers to a header no spec carries.
+        var refusal = Assert.Throws<InvalidOperationException>(() =>
+            Define.Get<Response>("/items").WithResponseHeader(name, required: required)
+        );
+        var keyed = Assert.Throws<InvalidOperationException>(() =>
+            Define.Get<Response>("/items").WithResponseHeaderKey<string>("2XX", name)
+        );
+
+        Assert.Contains(
+            $"GET /items: response header '{name}' is ignored by OpenAPI",
+            refusal.Message
+        );
+        Assert.Contains(".ProducesContentType(...)", refusal.Message);
+        Assert.Contains($"'{name}'", keyed.Message);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task A_header_the_handler_sets_before_returning_counts(bool mvc)
@@ -207,7 +229,6 @@ public sealed class RequiredResponseHeaderTests
             data.Add("Content-Length", "bytes", mvc);
             data.Add("Content-Length", "stream", mvc);
             data.Add("Content-Length", "physical", mvc);
-            data.Add("Content-Type", "writer", mvc);
             data.Add("X-Content-Type-Options", "writer", mvc);
         }
 

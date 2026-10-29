@@ -23,7 +23,7 @@ public sealed class OpenApiDocumentInfoTests
         public static class TasksContract
         {
             public static readonly RouteDefinition<TaskDto> GetTask =
-                Define.Get<TaskDto>("/api/tasks/{id}");
+                Define.Get<TaskDto>("/api/tasks/{id:guid}");
         }
         """;
 

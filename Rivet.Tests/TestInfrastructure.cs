@@ -452,7 +452,7 @@ internal static class TsTypeRefs
                 // No type refs to collect
                 break;
             case TsType.InlineObject obj:
-                foreach (var field in obj.Fields)
+                foreach (var field in obj.Properties)
                 {
                     Collect(field.Type, names);
                 }

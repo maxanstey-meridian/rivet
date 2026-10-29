@@ -9,6 +9,18 @@ namespace Rivet.Tests;
 
 public sealed class RealWorldImportTests
 {
+    /// <summary>
+    /// What an imported form input's renamed part needs: [DataMember] and MVC's [FromForm],
+    /// with the assemblies FromFormAttribute's interfaces live in.
+    /// </summary>
+    private static readonly string[] _formRenameReferences =
+    [
+        typeof(System.Runtime.Serialization.DataMemberAttribute).Assembly.Location,
+        typeof(Microsoft.AspNetCore.Mvc.FromFormAttribute).Assembly.Location,
+        typeof(Microsoft.AspNetCore.Mvc.ModelBinding.IModelNameProvider).Assembly.Location,
+        typeof(Microsoft.AspNetCore.Http.Metadata.IFromFormMetadata).Assembly.Location,
+    ];
+
     // Stub types for imported code that references ASP.NET Core or newer runtime types
     private const string ImportStubs = """
         namespace Microsoft.AspNetCore.Http
@@ -71,6 +83,7 @@ public sealed class RealWorldImportTests
                 typeof(RivetTypeAttribute).Assembly.Location,
                 typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location,
             };
+            refFiles.AddRange(_formRenameReferences);
             // Add System.Linq and System.Console for generated code that uses them
             var extraRefs = new[] { "System.Linq.dll", "System.Console.dll" };
             foreach (var extra in extraRefs)
@@ -274,6 +287,7 @@ public sealed class RealWorldImportTests
             typeof(RivetTypeAttribute).Assembly.Location,
             typeof(System.ComponentModel.DataAnnotations.RequiredAttribute).Assembly.Location,
         };
+        refFiles.AddRange(_formRenameReferences);
         foreach (var extra in new[] { "System.Linq.dll", "System.Console.dll" })
         {
             var path = Path.Combine(runtimeDir, extra);

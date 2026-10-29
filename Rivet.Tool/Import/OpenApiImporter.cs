@@ -150,18 +150,19 @@ public static partial class OpenApiImporter
         // Records and enums go to Types/, brands to Domain/.
         var ns = options.Namespace;
 
-        foreach (var record in schemaResult.Records)
+        // Contract building may have augmented a component record with [RivetHeader]
+        // properties (header-aware input reuse) — write the replacement.
+        var records = schemaResult
+            .Records.Select(record => mapper.GetComponentRecordOverride(record.Name) ?? record)
+            .Concat(mapper.ExtraRecords)
+            .ToList();
+        var formInputs = FormInputRecordNames(records, contracts);
+        foreach (var record in records)
         {
-            // Contract building may have augmented a component record with
-            // [RivetHeader] properties (header-aware input reuse) — write the replacement.
-            var effective = mapper.GetComponentRecordOverride(record.Name) ?? record;
-            var content = CSharpWriter.WriteRecord(effective, ns);
-            files.Add(new GeneratedFile($"Types/{effective.Name}.cs", content));
-        }
-
-        foreach (var record in mapper.ExtraRecords)
-        {
-            var content = CSharpWriter.WriteRecord(record, ns);
+            var content = CSharpWriter.WriteRecord(
+                formInputs.Contains(record.Name) ? record with { IsFormInput = true } : record,
+                ns
+            );
             files.Add(new GeneratedFile($"Types/{record.Name}.cs", content));
         }
 
@@ -215,6 +216,54 @@ public static partial class OpenApiImporter
         );
 
         return new ImportResult(files, warnings);
+    }
+
+    /// <summary>
+    /// The records a multipart or urlencoded request body binds, and their bases: an
+    /// endpoint's input that is <c>.FormEncoded()</c>, that declares a form request content
+    /// (a multipart body with no file in it), or that carries a file (which makes it
+    /// multipart). A <c>[RivetRequestBody]</c> type isn't one: generation keeps that body
+    /// whole.
+    /// </summary>
+    private static HashSet<string> FormInputRecordNames(
+        IReadOnlyList<GeneratedRecord> records,
+        IReadOnlyList<GeneratedContract> contracts
+    )
+    {
+        var byName = records
+            .GroupBy(record => record.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var field in contracts.SelectMany(contract => contract.Fields))
+        {
+            if (
+                field.InputType?.TrimEnd('?') is not { } inputType
+                || field.RequestBodyType is not null
+                || !byName.TryGetValue(inputType, out var record)
+                || !field.IsFormEncoded
+                    // A multipart body with no file in it is a form input too: the walker and
+                    // the runtime bind it from its declared form request content.
+                    && !field.RequestContents.Any(content =>
+                        !content.IsBinary && RequestInputLowering.IsForm(content.MediaType)
+                    )
+                    && !record.Properties.Any(property =>
+                        property.CSharpType.Contains("IFormFile", StringComparison.Ordinal)
+                    )
+            )
+            {
+                continue;
+            }
+
+            for (
+                GeneratedRecord? current = record;
+                current is not null && names.Add(current.Name);
+                current = current.BaseTypeName is { } baseName
+                        ? byName.GetValueOrDefault(baseName)
+                        : null
+            ) { }
+        }
+
+        return names;
     }
 
     private static bool HasRawSchemaProvenance(
@@ -321,7 +370,10 @@ public static partial class OpenApiImporter
     }
 
     internal static RivetUserException InvalidSpec(string message) =>
-        new($"error: invalid OpenAPI document: {message}");
+        Diagnostics.Error(
+            Diagnostics.InvalidOpenApiDocument,
+            $"invalid OpenAPI document: {message}"
+        );
 
     /// <summary>
     /// Microsoft.OpenApi registers components under their raw names but looks references up
@@ -514,7 +566,7 @@ public static partial class OpenApiImporter
     /// constraint grammar (<c>{id:int}</c> names a parameter <c>id:int</c>), so this one
     /// expression both erases and reads names here, as it does in tools/roundtrip_diff.py.
     /// </summary>
-    private static List<string> PathTemplateNames(string path) =>
+    internal static List<string> PathTemplateNames(string path) =>
         PathTemplateParameter().Matches(path).Select(match => match.Groups[1].Value).ToList();
 
     [System.Text.RegularExpressions.GeneratedRegex(@"\{([^{}/]*)\}")]

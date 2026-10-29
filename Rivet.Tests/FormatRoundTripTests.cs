@@ -406,7 +406,7 @@ public sealed class FormatRoundTripTests
             public static class BlobContract
             {
                 public static readonly RouteDefinition<BlobDto> Get =
-                    Define.Get<BlobDto>("/api/blobs/{id}");
+                    Define.Get<BlobDto>("/api/blobs/{id:guid}");
             }
             """;
 
@@ -475,7 +475,7 @@ public sealed class FormatRoundTripTests
             public static class GradesContract
             {
                 public static readonly RouteDefinition<GradeDto> Get =
-                    Define.Get<GradeDto>("/api/grades/{id}");
+                    Define.Get<GradeDto>("/api/grades/{id:guid}");
             }
             """;
 
@@ -870,7 +870,7 @@ public sealed class FormatRoundTripTests
             public static class PricesContract
             {
                 public static readonly RouteDefinition<PriceDto> GetPrice =
-                    Define.Get<PriceDto>("/api/prices/{id}");
+                    Define.Get<PriceDto>("/api/prices/{id:guid}");
             }
             """;
 

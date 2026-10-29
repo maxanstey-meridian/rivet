@@ -390,7 +390,7 @@ public sealed class MetadataAttributeTests
             CompilationHelper.EmitOpenApi(source)
         );
         Assert.Equal(
-            $"error: schema metadata {keyword} must be a JSON array, got '{value}'",
+            $"error RIV1123: schema metadata {keyword} must be a JSON array, got '{value}'",
             exception.Message
         );
     }
@@ -788,7 +788,7 @@ public sealed class MetadataAttributeTests
             public static class ItemContract
             {
                 public static readonly RouteDefinition<ItemDto, ItemDto> Update =
-                    Define.Put<ItemDto, ItemDto>("/api/items/{id}")
+                    Define.Put<ItemDto, ItemDto>("/api/items/{id:guid}")
                         .Returns(404, "Not found")
                         .Returns(409);
             }
@@ -1174,5 +1174,463 @@ public sealed class MetadataAttributeTests
             .GetProperty("Input");
 
         Assert.True(input.GetProperty("properties").TryGetProperty("value", out _));
+    }
+
+    // ========== [RivetSchemaType] only re-types a primitive (G.1) ==========
+
+    private static RivetUserException WalkRefusal(string source) =>
+        Assert.Throws<RivetUserException>(() => CompilationHelper.WalkContract(source));
+
+    private static JsonElement Schema(string source, string name)
+    {
+        using var document = CompilationHelper.EmitOpenApi(source);
+        return document
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty(name)
+            .Clone();
+    }
+
+    [Theory]
+    [InlineData("ItemDto", "the schema 'ItemDto'")]
+    [InlineData("List<string>", "an array")]
+    [InlineData("Dictionary<string, int>?", "a dictionary (nullable)")]
+    [InlineData("Email", "the [RivetScalar] brand 'Email'")]
+    public void RivetSchemaType_On_A_NonPrimitive_Member_Is_Refused(
+        string memberType,
+        string mapsTo
+    )
+    {
+        var source = $$"""
+            using System.Collections.Generic;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetScalar]
+            public sealed record Email(string Value);
+
+            public sealed record ItemDto(string Id);
+
+            [RivetType]
+            public sealed record Holder([property: RivetSchemaType("string")] {{memberType}} Value);
+            """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.SchemaTypeOnNonPrimitive}:", refusal.Message);
+        Assert.Contains("'Holder.Value'", refusal.Message);
+        Assert.Contains($"maps to {mapsTo}", refusal.Message);
+        Assert.Contains("[RivetScalar]", refusal.Message);
+    }
+
+    // The same reader serves a polymorphic variant's members and a route, query or header
+    // param lowered from an input record, so neither drops the attribute either.
+    [Theory]
+    [InlineData("variant")]
+    [InlineData("lowered")]
+    public void RivetSchemaType_On_A_NonPrimitive_Is_Refused_On_Every_Path(string path)
+    {
+        var source =
+            path == "variant"
+                ? """
+                    using System.Collections.Generic;
+                    using System.Text.Json.Serialization;
+                    using Rivet;
+
+                    namespace Test;
+
+                    [RivetType]
+                    [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+                    [JsonDerivedType(typeof(Circle), "circle")]
+                    public abstract record Shape;
+
+                    public sealed record Circle([property: RivetSchemaType("string")] List<int> Radii) : Shape;
+                    """
+                : """
+                    using System.Collections.Generic;
+                    using Rivet;
+
+                    namespace Test;
+
+                    public sealed record Search([property: RivetSchemaType("string")] List<int> Ids);
+
+                    public sealed record Result(string Id);
+
+                    [RivetContract]
+                    public static class SearchContract
+                    {
+                        public static readonly RouteDefinition<Search, Result> Find =
+                            Define.Get<Search, Result>("/api/search");
+                    }
+                    """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.SchemaTypeOnNonPrimitive}:", refusal.Message);
+        Assert.Contains(path == "variant" ? "'Circle.Radii'" : "'Search.Ids'", refusal.Message);
+    }
+
+    // ========== Open and closed objects (G.3, G.9) ==========
+
+    [Theory]
+    [InlineData("Dictionary<string, JsonElement>")]
+    [InlineData("Dictionary<string, object>")]
+    [InlineData("IDictionary<string, JsonElement>")]
+    [InlineData("SortedDictionary<string, object?>")]
+    [InlineData("JsonObject")]
+    public void A_JsonExtensionData_Bag_Opens_The_Schema(string bagType)
+    {
+        var source = $$"""
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Nodes;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Holder(string Id)
+            {
+                [JsonExtensionData]
+                public {{bagType}} Extra { get; init; } = default!;
+            }
+            """;
+
+        var holder = Schema(source, "Holder");
+
+        Assert.Equal(
+            ["id"],
+            holder.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+        );
+        var open = holder.GetProperty("additionalProperties");
+        Assert.Equal(JsonValueKind.Object, open.ValueKind);
+        Assert.Empty(open.EnumerateObject());
+    }
+
+    // A base's bag opens every type that inherits it, a variant included; a private bag
+    // (System.Text.Json never sees it) opens nothing.
+    [Fact]
+    public void An_Inherited_Bag_Opens_The_Derived_Schema_And_A_Private_One_Does_Not()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record Extensible
+            {
+                [JsonExtensionData]
+                public Dictionary<string, JsonElement> Extra { get; init; } = [];
+            }
+
+            [RivetType]
+            public sealed record Child(string Id) : Extensible;
+
+            [RivetType]
+            [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+            [JsonDerivedType(typeof(Circle), "circle")]
+            public abstract record Shape;
+
+            public sealed record Circle(double Radius) : Shape
+            {
+                [JsonExtensionData]
+                public Dictionary<string, object> Extra { get; init; } = [];
+            }
+
+            [RivetType]
+            public sealed record Hidden(string Id)
+            {
+                [JsonExtensionData]
+                private Dictionary<string, object> Extra { get; init; } = [];
+            }
+            """;
+
+        using var document = CompilationHelper.EmitOpenApi(source);
+        var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+
+        Assert.Equal(
+            JsonValueKind.Object,
+            schemas.GetProperty("Child").GetProperty("additionalProperties").ValueKind
+        );
+        Assert.Equal(
+            JsonValueKind.Object,
+            schemas.GetProperty("Shape_Circle").GetProperty("additionalProperties").ValueKind
+        );
+        Assert.False(schemas.GetProperty("Hidden").TryGetProperty("additionalProperties", out _));
+    }
+
+    [Theory]
+    [InlineData("Dictionary<string, string>")]
+    [InlineData("IReadOnlyDictionary<string, JsonElement>")]
+    [InlineData("Dictionary<string, JsonNode>")]
+    public void A_Bag_System_Text_Json_Refuses_Is_Refused(string bagType)
+    {
+        var source = $$"""
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Nodes;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Holder(string Id)
+            {
+                [JsonExtensionData]
+                public {{bagType}} Extra { get; init; } = default!;
+            }
+            """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.InvalidJsonExtensionData}:", refusal.Message);
+        Assert.Contains("'Holder.Extra'", refusal.Message);
+        Assert.Contains("JsonObject", refusal.Message);
+    }
+
+    [Fact]
+    public void A_Second_Bag_Down_The_Chain_Is_Refused()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            public abstract record Extensible
+            {
+                [JsonExtensionData]
+                public Dictionary<string, JsonElement> Extra { get; init; } = [];
+            }
+
+            [RivetType]
+            public sealed record Child(string Id) : Extensible
+            {
+                [JsonExtensionData]
+                public Dictionary<string, object> More { get; init; } = [];
+            }
+            """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.InvalidJsonExtensionData}:", refusal.Message);
+        Assert.Contains("'Extensible.Extra', 'Child.More'", refusal.Message);
+    }
+
+    // Decision 10: Disallow is modelled, on the type it sits on (System.Text.Json doesn't
+    // inherit it), a polymorphic variant included.
+    [Fact]
+    public void JsonUnmappedMemberHandling_Disallow_Closes_Only_Its_Own_Schema()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+            public record Strict(string Id);
+
+            [RivetType]
+            public sealed record Lenient(string Id, string Note) : Strict(Id);
+
+            [RivetType]
+            [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Skip)]
+            public sealed record Skipping(string Id);
+
+            [RivetType]
+            [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+            [JsonDerivedType(typeof(Circle), "circle")]
+            public abstract record Shape;
+
+            [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+            public sealed record Circle(double Radius) : Shape;
+            """;
+
+        using var document = CompilationHelper.EmitOpenApi(source);
+        var schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+
+        Assert.False(
+            schemas.GetProperty("Strict").GetProperty("additionalProperties").GetBoolean()
+        );
+        Assert.False(schemas.GetProperty("Lenient").TryGetProperty("additionalProperties", out _));
+        Assert.False(schemas.GetProperty("Skipping").TryGetProperty("additionalProperties", out _));
+        var circle = schemas.GetProperty("Shape_Circle");
+        Assert.False(circle.GetProperty("additionalProperties").GetBoolean());
+        Assert.True(circle.GetProperty("properties").TryGetProperty("kind", out _));
+    }
+
+    [Fact]
+    public void Disallow_Beside_A_Bag_Is_Refused()
+    {
+        var source = """
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+            public sealed record Holder(string Id)
+            {
+                [JsonExtensionData]
+                public Dictionary<string, JsonElement> Extra { get; init; } = [];
+            }
+            """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.InvalidJsonExtensionData}:", refusal.Message);
+        Assert.Contains("'Holder.Extra'", refusal.Message);
+        Assert.Contains("Disallow", refusal.Message);
+    }
+
+    // ========== Required members that may be omitted (G.9) ==========
+
+    [Theory]
+    [InlineData("[JsonRequired, RivetOptional]", "", "[JsonRequired]", "[RivetOptional]")]
+    [InlineData("[RivetOptional]", "required ", "required", "[RivetOptional]")]
+    [InlineData(
+        "[JsonRequired, JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]",
+        "",
+        "[JsonRequired]",
+        "[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]"
+    )]
+    [InlineData(
+        "[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]",
+        "required ",
+        "required",
+        "[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]"
+    )]
+    public void A_Required_Member_That_May_Be_Omitted_Is_Refused(
+        string attributes,
+        string modifier,
+        string demanded,
+        string omittable
+    )
+    {
+        var source = $$"""
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed class Holder
+            {
+                {{attributes}}
+                public {{modifier}}string? Note { get; init; }
+            }
+            """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.RequiredMemberMayBeOmitted}:", refusal.Message);
+        Assert.Contains($"'Holder.Note' is {demanded} but also {omittable}", refusal.Message);
+        Assert.Contains($"Drop {demanded}", refusal.Message);
+        Assert.Contains($"or drop {omittable}", refusal.Message);
+    }
+
+    [Fact]
+    public void A_Required_Member_That_Is_Always_Written_Stays_Required()
+    {
+        var source = """
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed class Holder
+            {
+                [JsonRequired]
+                public string? Note { get; init; }
+
+                public required string Name { get; init; }
+            }
+            """;
+
+        var holder = Schema(source, "Holder");
+
+        Assert.Equal(
+            ["note", "name"],
+            holder.GetProperty("required").EnumerateArray().Select(name => name.GetString())
+        );
+    }
+
+    // ========== Generated schema names (G.2) ==========
+
+    [Fact]
+    public void A_Walked_Type_Shadowing_A_Generated_Schema_Is_Refused()
+    {
+        var source = """
+            using Rivet;
+
+            [assembly: RivetGeneratedSchema("Code", "code", "string", null, false, "{}")]
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record Code(string Value);
+            """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.TypeNameCollision}:", refusal.Message);
+        Assert.Contains("the generated schema 'Code' (component 'code')", refusal.Message);
+        Assert.Contains("'Test.Code'", refusal.Message);
+    }
+
+    // An isEnum entry is the walked enum's own metadata, so it must name one.
+    [Theory]
+    [InlineData("", "the compilation has no type of that name")]
+    [InlineData(
+        "[RivetType] public sealed record State(string Value);",
+        "'Test.State' isn't an enum"
+    )]
+    public void Enum_Metadata_Naming_No_Enum_Is_Refused(string declaration, string found)
+    {
+        var source = $$"""
+            using Rivet;
+
+            [assembly: RivetGeneratedSchema("State", "state", "string", null, false, "{}", true)]
+
+            namespace Test;
+
+            {{declaration}}
+            """;
+
+        var refusal = WalkRefusal(source);
+
+        Assert.StartsWith($"error {Diagnostics.MalformedGeneratedMetadata}:", refusal.Message);
+        Assert.Contains(found, refusal.Message);
+    }
+
+    [Fact]
+    public void Enum_Metadata_Joins_The_Enum_Of_Its_Name()
+    {
+        var source = """
+            using Rivet;
+
+            [assembly: RivetGeneratedSchema("State", "state", "string", null, false, "{\"description\":\"Lifecycle\"}", true)]
+
+            namespace Test;
+
+            [RivetType]
+            public enum State { Ready, Held }
+            """;
+
+        Assert.Equal("Lifecycle", Schema(source, "State").GetProperty("description").GetString());
     }
 }

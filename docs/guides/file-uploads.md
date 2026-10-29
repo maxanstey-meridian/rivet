@@ -16,7 +16,83 @@ emulating MVC's recursive form binder, and a `[FromBody]` body cannot ride a mul
 request at all.
 
 On contracts, a `TInput` that is `IFormFile` itself, or a record with `IFormFile`
-(or collection-of-`IFormFile`) properties, is detected as multipart automatically.
+(or collection-of-`IFormFile`) properties, is detected as multipart automatically. A
+record behind `.FormEncoded()` is a form too, just without the files. Either way, which
+properties count, and which become parts, is one list, read the way ASP.NET's form binders
+read it, so a file that makes the body multipart is always one of its parts:
+
+- the public instance properties, along the whole base chain, a base class from a NuGet
+  package included;
+- a derived property hides its base's of the same name, whatever its accessibility, so an
+  `internal new string File` takes the base's `IFormFile File` out of the form, as it
+  does at runtime;
+- `[JsonIgnore]` doesn't count, because the form binders never read it: an ignored
+  `IFormFile` is still a part, and so is an ignored text field;
+- route-bound and `[RivetHeader]` properties are left to the route and the headers, a
+  `[RivetReadOnly]` field is never sent, and a `[JsonExtensionData]` bag or a property
+  nothing can set (a computed `=> ...`, a private setter) sends no part at all.
+
+The body `$ref`s the input's component when the component lists exactly those parts under
+the same names, and is spelled out inline when it doesn't (a file on a package base the
+type walk stops at, an ignored member, a property bound to the route, a part whose name
+isn't its JSON name). Inline, each part still carries its property's schema and
+annotations (description, bounds, default, example) as it would in a JSON body.
+
+On a controller, a `[FromForm]` record parameter goes the same way: its members become the
+parts, so a record with an `IFormFile` in it makes the body multipart instead of a
+urlencoded body that can't carry a file. A `Name =` on the parameter is a prefix MVC then
+reads every part under (`[FromForm(Name = "p")] UploadForm form` wants `p.Title`).
+
+### Part names
+
+A form part is named by what the server's binder reads, not by the JSON surface. Neither
+of ASP.NET's form binders has ever heard of `[JsonPropertyName]`:
+
+- **MVC's model binder** reads a member under its `[FromForm(Name = ...)]` (or
+  `[BindProperty(Name = ...)]`), else its C# name. On a positional record that means the
+  constructor parameter's attribute: a `[property: FromForm(Name = ...)]` is never seen.
+- **The minimal-API form mapper** reads a member under its `[DataMember(Name = ...)]`, else
+  its C# name, and ignores every binding attribute on the member.
+- Both ignore case, so `Title` is happy to answer to `title`.
+
+A contract can be served by either host, so its part names must be ones both read. With no
+rename, that's the C# name, camelCased like everything else. A `[JsonPropertyName]` on a form
+member changes nothing on the wire, so it changes nothing in the spec either (it still names
+the property in the component, and an input whose part names differ from its component's is
+spelled out inline). To send a part under a name C# can't spell, rename it for both
+binders at once:
+
+```csharp
+[RivetType]
+public sealed record UploadForm
+{
+    [DataMember(Name = "file_name")]  // the minimal-API form mapper
+    [FromForm(Name = "file_name")]    // MVC
+    public required IFormFile FileName { get; init; }
+}
+```
+
+A rename only one binder reads would leave the other host binding nothing, and no single
+part name in the spec can be right for both, so generation stops with `RIV1100` instead of
+picking one. So does a form member with a `[FromQuery]`, `[FromRoute]`, `[FromHeader]` or
+`[FromBody]` of its own: MVC would read it from there, the form mapper from the form. A
+`[RivetEndpoint]` action only ever runs on MVC, so there a `[FromForm(Name = ...)]` alone is
+enough, and a `[DataMember]` is ignored, as MVC ignores it.
+
+`--from-openapi` writes exactly that pair for a form part whose name isn't its property's
+(`file_name`, `x-meta`), beside the `[JsonPropertyName]`, and writes form inputs in the
+`{ get; init; }` form: the minimal-API form mapper refuses a request that leaves out any
+constructor parameter of a positional record, nullable or not.
+
+That refusal shapes the spec too. A contract's positional form record lists every
+constructor-bound part as `required`, `[RivetOptional]` or nullable as it may be, because
+that's the only request both hosts accept: MVC would bind a missing one as `null`, the form
+mapper answers `400`. The record's component still calls the member optional (a JSON body
+really can leave it out), so such a body is spelled out inline rather than `$ref`'d. A
+`[RivetEndpoint]` action only runs on MVC and keeps the member's own optionality. If a part
+should genuinely be optional on the wire, make it an `init` property instead of a
+constructor parameter.
+
 `.AcceptsFile()` marks a definition explicitly:
 
 ```csharp
@@ -83,7 +159,7 @@ await client.PUT("/api/things/{id}/chunks/{chunkIndex}", {
 
 ```csharp
 public static readonly FileRouteDefinition Avatar =
-    Define.File("/api/members/{id}/avatar")
+    Define.File("/api/members/{id:guid}/avatar")
         .ProducesFile("image/jpeg")
         .QueryAuth();             // auth token as ?token=... for media players
 ```
@@ -159,7 +235,7 @@ out yet, a body cut short if something has.
 When an endpoint can return different file formats, declare each representation:
 
 ```csharp
-public static readonly FileRouteDefinition Image = Define.File("/images/{id}")
+public static readonly FileRouteDefinition Image = Define.File("/images/{id:guid}")
     .ProducesFile("image/png")
     .ResponseBinaryContent(200, "image/jpeg");
 ```

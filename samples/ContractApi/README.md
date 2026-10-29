@@ -6,23 +6,36 @@ Demonstrates Rivet's contract-driven endpoint definitions using `[RivetContract]
 contract-owned responses with `.Success()`, `.Error()`, or `.File()`.
 
 Features shown: `[RivetContract]`, `RouteDefinition<T>.Bind()`, `.Success()`, `.Description()`,
-`.Returns<T>(status, desc)`, `.Status()`, `.Anonymous()`, `.Secure()`, branded value objects,
-and the first-party `RivetResult.ToActionResult()` / `.ToResult()` framework bridges.
+`.Returns<T>(status, desc)`, `.Status()`, `.Anonymous()`, `.Secure()`, `.QueryAuth()`, route
+tokens typed by their constraint (`{id:guid}`), branded value objects, and the first-party
+`RivetResult.ToActionResult()` / `.ToResult()` framework bridges.
+
+The spec and the handlers tell the same story about security. `Contracts/Security.cs` declares
+it in source, the way an app should: the `bearer` scheme, and bearer as the document's default
+(`[assembly: RivetSecurityScheme]`, `RivetGlobalSecurity`, and `RivetGlobalSecurityScheme`). So
+every endpoint needs a token except `Health`, which says `.Anonymous()`, and generation and
+`--check` read the same default with no `--security` on either command line. The controller actions carry `[Authorize]`, and the health check is a minimal
+API nobody guards. `Auth/DemoBearerHandler.cs` is the scheme behind it: it lets any non-empty
+token through, from the `Authorization: Bearer` header or, for the `.QueryAuth()` avatar
+endpoint, the `?token=` query parameter a media player can manage. A real app registers
+JwtBearer under the same name and changes nothing else. `--check` compares the two sides, so
+an `[Authorize]` that goes missing is `RIV4008`, not a surprise in production.
 
 ## Run
 
 ```bash
 # Preview the OpenAPI 3.1 spec to stdout
-dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --security bearer
+dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj
 
 # Write openapi.json to disk
-dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract --security bearer
+dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract
 
-# Coverage check: every contract field has an implementation on the declared route/method
+# Coverage check: every contract field has an implementation on the declared route and method,
+# binds what the contract declares, and is authorized exactly where the spec asks for a token
 dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --check
 
 # Drift gate: exit 1 if the written spec no longer matches the compiled C#
-dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract --security bearer --verify
+dotnet run --project Rivet.Tool -- --project samples/ContractApi/ContractApi.csproj --output /tmp/rivet-contract --verify
 ```
 
 All commands should be run from the repository root.

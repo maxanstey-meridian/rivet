@@ -42,8 +42,9 @@ public static class EndpointMerger
                     continue;
                 }
 
-                throw new RivetUserException(
-                    $"error {Diagnostics.ConflictingOperations}: transport identity {key.Method} {key.Route} is declared by two incompatible endpoints: "
+                throw Diagnostics.Error(
+                    Diagnostics.ConflictingOperations,
+                    $"transport identity {key.Method} {key.Route} is declared by two incompatible endpoints: "
                         + $"'{existing.ControllerName}.{existing.Name}' and '{endpoint.ControllerName}.{endpoint.Name}'. "
                         + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."
                 );
@@ -96,6 +97,7 @@ public static class EndpointMerger
         }
 
         return RequestSurfaceEquivalent(left, right)
+            && SecurityEquivalent(left.Security, right.Security)
             && ParamsEquivalent(left.Params, right.Params)
             && DeclaredMediaTypeEquivalent(left.FileContentType, right.FileContentType)
             && ContentTypeOverrideEquivalent(
@@ -107,6 +109,36 @@ public static class EndpointMerger
                 right.ResponseContentTypeOverride
             );
     }
+
+    /// <summary>
+    /// Security equivalence: the same alternatives, each needing the same schemes with the
+    /// same scopes, in any order (OpenAPI ORs alternatives and ANDs schemes). Inheriting the
+    /// document's security (null) is a declaration of its own: a controller action and a
+    /// contract that disagree on it would publish whichever came first.
+    /// </summary>
+    private static bool SecurityEquivalent(
+        SecurityRequirements? left,
+        SecurityRequirements? right
+    ) =>
+        left is null || right is null
+            ? left is null && right is null
+            : CanonicalSecurity(left).SetEquals(CanonicalSecurity(right));
+
+    private static HashSet<string> CanonicalSecurity(SecurityRequirements security) =>
+        security
+            .Alternatives.Select(alternative =>
+                string.Join(
+                    "&",
+                    alternative
+                        .Schemes.Select(scheme =>
+                            scheme.Name
+                            + ":"
+                            + string.Join(",", scheme.Scopes.Order(StringComparer.Ordinal))
+                        )
+                        .Order(StringComparer.Ordinal)
+                )
+            )
+            .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Parameter-surface equivalence: the same set of (wire name, source, mapped type)

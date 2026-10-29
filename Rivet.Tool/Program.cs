@@ -2,7 +2,6 @@ using Rivet.Tool;
 using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Import;
-using Rivet.Tool.Model;
 
 try
 {
@@ -19,6 +18,12 @@ static async Task<int> Run(string[] args)
     if (CliParser.IsHelpRequest(args))
     {
         CliParser.PrintUsage(Console.Out);
+        return 0;
+    }
+
+    if (CliParser.IsToolVersionRequest(args))
+    {
+        Console.Out.WriteLine(CliParser.ToolVersion);
         return 0;
     }
 
@@ -95,23 +100,21 @@ static async Task<int> Run(string[] args)
                     Diagnostics.CoverageUnbindableEnumParameter,
                 CoverageWarningKind.InputBindingMismatch =>
                     Diagnostics.CoverageInputBindingMismatch,
+                CoverageWarningKind.SecurityMismatch => Diagnostics.CoverageSecurityMismatch,
+                CoverageWarningKind.AuthorizationUnreadable =>
+                    Diagnostics.CoverageAuthorizationUnreadable,
                 _ => throw new InvalidOperationException(
                     $"Unmapped coverage warning kind: {w.Kind}"
                 ),
             };
-            if (
-                w.Kind
-                is CoverageWarningKind.UnbindableEnumParameter
-                    or CoverageWarningKind.InputBindingMismatch
-            )
-            {
-                Console.Error.WriteLine($"error {id}: {w.Message}");
-                continue;
-            }
-
-            Diagnostics.Warn(
-                id,
-                $"[{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}"
+            // Every --check result is printed, errors included, so the word comes from the
+            // registry's severity for the ID rather than from the kind.
+            Console.Error.WriteLine(
+                Diagnostics.Format(
+                    id,
+                    w.Message
+                        ?? $"[{w.Kind}] {w.ContractName}.{w.FieldName}: expected {w.Expected}, got {w.Actual}"
+                )
             );
         }
 
@@ -176,27 +179,25 @@ static async Task<int> RunFromContract(RivetOptions options)
     }
 
     var json = await File.ReadAllTextAsync(contractPath);
-    IReadOnlyList<TsTypeDefinition> types;
-    Dictionary<string, TsType> enums;
-    IReadOnlyList<TsEndpointDefinition> endpoints;
-    Dictionary<string, TsType.Brand> brands;
+    JsonContractReader.Contract contract;
     try
     {
-        (types, enums, endpoints, brands) = JsonContractReader.Read(json);
+        contract = JsonContractReader.Read(json);
     }
     catch (System.Text.Json.JsonException exception)
     {
-        throw new RivetUserException(
-            $"error: invalid contract JSON in {contractPath}: {exception.Message}"
+        throw Diagnostics.Error(
+            Diagnostics.InvalidContractJson,
+            $"invalid contract JSON in {contractPath}: {exception.Message}"
         );
     }
 
     var emitInput = new EmitPipeline.EmitInput(
-        enums,
-        endpoints,
-        types.ToDictionary(t => t.Name),
-        brands,
-        SecurityParser.ParseMany(options.SecuritySchemes ?? [])
+        contract.Enums,
+        contract.Endpoints,
+        contract.Types.ToDictionary(t => t.Name),
+        contract.Brands,
+        contract.WithSecuritySchemes(SecurityParser.ParseMany(options.SecuritySchemes ?? []))
     );
 
     return await EmitPipeline.RunAsync(emitInput, options);

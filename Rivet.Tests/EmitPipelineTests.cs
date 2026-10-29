@@ -35,8 +35,8 @@ public sealed class EmitPipelineTests : IDisposable
     private static List<TsEndpointDefinition> DuplicateInlineEndpoints()
     {
         var inlineType = new TsType.InlineObject([
-            ("name", new TsType.Primitive("string")),
-            ("age", new TsType.Primitive("number")),
+            new("name", new TsType.Primitive("string")),
+            new("age", new TsType.Primitive("number")),
         ]);
 
         return
@@ -124,8 +124,8 @@ public sealed class EmitPipelineTests : IDisposable
         // A definition named like the would-be extracted type already exists;
         // extraction must pick a collision-avoidance name, not overwrite it.
         var inlineType = new TsType.InlineObject([
-            ("x", new TsType.Primitive("number")),
-            ("y", new TsType.Primitive("number")),
+            new("x", new TsType.Primitive("number")),
+            new("y", new TsType.Primitive("number")),
         ]);
 
         var existingDef = new TsTypeDefinition(

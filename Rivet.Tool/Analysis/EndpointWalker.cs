@@ -86,15 +86,17 @@ public static class EndpointWalker
         TypeWalker typeWalker
     )
     {
-        var (httpMethod, route) = ResolveActionRoute(wkt, method);
+        var (httpMethod, routeTemplate) = ResolveActionTemplate(wkt, method);
+        var route = routeTemplate is null ? null : RouteParser.StripRouteConstraints(routeTemplate);
         var name = Naming.ToCamelCase(method.Name);
         var label = isContract
             ? $"contract endpoint '{MethodOwner(method)}.{method.Name}'"
             : $"endpoint '{MethodOwner(method)}.{method.Name}'";
         if (httpMethod is null)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnresolvedBindingSource}: {label} "
+            throw Diagnostics.Error(
+                Diagnostics.UnresolvedBindingSource,
+                $"{label} "
                     + (
                         isContract
                             ? "is an abstract method on a [RivetContract] class"
@@ -113,15 +115,21 @@ public static class EndpointWalker
 
         if (route is null)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnresolvedBindingSource}: {label} has no route template on its "
+            throw Diagnostics.Error(
+                Diagnostics.UnresolvedBindingSource,
+                $"{label} has no route template on its "
                     + $"{httpMethod} attribute or a [Route] on "
                     + "its class, so the operation has no path and would drop from the spec. Give the verb "
                     + "attribute a template, or put [Route] on the class."
             );
         }
 
-        var parameters = ExtractParams(wkt, method, typeWalker, route);
+        var (parameters, formInputTypeName) = ExtractParams(
+            wkt,
+            method,
+            typeWalker,
+            routeTemplate!
+        );
         if (!isContract)
         {
             RejectUnbindableEnumParameters(wkt, method, httpMethod);
@@ -138,13 +146,14 @@ public static class EndpointWalker
             var unwrapped = UnwrapTask(wkt, method.ReturnType, out _);
             if (unwrapped is null || IsStatusSelectingResultContainer(wkt, unwrapped))
             {
-                throw new RivetUserException(
+                throw Diagnostics.Error(
+                    Diagnostics.UnmappedTypedResult,
                     isContract
-                        ? $"error {Diagnostics.UnmappedTypedResult}: contract endpoint "
+                        ? "contract endpoint "
                             + $"'{name}' declares no success response. "
                             + "Rivet reads explicit contract declarations — add .Status(...).Returns(...) "
                             + "(or a concrete payload output type) to declare the success response."
-                        : $"error {Diagnostics.UnmappedTypedResult}: endpoint "
+                        : "endpoint "
                             + $"'{MethodOwner(method)}.{method.Name}' declares no response. "
                             + "Rivet reads explicit response declarations, not MVC runtime defaults — "
                             + "add [ProducesResponseType(typeof(T), 200)] (or a concrete payload return / "
@@ -169,6 +178,7 @@ public static class EndpointWalker
             method,
             successResponse?.DataType
         );
+        var security = SecurityDeclaration.FromAttributes(wkt, method, label);
         if (isContract)
         {
             return new TsEndpointDefinition(
@@ -179,6 +189,8 @@ public static class EndpointWalker
                 successResponse?.DataType,
                 controllerName,
                 responses,
+                Security: security,
+                InputTypeName: formInputTypeName,
                 ResponseContentTypeOverride: responseContentTypeOverride
             );
         }
@@ -208,8 +220,9 @@ public static class EndpointWalker
             .ToArray();
         if (requestMediaTypes.Length > 1)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnresolvedBindingSource}: endpoint '{MethodOwner(method)}.{method.Name}' declares multiple request media types. Declare one supported [Consumes] media type."
+            throw Diagnostics.Error(
+                Diagnostics.UnresolvedBindingSource,
+                $"endpoint '{MethodOwner(method)}.{method.Name}' declares multiple request media types. Declare one supported [Consumes] media type."
             );
         }
 
@@ -221,6 +234,8 @@ public static class EndpointWalker
             successResponse?.DataType,
             controllerName,
             responses,
+            Security: security,
+            InputTypeName: formInputTypeName,
             IsFormEncoded: isFormEncoded,
             RequestExamples: requestExamples,
             RequestContentTypeOverride: requestMediaTypes.SingleOrDefault(),
@@ -239,6 +254,18 @@ public static class EndpointWalker
         IMethodSymbol method
     )
     {
+        var (httpMethod, template) = ResolveActionTemplate(wkt, method);
+        return (httpMethod, template is null ? null : RouteParser.StripRouteConstraints(template));
+    }
+
+    /// <summary>
+    /// <see cref="ResolveActionRoute"/> with the route's constraints kept, for reading them.
+    /// </summary>
+    private static (string? HttpMethod, string? Template) ResolveActionTemplate(
+        WellKnownTypes wkt,
+        IMethodSymbol method
+    )
+    {
         var (httpMethod, methodRoute) = ExtractHttpMethodAndRoute(wkt, method);
         if (httpMethod is null)
         {
@@ -246,9 +273,7 @@ public static class EndpointWalker
         }
 
         var route = CombineRoutes(ExtractControllerRoute(wkt, method.ContainingType), methodRoute);
-        return route is null
-            ? (httpMethod, null)
-            : (httpMethod, RouteParser.StripRouteConstraints(SubstituteRouteTokens(route, method)));
+        return (httpMethod, route is null ? null : SubstituteRouteTokens(route, method));
     }
 
     /// <summary>
@@ -413,16 +438,16 @@ public static class EndpointWalker
         bool isFormEncoded
     )
     {
-        if (
-            parameters.Any(parameter =>
-                parameter.Source is ParamSource.File or ParamSource.FormField
-            )
-        )
+        // The emitter's rule: files make a form multipart, and form fields alone are urlencoded.
+        if (parameters.Any(parameter => parameter.Source == ParamSource.File))
         {
             return "multipart/form-data";
         }
 
-        return isFormEncoded ? "application/x-www-form-urlencoded" : "application/json";
+        return
+            isFormEncoded || parameters.Any(parameter => parameter.Source == ParamSource.FormField)
+            ? "application/x-www-form-urlencoded"
+            : "application/json";
     }
 
     private static bool HasFromFormBody(IMethodSymbol method, WellKnownTypes wkt)
@@ -525,8 +550,9 @@ public static class EndpointWalker
             );
             if (responseIndex < 0)
             {
-                throw new RivetUserException(
-                    $"error {undeclaredStatusDiagnostic}: {endpointLabel} has a response example for status "
+                throw Diagnostics.Error(
+                    undeclaredStatusDiagnostic,
+                    $"{endpointLabel} has a response example for status "
                         + $"{group.Key}, which it does not declare, so the spec has nowhere to put it. "
                         + $"To keep the example, {declareStatusHint}; otherwise fix or remove the example's status code."
                 );
@@ -657,24 +683,38 @@ public static class EndpointWalker
         return combined;
     }
 
-    internal static IReadOnlyList<TsEndpointParam> ExtractParams(
+    /// <summary>
+    /// The action's params, and the definition a <c>[FromForm]</c> record was lowered from
+    /// (its parts become params), which the emitter describes the form body from.
+    /// </summary>
+    internal static (
+        IReadOnlyList<TsEndpointParam> Parameters,
+        string? FormInputTypeName
+    ) ExtractParams(
         WellKnownTypes wkt,
         IMethodSymbol method,
         TypeWalker typeWalker,
-        string? routeTemplate
+        string routeTemplate
     )
     {
         // Extract route param names from the template for implicit classification
-        var routeParamNames = routeTemplate is not null
-            ? RouteParser.ParseRouteParamNames(routeTemplate)
-            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var routeParamNames = RouteParser.ParseRouteParamNames(routeTemplate);
+        var routeTokens = new Dictionary<string, RouteToken>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in RouteParser.ParseRouteTokens(routeTemplate))
+        {
+            routeTokens.TryAdd(token.Name, token);
+        }
 
+        var where =
+            $"{RouteParser.StripRouteConstraints(routeTemplate)} (endpoint '{MethodOwner(method)}.{method.Name}')";
         var parameters = new List<TsEndpointParam>();
         // MVC rejects multiple body-bound parameters on one action; extraction must
         // not confidently emit a body surface MVC cannot execute. Any Body-classified
         // source occupies the single body slot.
         var bodySeen = false;
         var formSeen = false;
+        string? bodyParameterName = null;
+        string? formInputTypeName = null;
 
         foreach (var param in method.Parameters)
         {
@@ -692,8 +732,9 @@ public static class EndpointWalker
                     : $"[FromRoute(Name = \"{explicitRouteName}\")]";
                 if (!routeParamNames.Contains(effectiveRouteName))
                 {
-                    throw new RivetUserException(
-                        $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' on endpoint "
+                    throw Diagnostics.Error(
+                        Diagnostics.UnresolvedBindingSource,
+                        $"parameter '{param.Name}' on endpoint "
                             + $"'{MethodOwner(method)}.{method.Name}' is {declaration} but route '{routeTemplate}' "
                             + $"contains no '{{{effectiveRouteName}}}' placeholder — the route binds by its "
                             + "template. Align the binding name with a route placeholder (e.g. {{id}})."
@@ -718,26 +759,88 @@ public static class EndpointWalker
             // itself would reject at startup.
             if (bodySeen && source == ParamSource.Body)
             {
-                throw new RivetUserException(
-                    $"error {Diagnostics.UnresolvedBindingSource}: endpoint "
+                throw Diagnostics.Error(
+                    Diagnostics.UnresolvedBindingSource,
+                    "endpoint "
                         + $"'{MethodOwner(method)}.{method.Name}' declares a second request body — "
                         + $"parameter '{param.Name}' of type '{param.Type.ToDisplayString()}' cannot share the "
                         + "single body slot with an earlier body-bound parameter. MVC itself rejects this at "
                         + "startup; declare one [FromBody] (or an explicit form surface with IFormFile fields)."
                 );
             }
-            parameters.Add(
-                new TsEndpointParam(
-                    wireName,
-                    tsType,
-                    source,
-                    IsOptional: param.HasExplicitDefaultValue,
-                    DefaultValue: GetDefaultValueLiteral(param)
-                )
+            if (
+                source == ParamSource.Body
+                && param.HasAttribute(wkt.FromForm)
+                && typeWalker.IsParamLowerable(param.Type)
+            )
+            {
+                // A [FromForm] record is bound member by member from the form, under the names
+                // MVC's model binder reads, so its parts are params like a contract's form
+                // input. Its own Name = is a prefix every part is then read under.
+                formInputTypeName = (tsType is TsType.Nullable nullable ? nullable.Inner : tsType)
+                    is TsType.TypeRef typeRef
+                    ? typeRef.Name
+                    : null;
+                parameters.AddRange(
+                    ContractWalker.FormPartParams(
+                        wkt,
+                        typeWalker,
+                        FormBinding.Parts(
+                            wkt.Compilation,
+                            wkt,
+                            typeWalker,
+                            param.Type,
+                            new HashSet<string>(),
+                            FormBinding.FormHosts.Mvc,
+                            where
+                        ),
+                        formInputTypeName,
+                        FormBinding.MvcModelName(param.GetAttributes(), param.Type)
+                    )
+                );
+                bodySeen = true;
+                bodyParameterName = param.Name;
+                continue;
+            }
+
+            var endpointParam = new TsEndpointParam(
+                wireName,
+                tsType,
+                source,
+                IsOptional: param.HasExplicitDefaultValue,
+                DefaultValue: GetDefaultValueLiteral(param)
             );
+            if (
+                source
+                is ParamSource.Route
+                    or ParamSource.Query
+                    or ParamSource.Header
+                    or ParamSource.FormField
+            )
+            {
+                endpointParam = WithAnnotations(
+                    endpointParam,
+                    typeWalker.ReadMemberAnnotations(param, tsType),
+                    param
+                );
+            }
+            if (
+                source == ParamSource.Route
+                && routeTokens.TryGetValue(wireName, out var routeToken)
+            )
+            {
+                endpointParam = RouteConstraints.Apply(
+                    endpointParam,
+                    routeToken,
+                    where,
+                    $"its action parameter '{param.Name}'"
+                );
+            }
+            parameters.Add(endpointParam);
             if (source == ParamSource.Body)
             {
                 bodySeen = true;
+                bodyParameterName = param.Name;
             }
 
             if (source is ParamSource.File or ParamSource.FormField)
@@ -746,17 +849,79 @@ public static class EndpointWalker
             }
         }
 
+        // A token no action parameter binds still sits in the path, and OpenAPI needs every
+        // templated parameter declared. A type constraint declares it; with none its type
+        // is unknown and RIV1019 stops generation.
+        var unbound = routeTokens
+            .Values.Where(token =>
+                !parameters.Any(parameter =>
+                    parameter.Source == ParamSource.Route
+                    && string.Equals(parameter.Name, token.Name, StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            .Select(token =>
+            {
+                if (RouteConstraints.DeclaredType(token, where) is { } constrained)
+                {
+                    return RouteConstraints.Apply(
+                        new TsEndpointParam(token.Name, constrained, ParamSource.Route),
+                        token,
+                        where,
+                        "its type constraint"
+                    );
+                }
+
+                throw Diagnostics.Error(
+                    Diagnostics.RouteTokenUndeclared,
+                    $"route token '{{{token.Name}}}' on {where} has no action parameter and no type "
+                        + "constraint, so its type is unknown and the spec can't say what the handler "
+                        + $"binds. Declare it: bind it with an action parameter named '{token.Name}', or "
+                        + $"add a type constraint ('{{{token.Name}:guid}}', '{{{token.Name}:int}}', ...)."
+                );
+            })
+            .ToList();
+        parameters.InsertRange(0, unbound);
+
         if (formSeen && bodySeen)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.MixedFormFileParameters}: endpoint '{MethodOwner(method)}.{method.Name}' "
-                    + $"mixes body parameter '{parameters.First(p => p.Source == ParamSource.Body).Name}' with separate form fields or files. Declare one form DTO, "
+            throw Diagnostics.Error(
+                Diagnostics.MixedFormFileParameters,
+                $"endpoint '{MethodOwner(method)}.{method.Name}' "
+                    + $"mixes body parameter '{bodyParameterName}' with separate form fields or files. Declare one form DTO, "
                     + "or separate scalar [FromForm] fields and files; put a JSON body on a separate endpoint."
             );
         }
 
-        return parameters;
+        return (parameters, formInputTypeName);
     }
+
+    /// <summary>
+    /// An action's route, query, header or form-field parameter with its annotations, read as a
+    /// property's are (ContractWalker's lowered params carry the same): description,
+    /// constraints, deprecated, example and format. A <c>[RivetDefault]</c> wins over the C#
+    /// default value, which is source text rather than a JSON literal.
+    /// </summary>
+    private static TsEndpointParam WithAnnotations(
+        TsEndpointParam endpointParam,
+        TypeWalker.MemberAnnotations annotations,
+        IParameterSymbol param
+    ) =>
+        endpointParam with
+        {
+            Type = annotations.ApplyLeaf(endpointParam.Type),
+            Description = annotations.Description,
+            IsDeprecated = annotations.IsDeprecated,
+            DefaultValue = annotations.DefaultValue ?? endpointParam.DefaultValue,
+            Constraints = annotations.Constraints,
+            SchemaExamples = ContractWalker.SchemaExamples(
+                annotations.Example,
+                $"[RivetExample] on parameter '{param.Name}'"
+            ),
+            Format = annotations is { IsFormatSpecified: true, Format: not "" }
+                ? annotations.Format
+                : null,
+            IsFormatSpecified = annotations.IsFormatSpecified,
+        };
 
     /// <summary>
     /// RIV1110: an annotated endpoint is the spec's source, so every enum it binds from
@@ -791,8 +956,9 @@ public static class EndpointWalker
             .FirstOrDefault();
         if (unbindable is not null)
         {
-            throw new RivetUserException(
-                $"error {Diagnostics.UnbindableEnumParameter}: endpoint "
+            throw Diagnostics.Error(
+                Diagnostics.UnbindableEnumParameter,
+                "endpoint "
                     + $"'{MethodOwner(method)}.{method.Name}': "
                     + EnumParameterBinding.Explain(host, path, unbindable)
             );
@@ -952,8 +1118,9 @@ public static class EndpointWalker
         {
             if (explicitSources.Any(source => source != BindingSource.Services))
             {
-                throw new RivetUserException(
-                    $"error {Diagnostics.UnresolvedBindingSource}: CancellationToken parameter '{param.Name}' "
+                throw Diagnostics.Error(
+                    Diagnostics.UnresolvedBindingSource,
+                    $"CancellationToken parameter '{param.Name}' "
                         + "is host plumbing and cannot declare a transport binding."
                 );
             }
@@ -1029,8 +1196,9 @@ public static class EndpointWalker
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static ParamSource ThrowUnresolvedBinding(IMethodSymbol method, IParameterSymbol param)
     {
-        throw new RivetUserException(
-            $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
+        throw Diagnostics.Error(
+            Diagnostics.UnresolvedBindingSource,
+            $"parameter '{param.Name}' of type "
                 + $"'{param.Type.ToDisplayString()}' on endpoint '{MethodOwner(method)}.{method.Name}' has no "
                 + "binding source. Rivet reads explicit transport declarations, not MVC inference — add "
                 + "[FromQuery]/[FromBody]/[FromRoute]/[FromHeader]/[FromForm], [FromServices] for DI plumbing, "
@@ -1050,8 +1218,9 @@ public static class EndpointWalker
         List<BindingSource> sources
     )
     {
-        throw new RivetUserException(
-            $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
+        throw Diagnostics.Error(
+            Diagnostics.UnresolvedBindingSource,
+            $"parameter '{param.Name}' of type "
                 + $"'{param.Type.ToDisplayString()}' carries contradictory binding attributes "
                 + $"({string.Join(", ", sources.Select(source => $"[From{source}]"))}) — one parameter "
                 + "declares exactly one binding source. Rivet does not pick a winner; keep a single "
@@ -1068,8 +1237,9 @@ public static class EndpointWalker
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void ThrowIncompatibleFileSource(IParameterSymbol param, ParamSource declared)
     {
-        throw new RivetUserException(
-            $"error {Diagnostics.UnresolvedBindingSource}: parameter '{param.Name}' of type "
+        throw Diagnostics.Error(
+            Diagnostics.UnresolvedBindingSource,
+            $"parameter '{param.Name}' of type "
                 + $"'{param.Type.ToDisplayString()}' is IFormFile but is explicitly declared "
                 + $"{ToWireLabel(declared)} — an incompatible source for file transport. Remove the "
                 + "explicit attribute (IFormFile alone is the retained file convention) or use [FromForm] "
@@ -1189,8 +1359,9 @@ public static class EndpointWalker
                     {
                         // An unmapped Results<> branch must never vanish from a
                         // successful contract: refuse instead of warn-and-omit.
-                        throw new RivetUserException(
-                            $"error {Diagnostics.UnmappedTypedResult}: typed result "
+                        throw Diagnostics.Error(
+                            Diagnostics.UnmappedTypedResult,
+                            "typed result "
                                 + $"'{resultArg.ToDisplayString()}' in Results<...> on endpoint "
                                 + $"'{(warnContext ?? "<unknown>")}' does not "
                                 + "statically encode its HTTP status. Rivet maps only genuinely fixed typed "
@@ -1294,10 +1465,15 @@ public static class EndpointWalker
         {
             // Covers the classic and the generic [ProducesResponseType<T>] forms
             var parsed = ReadProducesResponseType(wkt, attr);
-            if (parsed is not { StatusCode: int statusCode })
+            if (parsed is not { StatusCode: int declaredStatusCode })
             {
                 continue;
             }
+
+            var statusCode = ResponseStatusValidation.AuthoredStatusCode(
+                declaredStatusCode,
+                $"endpoint '{MethodOwner(method)}.{method.Name}' ([ProducesResponseType])"
+            );
 
             // typeof(void) as a declared response type means "no body": System.Text.Json
             // never serializes a void payload, so mapping it to a schema would advertise
@@ -1333,8 +1509,9 @@ public static class EndpointWalker
                         );
                     if (!declarationsAgree)
                     {
-                        throw new RivetUserException(
-                            $"error {Diagnostics.ConflictingResponseDeclaration}: endpoint "
+                        throw Diagnostics.Error(
+                            Diagnostics.ConflictingResponseDeclaration,
+                            "endpoint "
                                 + $"'{method.ContainingType.Name}.{method.Name}' declares response status "
                                 + $"{mapping.StatusCode} twice with different bodies — the earlier declaration "
                                 + $"declares '{declaredBody?.ToDisplayString() ?? "no body"}' while the "

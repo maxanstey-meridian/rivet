@@ -147,7 +147,7 @@ public sealed class AcceptsBinaryTests
     }
 
     [Fact]
-    public void Walker_AcceptsBinary_Unmatched_Route_Placeholder_Defaults_To_String_Route_Param()
+    public void Walker_AcceptsBinary_Unmatched_Route_Placeholder_Is_Typed_By_Its_Constraint()
     {
         var source = """
             using Rivet;
@@ -161,7 +161,7 @@ public sealed class AcceptsBinaryTests
             public static class ThingsContract
             {
                 public static readonly InputRouteDefinition<ChunkInput> UploadChunk =
-                    Define.Put("/api/things/{id}/chunks/{chunkIndex}")
+                    Define.Put("/api/things/{id}/chunks/{chunkIndex:int}")
                         .Accepts<ChunkInput>()
                         .AcceptsBinary();
             }
@@ -172,7 +172,7 @@ public sealed class AcceptsBinaryTests
         var ep = Assert.Single(endpoints);
         var chunkIndexParam = ep.Params.First(p => p.Name == "chunkIndex");
         Assert.Equal(ParamSource.Route, chunkIndexParam.Source);
-        Assert.True(chunkIndexParam.Type is TsType.Primitive { Name: "string" });
+        Assert.Equal(new TsType.Primitive("number", "int32"), chunkIndexParam.Type);
     }
 
     [Fact]
@@ -194,6 +194,7 @@ public sealed class AcceptsBinaryTests
             """;
 
         var ex = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkContract(source));
+        Assert.StartsWith("error RIV1104: ", ex.Message);
         Assert.Contains(".AcceptsBinary()", ex.Message);
         Assert.Contains(".AcceptsFile()", ex.Message);
     }

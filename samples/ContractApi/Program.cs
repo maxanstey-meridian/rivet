@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ContractApi.Auth;
 using ContractApi.Endpoints;
 using ContractApi.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -27,7 +28,21 @@ builder
         }
     );
 
+// The contract's .Secure("bearer") endpoints are [Authorize]d, and this is the scheme that
+// lets a caller through. DemoBearerHandler accepts any token; a real app registers
+// JwtBearer (or its own handler) under the same name.
+builder
+    .Services.AddAuthentication(DemoBearerHandler.SchemeName)
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, DemoBearerHandler>(
+        DemoBearerHandler.SchemeName,
+        null
+    );
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 app.MapMembersEndpoints();

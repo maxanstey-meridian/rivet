@@ -35,8 +35,43 @@ public static class JsonContractReader
     internal sealed record RivetContract(
         [property: JsonRequired] IReadOnlyList<TsTypeDefinition> Types,
         [property: JsonRequired] IReadOnlyList<ContractEnum> Enums,
-        [property: JsonRequired] IReadOnlyList<TsEndpointDefinition> Endpoints
+        [property: JsonRequired] IReadOnlyList<TsEndpointDefinition> Endpoints,
+        SecurityRequirements? Security = null
     );
+
+    /// <summary>
+    /// What a contract says. <see cref="Security"/> is the document's own requirement (the C#
+    /// path's <c>[assembly: RivetGlobalSecurity*]</c>), null when the contract leaves it to
+    /// <c>--security</c>; <see cref="WithSecuritySchemes"/> joins the two.
+    /// </summary>
+    public sealed record Contract(
+        IReadOnlyList<TsTypeDefinition> Types,
+        Dictionary<string, TsType> Enums,
+        IReadOnlyList<TsEndpointDefinition> Endpoints,
+        Dictionary<string, TsType.Brand> Brands,
+        SecurityRequirements? Security
+    )
+    {
+        public void Deconstruct(
+            out IReadOnlyList<TsTypeDefinition> types,
+            out Dictionary<string, TsType> enums,
+            out IReadOnlyList<TsEndpointDefinition> endpoints,
+            out Dictionary<string, TsType.Brand> brands
+        ) => (types, enums, endpoints, brands) = (Types, Enums, Endpoints, Brands);
+
+        /// <summary>
+        /// The document security to emit with: the scheme definitions <c>--security</c> gave
+        /// (contract JSON defines none), and the contract's own document requirement over the
+        /// first <c>--security</c> scheme's default, since the contract says it outright.
+        /// </summary>
+        public ContractSecurityMetadata? WithSecuritySchemes(ContractSecurityMetadata? cli) =>
+            Security is null
+                ? cli
+                : new ContractSecurityMetadata(
+                    cli?.Schemes ?? new Dictionary<string, SecuritySchemeDefinition>(),
+                    Security
+                );
+    }
 
     /// <summary>An enum declaration: string members in <c>values</c> or integer members in <c>intValues</c>.</summary>
     internal sealed record ContractEnum(
@@ -111,12 +146,7 @@ public static class JsonContractReader
         };
     }
 
-    public static (
-        IReadOnlyList<TsTypeDefinition> Types,
-        Dictionary<string, TsType> Enums,
-        IReadOnlyList<TsEndpointDefinition> Endpoints,
-        Dictionary<string, TsType.Brand> Brands
-    ) Read(string json)
+    public static Contract Read(string json)
     {
         RivetContract contract;
         try
@@ -194,9 +224,14 @@ public static class JsonContractReader
         }
 
         var endpoints = contract.Endpoints.Select(NormalizeResponses).ToList();
+        RejectRepeatedSecuritySchemes(contract.Security, "the document's security");
         foreach (var endpoint in endpoints)
         {
-            RejectRepeatedSecuritySchemes(endpoint);
+            RefuseRoutingSyntax(endpoint);
+            RejectRepeatedSecuritySchemes(
+                endpoint.Security,
+                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate})"
+            );
         }
 
         var nodes = AllTypeNodes(contract.Types, endpoints).ToList();
@@ -209,16 +244,16 @@ public static class JsonContractReader
         // kind:"brand" nodes, and the OpenAPI emitter $refs every brand by name.
         var brands = CollectBrands(nodes);
 
-        return (contract.Types, enums, endpoints, brands);
+        return new Contract(contract.Types, enums, endpoints, brands, contract.Security);
     }
 
     /// <summary>
     /// A security alternative is one OpenAPI Security Requirement Object, keyed by scheme
     /// name, so a scheme can appear in it once; its scopes all go in that one entry.
     /// </summary>
-    private static void RejectRepeatedSecuritySchemes(TsEndpointDefinition endpoint)
+    private static void RejectRepeatedSecuritySchemes(SecurityRequirements? security, string owner)
     {
-        var repeated = (endpoint.Security?.Alternatives ?? [])
+        var repeated = (security?.Alternatives ?? [])
             .SelectMany(alternative =>
                 alternative
                     .Schemes.GroupBy(scheme => scheme.Name, StringComparer.Ordinal)
@@ -228,9 +263,50 @@ public static class JsonContractReader
         if (repeated is not null)
         {
             throw new JsonException(
-                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate}) "
+                $"{owner} "
                     + $"lists security scheme '{repeated.Key}' more than once in one security alternative; "
                     + "list each scheme once per alternative, with all its scopes in that entry"
+            );
+        }
+    }
+
+    /// <summary>
+    /// A contract's <c>routeTemplate</c> is the OpenAPI path key, written as is, and its
+    /// params are already typed. So a token carrying ASP.NET routing syntax (a constraint,
+    /// the optional marker, a default or a catch-all) would make a path whose token matches
+    /// no parameter; the producer has to write it bare.
+    /// </summary>
+    private static void RefuseRoutingSyntax(TsEndpointDefinition endpoint)
+    {
+        foreach (var token in RouteParser.ParseRouteTokens(endpoint.RouteTemplate))
+        {
+            var syntax = new List<string>();
+            syntax.AddRange(
+                token.Constraints.Select(constraint => $"the constraint ':{constraint}'")
+            );
+            if (token.IsOptional)
+            {
+                syntax.Add("the optional marker '?'");
+            }
+            if (token.DefaultValue is not null)
+            {
+                syntax.Add($"the default '={token.DefaultValue}'");
+            }
+            if (token.IsCatchAll)
+            {
+                syntax.Add("the catch-all '*'");
+            }
+            if (syntax.Count == 0)
+            {
+                continue;
+            }
+
+            throw Diagnostics.Error(
+                Diagnostics.InvalidContractJson,
+                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate}) "
+                    + $"writes its route token '{token.Name}' with {string.Join(" and ", syntax)}. "
+                    + "A contract's routeTemplate is the OpenAPI path key, written as is, so the token must be bare "
+                    + $"('{{{token.Name}}}'); type it with its path param in params instead."
             );
         }
     }
@@ -314,8 +390,9 @@ public static class JsonContractReader
                 && TsType.TaggedUnionVariant.TagSchemaProblem(tagSchema, variant.Tag) is { } problem
             )
             {
-                throw new RivetUserException(
-                    $"error {Diagnostics.InvalidContractJson}: {site} has the discriminatorSchema '{tagSchema}', "
+                throw Diagnostics.Error(
+                    Diagnostics.InvalidContractJson,
+                    $"{site} has the discriminatorSchema '{tagSchema}', "
                         + $"which {problem}, so it can't be the schema of the tag '{variant.Tag}'. Write it as a "
                         + "JSON schema object that admits the tag, or leave it out for the synthesized enum."
                 );
@@ -324,14 +401,15 @@ public static class JsonContractReader
             if (
                 variant is { Description: null, ScalarMetadata: null, DiscriminatorSchema: null }
                 || variant.Type is TsType.InlineObject inline
-                    && inline.Fields.Any(field => field.Name == union.Discriminator)
+                    && inline.Properties.Any(property => property.Name == union.Discriminator)
             )
             {
                 continue;
             }
 
-            throw new RivetUserException(
-                $"error {Diagnostics.InvalidContractJson}: {site} carries a description, scalarMetadata "
+            throw Diagnostics.Error(
+                Diagnostics.InvalidContractJson,
+                $"{site} carries a description, scalarMetadata "
                     + $"or discriminatorSchema, but it isn't an inline object with a '{union.Discriminator}' "
                     + "property to put them on. Give the variant an inline object type with the tag "
                     + "property, or move the annotations to the type it refers to."
@@ -357,8 +435,9 @@ public static class JsonContractReader
             {
                 // One brand name is one component schema; picking either declaration
                 // would mistype every site that used the other.
-                throw new RivetUserException(
-                    $"error {Diagnostics.BrandConflictingUnderlyingTypes}: brand '{brand.Name}' is declared two different ways: "
+                throw Diagnostics.Error(
+                    Diagnostics.BrandConflictingUnderlyingTypes,
+                    $"brand '{brand.Name}' is declared two different ways: "
                         + $"{first} and {second}. Declare every use of the brand identically, "
                         + "or give the second shape a brand name of its own"
                 );

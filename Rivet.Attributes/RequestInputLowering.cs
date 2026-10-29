@@ -60,21 +60,25 @@ internal static class RequestInputLowering
 
     /// <summary>
     /// The runtime's <c>formFileInput</c>: <c>TInput</c> is an <c>IFormFile</c>, or one of the
-    /// properties ASP.NET's form binder would bind is an <c>IFormFile</c>, an array of them or
-    /// one of the tool's collections of them. Those are the public instance properties that
-    /// aren't indexers, along the whole base chain, where the most-derived property of a name,
-    /// whatever its accessibility, hides the base's, so a <c>new</c> member hides its base's. Roslyn symbols and <c>System.Type</c> can't share
-    /// code, so the tool keeps its own copy (<c>ContractWalker.HasFormFileProperty</c>), and
+    /// properties ASP.NET's form binder binds (<see cref="FormBoundProperties"/>) is an
+    /// <c>IFormFile</c>, an array of them or one of the tool's collections of them.
+    /// </summary>
+    internal static bool CarriesFormFiles(Type inputType) =>
+        inputType == typeof(IFormFile)
+        || FormBoundProperties(inputType).Any(property => IsFormFiles(property.PropertyType));
+
+    /// <summary>
+    /// The properties ASP.NET's form binder binds: the public instance properties that aren't
+    /// indexers, along the whole base chain, where the most-derived property of a name,
+    /// whatever its accessibility, hides the base's, so a <c>new</c> member hides its base's.
+    /// <c>[JsonIgnore]</c> doesn't count; the form binder never reads it. Roslyn symbols and
+    /// <c>System.Type</c> can't share code, so the tool keeps its own copy
+    /// (<c>FormBinding.FormBoundProperties</c>, which decides multipart and lists the parts), and
     /// <c>FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files</c> holds the two
     /// to one table of shapes.
     /// </summary>
-    internal static bool CarriesFormFiles(Type inputType)
+    internal static IEnumerable<PropertyInfo> FormBoundProperties(Type inputType)
     {
-        if (inputType == typeof(IFormFile))
-        {
-            return true;
-        }
-
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (var type = inputType; type is not null; type = type.BaseType)
         {
@@ -88,22 +92,19 @@ internal static class RequestInputLowering
             )
             {
                 // Any instance property hides a base's of the same name; only a public one
-                // (a public accessor, as BindingFlags.Public reads it) can carry files.
+                // (a public accessor, as BindingFlags.Public reads it) is bound.
                 if (
                     property.GetIndexParameters().Length == 0
                     && seen.Add(property.Name)
                     && (
                         property.GetMethod?.IsPublic == true || property.SetMethod?.IsPublic == true
                     )
-                    && IsFormFiles(property.PropertyType)
                 )
                 {
-                    return true;
+                    yield return property;
                 }
             }
         }
-
-        return false;
     }
 
     // An IFormFile, or an array, List<T> or sequence interface of them: the tool's
@@ -127,7 +128,8 @@ internal static class RequestInputLowering
         typeof(IReadOnlyCollection<>),
     ];
 
-    private static bool IsForm(string mediaType) =>
+    /// <summary>A form media type: <c>multipart/form-data</c> or <c>application/x-www-form-urlencoded</c>.</summary>
+    internal static bool IsForm(string mediaType) =>
         mediaType.Split(';')[0].Trim() is var bare
         && (
             bare.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)

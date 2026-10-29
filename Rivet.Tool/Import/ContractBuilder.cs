@@ -61,6 +61,8 @@ internal static class ContractBuilder
                 }
 
                 var httpMethod = method.Method.ToLowerInvariant();
+                var parameters = MergeParameters(pathItem.Parameters, operation.Parameters);
+                RequireDeclaredPathTokens(route, httpMethod, operation, parameters);
                 var tag = ExtractTag(operation) ?? "Default";
 
                 // Prefer the explicit x-rivet-contract extension — the tag
@@ -79,7 +81,7 @@ internal static class ContractBuilder
                     httpMethod,
                     route,
                     operation,
-                    MergeParameters(pathItem.Parameters, operation.Parameters),
+                    parameters,
                     tag,
                     globalSecurityScheme,
                     mapper,
@@ -283,6 +285,45 @@ internal static class ContractBuilder
             explicitParameters,
             SuppressImplicitResponse: successStatus is null,
             Provenance: provenance
+        );
+    }
+
+    /// <summary>
+    /// OpenAPI requires every path template token to be a declared path parameter, so one
+    /// with no declaration is an invalid document. Importing it would leave a token nothing
+    /// types, which generation refuses (RIV1019); writing a string parameter for it would be
+    /// the guess RIV1019 exists to refuse, so import refuses the document instead.
+    /// </summary>
+    private static void RequireDeclaredPathTokens(
+        string route,
+        string httpMethod,
+        OpenApiOperation operation,
+        IReadOnlyList<IOpenApiParameter> parameters
+    )
+    {
+        var declared = parameters
+            .Where(parameter => parameter.In == ParameterLocation.Path)
+            .Select(parameter => parameter.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var undeclared = OpenApiImporter
+            .PathTemplateNames(route)
+            .Where(token => !declared.Contains(token))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (undeclared.Count == 0)
+        {
+            return;
+        }
+
+        var operationName = operation.OperationId is { Length: > 0 } operationId
+            ? $"operation '{operationId}' ({httpMethod.ToUpperInvariant()} {route})"
+            : $"operation {httpMethod.ToUpperInvariant()} {route}";
+        var tokens = string.Join(", ", undeclared.Select(token => $"'{{{token}}}'"));
+        throw OpenApiImporter.InvalidSpec(
+            $"{operationName} has path template {(undeclared.Count == 1 ? "token" : "tokens")} "
+                + $"{tokens} that no path parameter declares. OpenAPI requires a path parameter "
+                + "(in: path, required: true) for every token, on the operation or its path item; "
+                + "declare it in the source document."
         );
     }
 
@@ -571,6 +612,15 @@ internal static class ContractBuilder
                     continue;
                 }
 
+                // OpenAPI ignores a response header named Content-Type, so it isn't part of
+                // the contract (the adapters would demand it, and emit refuses it, RIV2009).
+                // UnrepresentedFieldReporter keeps an inline response's verbatim, and a
+                // response component keeps its own as raw provenance.
+                if (OpenApiStructure.IsReservedHeaderName(name, isResponseHeader: true))
+                {
+                    continue;
+                }
+
                 if (!declaredStatuses.Contains(statusStr))
                 {
                     unsupported.Add(
@@ -623,7 +673,7 @@ internal static class ContractBuilder
                         statusStr,
                         name,
                         typeName,
-                        schema is null ? null : mapper.ResolveSchemaType(schema),
+                        schema is null ? null : mapper.ResolveLeafSchemaType(schema, typeName),
                         format,
                         isFormatSpecified,
                         header.Description,

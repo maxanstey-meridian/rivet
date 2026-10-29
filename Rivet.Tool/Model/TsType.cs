@@ -107,82 +107,18 @@ public abstract record TsType
         string? Description = null
     ) : TsType;
 
-    /// <summary>Inline object: { key: string; value?: number }. Used for tuples and union variants.</summary>
-    public sealed record InlineObject(
-        [property: JsonRequired, JsonPropertyName("properties")]
-            IReadOnlyList<InlineObjectField> Fields
-    ) : TsType;
-
     /// <summary>
-    /// One inline-object property. An absent <c>optional</c> reads as required: a nullable
-    /// type does not make the property optional. The annotations after <c>optional</c> are a
-    /// record property's (<see cref="TsPropertyDefinition"/>, same JSON names), so a
-    /// polymorphic variant describes its members exactly as the derived record would; a member
-    /// System.Text.Json only reads (or only writes) is writeOnly (readOnly) here too.
+    /// Inline object: { key: string; value?: number }. Used for tuples and union variants; a
+    /// member System.Text.Json only reads (or only writes) is writeOnly (readOnly) here too.
+    /// <c>AdditionalProperties</c> says what a <see cref="TsTypeDefinition"/>'s does: a variant
+    /// whose derived type has a <c>[JsonExtensionData]</c> bag is open (<c>true</c>), one marked
+    /// <c>[JsonUnmappedMemberHandling(Disallow)]</c> is closed (<c>false</c>).
     /// </summary>
-    public sealed record InlineObjectField(
-        [property: JsonRequired] string Name,
-        [property: JsonRequired] TsType Type,
-        bool Optional = false,
-        [property:
-            JsonPropertyName("deprecated"),
-            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
-        ]
-            bool IsDeprecated = false,
-        string? Format = null,
-        string? DefaultValue = null,
-        TsPropertyConstraints? Constraints = null,
-        string? Description = null,
-        string? Example = null,
-        [property:
-            JsonPropertyName("readOnly"),
-            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
-        ]
-            bool IsReadOnly = false,
-        [property:
-            JsonPropertyName("writeOnly"),
-            JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)
-        ]
-            bool IsWriteOnly = false,
-        TsScalarMetadata? ScalarMetadata = null
-    )
-    {
-        // Keep concise tuple syntax without conflating a nullable value with an absent field.
-        public static implicit operator InlineObjectField((string Name, TsType Type) field) =>
-            new(field.Name, field.Type, Optional: false);
-
-        public static InlineObjectField FromProperty(TsPropertyDefinition property) =>
-            new(
-                property.Name,
-                property.Type,
-                property.IsOptional,
-                property.IsDeprecated,
-                property.Format,
-                property.DefaultValue,
-                property.Constraints,
-                property.Description,
-                property.Example,
-                property.IsReadOnly,
-                property.IsWriteOnly,
-                property.ScalarMetadata
-            );
-
-        public TsPropertyDefinition ToProperty() =>
-            new(
-                Name,
-                Type,
-                Optional,
-                IsDeprecated,
-                Format,
-                DefaultValue,
-                Constraints,
-                Description,
-                Example,
-                IsReadOnly,
-                IsWriteOnly,
-                ScalarMetadata
-            );
-    }
+    public sealed record InlineObject(
+        [property: JsonRequired] IReadOnlyList<TsPropertyDefinition> Properties,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            bool? AdditionalProperties = null
+    ) : TsType;
 
     /// <summary>Discriminated union of object-like variants keyed by a shared string-literal field.</summary>
     public sealed record TaggedUnion(
@@ -292,10 +228,10 @@ public abstract record TsType
             // Field TYPES are part of the suffix: naming by field names alone made
             // Wrapper<{value:string}> and Wrapper<{value:number}> collide on "Wrapper_Value"
             // and silently overwrite each other's component schema.
-            InlineObject obj => obj.Fields.Count <= 3
+            InlineObject obj => obj.Properties.Count <= 3
                 ? string.Join(
                     "_",
-                    obj.Fields.Select(f =>
+                    obj.Properties.Select(f =>
                         char.ToUpperInvariant(f.Name[0]) + f.Name[1..] + "_" + GetNameSuffix(f.Type)
                     )
                 )
@@ -333,7 +269,7 @@ public abstract record TsType
             Dictionary d => d.Key is null ? [d.Value] : [d.Value, d.Key],
             Generic g => g.TypeArguments,
             Brand b => [b.Inner],
-            InlineObject obj => obj.Fields.Select(field => field.Type),
+            InlineObject obj => obj.Properties.Select(property => property.Type),
             TaggedUnion tu => tu.Variants.Select(variant => variant.Type),
             Union u => u.Variants,
             _ => [],
@@ -375,8 +311,13 @@ public abstract record TsType
             Brand b => b with { Inner = b.Inner.Rewrite(replace) },
             InlineObject obj => obj with
             {
-                Fields = obj
-                    .Fields.Select(field => field with { Type = field.Type.Rewrite(replace) })
+                Properties = obj
+                    .Properties.Select(property =>
+                        property with
+                        {
+                            Type = property.Type.Rewrite(replace),
+                        }
+                    )
                     .ToList(),
             },
             TaggedUnion tu => tu with

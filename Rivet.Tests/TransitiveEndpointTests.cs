@@ -163,11 +163,13 @@ public sealed class TransitiveEndpointTests
 
             namespace Host;
 
+            public sealed record CaseLookup(string CaseRef);
+
             [RivetContract]
             public static class CaseSearchContract
             {
-                public static readonly RouteDefinition<CaseSearchResult> Search =
-                    Define.Get<CaseSearchResult>("/api/cases/{caseRef}")
+                public static readonly RouteDefinition<CaseLookup, CaseSearchResult> Search =
+                    Define.Get<CaseLookup, CaseSearchResult>("/api/cases/{caseRef}")
                         .Description("Search for a case");
             }
             """;

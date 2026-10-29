@@ -181,8 +181,10 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         export type Api = ReturnType<typeof createApi>;
         export type InviteMemberRequest = components["schemas"]["InviteMemberRequest"];
 
-        export function createApi(baseUrl: string, fetchImpl?: typeof fetch) {
-          return createClient<paths>(fetchImpl ? { baseUrl, fetch: fetchImpl } : { baseUrl });
+        export function createApi(baseUrl: string, token?: string, fetchImpl?: typeof fetch) {
+          // The contract's bearer endpoints are [Authorize]d; the sample takes any token.
+          const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+          return createClient<paths>(fetchImpl ? { baseUrl, headers, fetch: fetchImpl } : { baseUrl, headers });
         }
 
         export async function listMembers(api: Api) {
@@ -241,14 +243,15 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
     // openapi-fetch results asserted against expected literals (the live server's
     // known behavior): list → 200 {items:[],totalCount:0}; invite → 201 {id:uuid}
     // (fresh Guid per request, so the id is shape-checked); remove(guid) → 204 void;
-    // remove(non-guid) → 404; updateRole → 204; health → 200 void; avatar → 404
-    // (declared in the contract, not implemented by the sample controller).
+    // remove(non-guid) → 404; updateRole → 204; health → 200 void; avatar → 200 with
+    // only the query token; list with no token → 401.
 
     private const string SingleRunScript = """
         import { createApi, listMembers, inviteMember, removeMember, updateMemberRole, checkHealth, getAvatar } from "./dist/consumer.js";
 
         const baseUrl = process.argv[2];
-        const api = createApi(baseUrl);
+        const api = createApi(baseUrl, "sample-token");
+        const anonymous = createApi(baseUrl);
 
         const failures = [];
 
@@ -273,6 +276,12 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
         }
 
         const isUuid = (s) => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+
+        // ── 0. GET /api/members without a token → 401 (the handler is [Authorize]d) ──
+        {
+          const o = await listMembers(anonymous);
+          expectStatus("list-anonymous", o.status, 401);
+        }
 
         // ── 1. GET /api/members → 200 + empty PagedResult ──
         {
@@ -311,18 +320,18 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
           expectBody("updateRole", o.data ?? o.error, null);
         }
 
-        // ── 6. GET /api/health → 200 void ──
+        // ── 6. GET /api/health → 200 void, no token needed (.Anonymous()) ──
         {
-          const o = await checkHealth(api);
+          const o = await checkHealth(anonymous);
           expectStatus("health", o.status, 200);
           expectBody("health", o.data ?? o.error, null);
         }
 
         // ── 7. GET /api/members/{id}/avatar?token=… (queryAuth file endpoint) ──
-        // Declared in the contract but not implemented by the sample controller → 404.
+        // No Authorization header: the query token alone gets a media player in.
         {
-          const o = await getAvatar(api, "a1b2c3d4-e5f6-4a7b-8c9d-000000000001", "tok-123");
-          expectStatus("avatar", o.status, 404);
+          const o = await getAvatar(anonymous, "a1b2c3d4-e5f6-4a7b-8c9d-000000000001", "tok-123");
+          expectStatus("avatar", o.status, 200);
         }
 
         if (failures.length > 0) {
@@ -331,6 +340,6 @@ public sealed class SampleProjectOpenApiFetchTests : IDisposable
           process.exit(1);
         }
 
-        console.log("Single-arm run: openapi-fetch produced the expected statuses and bodies across all 7 scenarios");
+        console.log("Single-arm run: openapi-fetch produced the expected statuses and bodies across all 8 scenarios");
         """;
 }

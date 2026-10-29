@@ -73,7 +73,9 @@ public sealed class OpenApiConformanceTests : IDisposable
             "validation-metadata" => EmitFromSources([ValidationMetadataSource], null),
             "polymorphic-shapes" => EmitFromSources([PolymorphicShapesSource], "bearer"),
             "header-contracts" => EmitFromSources([HeaderContractsSource], "bearer"),
-            "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), "bearer"),
+            // The sample declares its security in source (Contracts/Security.cs), so it emits
+            // with no --security, as its README runs it.
+            "contractapi-sample" => EmitFromSources(LoadContractApiSampleSources(), null),
             "contract-sample-json" => CompilationHelper.EmitOpenApiFromJson(
                 Fixture.Text("contract-sample.json"),
                 _fixtureDocumentInfo
@@ -108,8 +110,9 @@ public sealed class OpenApiConformanceTests : IDisposable
         var contractEndpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
         var annotationEndpoints = CompilationHelper.WalkEndpoints(compilation, discovered, walker);
         var merged = EndpointMerger.Merge(contractEndpoints, annotationEndpoints);
+        // As the CLI does: --security replaces the source's security attributes wholesale.
         var securityConfig = security is null
-            ? null
+            ? SecurityMetadataWalker.Walk(compilation)
             : SecurityParser.ParseMany(security.Split(','));
         return OpenApiEmitter.Emit(
             merged,
@@ -576,7 +579,7 @@ public sealed class OpenApiConformanceTests : IDisposable
                         .Returns<ValidationErrorDto>(422);
 
                 public static readonly RouteDefinition Remove =
-                    Define.Delete("/api/members/{id}")
+                    Define.Delete("/api/members/{id:guid}")
                         .Returns<NotFoundDto>(404);
             }
         }
@@ -610,13 +613,13 @@ public sealed class OpenApiConformanceTests : IDisposable
             public static class StreamingContract
             {
                 public static readonly FileRouteDefinition Stream =
-                    Define.File("/api/streams/{id}")
+                    Define.File("/api/streams/{id:guid}")
                         .ProducesFile("video/mp4")
                         .QueryAuth()
                         .Description("Stream a video file");
 
                 public static readonly FileRouteDefinition Preview =
-                    Define.File("/api/streams/{id}/preview")
+                    Define.File("/api/streams/{id:guid}/preview")
                         .ProducesFile("image/jpeg")
                         .QueryAuth("key")
                         .Returns<ErrorDto>(404, "Not found");
@@ -633,13 +636,13 @@ public sealed class OpenApiConformanceTests : IDisposable
             public static class FilesContract
             {
                 public static readonly RouteDefinition Download =
-                    Define.Get("/api/files/{id}")
+                    Define.Get("/api/files/{id:guid}")
                         .ProducesFile("application/octet-stream")
                         .Description("Download a file")
                         .Returns<NotFoundDto>(404, "File not found");
 
                 public static readonly RouteDefinition Preview =
-                    Define.Get("/api/files/{id}/preview")
+                    Define.Get("/api/files/{id:guid}/preview")
                         .ProducesFile("image/png")
                         .Returns<ErrorDto>(400, "Bad request");
             }
@@ -706,7 +709,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         public static class ProductContract
         {
             public static readonly RouteDefinition<ProductDto> Get =
-                Define.Get<ProductDto>("/api/products/{id}");
+                Define.Get<ProductDto>("/api/products/{id:guid}");
 
             public static readonly RouteDefinition<LoginInput, LoginResult> Login =
                 Define.Post<LoginInput, LoginResult>("/api/auth/login")
@@ -806,7 +809,7 @@ public sealed class OpenApiConformanceTests : IDisposable
         public static class ShapesContract
         {
             public static readonly RouteDefinition<Shape> GetShape =
-                Define.Get<Shape>("/api/shapes/{id}");
+                Define.Get<Shape>("/api/shapes/{id:guid}");
 
             public static readonly RouteDefinition<Shape, Shape> CreateShape =
                 Define.Post<Shape, Shape>("/api/shapes")
@@ -814,14 +817,14 @@ public sealed class OpenApiConformanceTests : IDisposable
 
             // Derived type referenced directly — its standalone schema stays untagged
             public static readonly RouteDefinition<Circle> GetCircle =
-                Define.Get<Circle>("/api/circles/{id}");
+                Define.Get<Circle>("/api/circles/{id:guid}");
         }
 
         [RivetContract]
         public static class ChannelsContract
         {
             public static readonly RouteDefinition<Channel> GetChannel =
-                Define.Get<Channel>("/api/channels/{id}");
+                Define.Get<Channel>("/api/channels/{id:guid}");
         }
         """;
 }

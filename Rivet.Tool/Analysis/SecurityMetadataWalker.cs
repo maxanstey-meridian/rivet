@@ -32,8 +32,9 @@ internal static class SecurityMetadataWalker
             {
                 if (!schemeAttributes.TryAdd(name, attribute))
                 {
-                    throw new RivetUserException(
-                        $"Duplicate Rivet security scheme metadata for '{name}'."
+                    throw Diagnostics.Error(
+                        Diagnostics.InvalidSecuritySchemeMetadata,
+                        $"duplicate Rivet security scheme metadata for '{name}'."
                     );
                 }
             }
@@ -57,7 +58,8 @@ internal static class SecurityMetadataWalker
                 var descriptions = ReadStrings(scopeDescriptions);
                 if (names.Count != descriptions.Count)
                 {
-                    throw new RivetUserException(
+                    throw Diagnostics.Error(
+                        Diagnostics.InvalidSecuritySchemeMetadata,
                         $"OAuth2 security scheme '{schemeName}' has mismatched scope metadata."
                     );
                 }
@@ -144,7 +146,8 @@ internal static class SecurityMetadataWalker
                 description
             ),
             "mutualTLS" => new MutualTlsSecurityScheme(description),
-            _ => throw new RivetUserException(
+            _ => throw Diagnostics.Error(
+                Diagnostics.InvalidSecuritySchemeMetadata,
                 $"Rivet security scheme '{name}' has unsupported type '{type}'."
             ),
         };
@@ -160,7 +163,8 @@ internal static class SecurityMetadataWalker
         string field
     ) =>
         StringArgument(arguments, index)
-        ?? throw new RivetUserException(
+        ?? throw Diagnostics.Error(
+            Diagnostics.InvalidSecuritySchemeMetadata,
             $"Rivet security scheme '{schemeName}' is missing its {field}."
         );
 
@@ -170,7 +174,8 @@ internal static class SecurityMetadataWalker
     private static SecurityApiKeyLocation ParseLocation(string value, string schemeName) =>
         Enum.TryParse<SecurityApiKeyLocation>(value, ignoreCase: true, out var location)
             ? location
-            : throw new RivetUserException(
+            : throw Diagnostics.Error(
+                Diagnostics.InvalidSecuritySchemeMetadata,
                 $"Rivet apiKey security scheme '{schemeName}' has unsupported location '{value}'."
             );
 
@@ -181,7 +186,8 @@ internal static class SecurityMetadataWalker
             "password" => OAuth2FlowType.Password,
             "clientCredentials" => OAuth2FlowType.ClientCredentials,
             "authorizationCode" => OAuth2FlowType.AuthorizationCode,
-            _ => throw new RivetUserException(
+            _ => throw Diagnostics.Error(
+                Diagnostics.InvalidSecuritySchemeMetadata,
                 $"Rivet OAuth2 security scheme '{schemeName}' has unsupported flow '{value}'."
             ),
         };

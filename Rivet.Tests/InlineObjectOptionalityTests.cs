@@ -13,12 +13,12 @@ public sealed class InlineObjectOptionalityTests
     {
         var type = new TsType.InlineObject([
             new("required", new TsType.Primitive("string")),
-            new("optional", new TsType.Primitive("string"), Optional: true),
+            new("optional", new TsType.Primitive("string"), IsOptional: true),
             new("requiredNullable", new TsType.Nullable(new TsType.Primitive("string"))),
             new(
                 "optionalNullable",
                 new TsType.Nullable(new TsType.Primitive("string")),
-                Optional: true
+                IsOptional: true
             ),
         ]);
 
@@ -44,7 +44,7 @@ public sealed class InlineObjectOptionalityTests
     {
         TsType type = new TsType.InlineObject([
             new("requiredNullable", new TsType.Nullable(new TsType.Primitive("string"))),
-            new("optional", new TsType.Primitive("string"), Optional: true),
+            new("optional", new TsType.Primitive("string"), IsOptional: true),
         ]);
 
         var json = JsonSerializer.Serialize(type, _options);
@@ -52,21 +52,27 @@ public sealed class InlineObjectOptionalityTests
             JsonSerializer.Deserialize<TsType>(json, _options)
         );
 
-        Assert.False(roundTripped.Fields[0].Optional);
-        Assert.True(roundTripped.Fields[1].Optional);
+        Assert.False(roundTripped.Properties[0].IsOptional);
+        Assert.True(roundTripped.Properties[1].IsOptional);
         Assert.Contains("\"optional\":false", json);
         Assert.Contains("\"optional\":true", json);
     }
 
+    // rivet-ts leaves "optional" off an inline field; that reads as required, and a nullable
+    // type doesn't change it.
     [Fact]
-    public void Tuple_Syntax_Does_Not_Infer_Optionality_From_Nullability()
+    public void Absent_Optional_Reads_As_Required_Even_When_Nullable()
     {
-        TsType.InlineObjectField field = (
-            "value",
-            new TsType.Nullable(new TsType.Primitive("number"))
+        var type = Assert.IsType<TsType.InlineObject>(
+            JsonSerializer.Deserialize<TsType>(
+                """
+                {"kind":"inlineObject","properties":[{"name":"value","type":{"kind":"nullable","inner":{"kind":"primitive","type":"number"}}}]}
+                """,
+                _options
+            )
         );
 
-        Assert.False(field.Optional);
+        Assert.False(Assert.Single(type.Properties).IsOptional);
     }
 
     [Fact]
@@ -74,7 +80,7 @@ public sealed class InlineObjectOptionalityTests
     {
         var required = new TsType.InlineObject([new("value", new TsType.Primitive("string"))]);
         var optional = new TsType.InlineObject([
-            new("value", new TsType.Primitive("string"), Optional: true),
+            new("value", new TsType.Primitive("string"), IsOptional: true),
         ]);
 
         Assert.NotEqual(
@@ -92,7 +98,7 @@ public sealed class InlineObjectOptionalityTests
         TsType.TaggedUnion Union(TsType.TaggedUnionVariant variant) => new("kind", [variant]);
         var variant = new TsType.TaggedUnionVariant(
             "a",
-            new TsType.InlineObject([("kind", new TsType.StringUnion(["a"]))])
+            new TsType.InlineObject([new("kind", new TsType.StringUnion(["a"]))])
         );
         var stringEnum = new TsType.StringUnion(["a", "b"]);
         var intEnum = new TsType.IntUnion(["1", "2"]);
@@ -134,7 +140,7 @@ public sealed class InlineObjectOptionalityTests
             new("value?", new TsType.Primitive("string")),
         ]);
         var optional = new TsType.InlineObject([
-            new("value", new TsType.Primitive("string"), Optional: true),
+            new("value", new TsType.Primitive("string"), IsOptional: true),
         ]);
 
         Assert.NotEqual(

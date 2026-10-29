@@ -436,6 +436,9 @@ public sealed class OpenApiImporterTests
             """,
             paths: """
             "/api/tasks/{id}": {
+                "parameters": [
+                    { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
                 "get": {
                     "operationId": "tasks_getTask",
                     "tags": ["Tasks"],
@@ -475,6 +478,9 @@ public sealed class OpenApiImporterTests
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/api/tasks/{id}": {
+                "parameters": [
+                    { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
                 "delete": {
                     "operationId": "tasks_deleteTask",
                     "tags": ["Tasks"],
@@ -491,10 +497,49 @@ public sealed class OpenApiImporterTests
             CompilationHelper.Import(spec),
             "TasksContract.cs"
         );
-        Assert.Contains("public static readonly RouteDefinition DeleteTask", content);
+        // The path parameter makes an input; the operation still has no output type.
+        Assert.Contains(
+            "public static readonly InputRouteDefinition<DeleteTaskInput> DeleteTask",
+            content
+        );
         Assert.Contains("Define.Delete(\"/api/tasks/{id}\")", content);
         // 204 is the default for DELETE — no .Status() emitted
         Assert.DoesNotContain(".Status(", content);
+    }
+
+    [Fact]
+    public void Path_Token_No_Path_Parameter_Declares_Is_An_Invalid_Document()
+    {
+        // OpenAPI requires a path parameter for every template token. A query parameter of the
+        // same name doesn't declare it; the path item's own parameters do.
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/api/orgs/{orgId}/tasks/{taskId}": {
+                "parameters": [
+                    { "name": "orgId", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
+                "get": {
+                    "operationId": "tasks_getTask",
+                    "tags": ["Tasks"],
+                    "parameters": [
+                        { "name": "taskId", "in": "query", "schema": { "type": "string" } }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """,
+            title: "API"
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() => CompilationHelper.Import(spec));
+
+        Assert.StartsWith(
+            "error RIV3032: invalid OpenAPI document: operation 'tasks_getTask' "
+                + "(GET /api/orgs/{orgId}/tasks/{taskId}) has path template token '{taskId}' "
+                + "that no path parameter declares.",
+            exception.Message
+        );
+        Assert.DoesNotContain("'{orgId}'", exception.Message);
     }
 
     [Fact]
@@ -1048,6 +1093,9 @@ public sealed class OpenApiImporterTests
               },
               "paths": {
                 "/api/orders/{id}": {
+                  "parameters": [
+                    { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                  ],
                   "get": {
                     "operationId": "orders_get",
                     "tags": ["Orders"],
@@ -1288,6 +1336,9 @@ public sealed class OpenApiImporterTests
             """,
             paths: """
             "/api/tasks/{id}": {
+                "parameters": [
+                    { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
                 "get": {
                     "operationId": "tasks_get",
                     "tags": ["Tasks"],
@@ -1340,6 +1391,9 @@ public sealed class OpenApiImporterTests
         var spec = CompilationHelper.BuildSpec(
             paths: """
             "/api/previews/{id}": {
+                "parameters": [
+                    { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+                ],
                 "get": {
                     "operationId": "previews_get",
                     "tags": ["Previews"],
@@ -1470,6 +1524,80 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Text_Only_Multipart_Body_Imports_As_A_Form_Input()
+    {
+        // No binary part, so nothing in the record says multipart: the body must still come
+        // back as multipart form fields, never as a JSON body, and a part named unlike its
+        // property gets the renames both form binders read.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "NoteForm": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "x-mood": { "type": "string" }
+                },
+                "required": ["title"]
+            }
+            """,
+            paths: """
+            "/api/notes": {
+                "post": {
+                    "operationId": "notes_create",
+                    "tags": ["Notes"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": { "$ref": "#/components/schemas/NoteForm" }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "Created" } }
+                }
+            }
+            """,
+            title: "API"
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains(
+            "[global::System.Runtime.Serialization.DataMember(Name = \"x-mood\")]",
+            CompilationHelper.FindFile(result, "NoteForm.cs")
+        );
+        var compilation = CompilationHelper.CompileImportResult(result);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+
+        var endpoint = Assert.Single(endpoints);
+        Assert.DoesNotContain(endpoint.Params, param => param.Source == ParamSource.Body);
+        Assert.Equal(
+            [("title", ParamSource.FormField), ("x-mood", ParamSource.FormField)],
+            endpoint.Params.Select(param => (param.Name, param.Source))
+        );
+
+        var requestBody = JsonSerializer
+            .Deserialize<JsonElement>(
+                OpenApiEmitter.Emit(
+                    endpoints,
+                    walker.Definitions,
+                    walker.Brands,
+                    walker.Enums,
+                    security: null
+                )
+            )
+            .GetProperty("paths")
+            .GetProperty("/api/notes")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content");
+        Assert.Equal(
+            ["multipart/form-data"],
+            requestBody.EnumerateObject().Select(media => media.Name)
+        );
+    }
+
+    [Fact]
     public void Standalone_Multipart_Binary_Maps_To_IFormFile()
     {
         var spec = CompilationHelper.BuildSpec(
@@ -1523,6 +1651,166 @@ public sealed class OpenApiImporterTests
 
         var contract = CompilationHelper.FindFile(result, "UploadsContract.cs");
         Assert.Contains("RouteDefinition<UploadRequest, UploadResult>", contract);
+    }
+
+    // Decision 33: no form binder reads [JsonPropertyName], so a form body's renamed part is
+    // written with the names the hosts read ([DataMember] for the minimal-API form mapper,
+    // [FromForm] for MVC; FormPartNameTests pins both), in the init form the form mapper
+    // accepts without every part. Generation then names the part as the source did.
+    [Fact]
+    public void Form_body_parts_named_unlike_their_properties_import_with_the_names_both_hosts_read()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "SessionForm": {
+                "type": "object",
+                "properties": {
+                    "user_name": { "type": "string" },
+                    "Scope": { "type": "string" },
+                    "remember": { "type": "boolean" }
+                },
+                "required": ["user_name"]
+            },
+            "Ok": {
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }
+            """,
+            paths: """
+            "/api/uploads": {
+                "post": {
+                    "operationId": "uploads_create",
+                    "tags": ["Uploads"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "file_name": { "type": "string", "format": "binary" },
+                                        "x-meta": { "type": "string" },
+                                        "title": { "type": "string" }
+                                    },
+                                    "required": ["file_name"]
+                                }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Ok" } }
+                            }
+                        }
+                    }
+                }
+            },
+            "/api/sessions": {
+                "post": {
+                    "operationId": "sessions_create",
+                    "tags": ["Sessions"],
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/x-www-form-urlencoded": {
+                                "schema": { "$ref": "#/components/schemas/SessionForm" }
+                            }
+                        }
+                    },
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": { "schema": { "$ref": "#/components/schemas/Ok" } }
+                            }
+                        }
+                    }
+                }
+            }
+            """,
+            title: "API"
+        );
+
+        var result = CompilationHelper.Import(spec);
+        var session = CompilationHelper.FindFile(result, "SessionForm.cs");
+        Assert.Contains(
+            """
+                [JsonPropertyName("user_name")]
+                [global::System.Runtime.Serialization.DataMember(Name = "user_name")]
+                [global::Microsoft.AspNetCore.Mvc.FromForm(Name = "user_name")]
+            """,
+            session
+        );
+        Assert.Contains("public required string UserName { get; init; }", session);
+        // Both binders already read Scope, ignoring case.
+        Assert.Contains(
+            """
+                [JsonPropertyName("Scope")]
+                [RivetOptional]
+            """,
+            session
+        );
+        var upload = Assert
+            .Single(
+                result.Files,
+                file => file.FileName.StartsWith("Types/") && file.Content.Contains("IFormFile")
+            )
+            .Content;
+        Assert.Contains(
+            """[global::Microsoft.AspNetCore.Mvc.FromForm(Name = "file_name")]""",
+            upload
+        );
+        Assert.Contains(
+            """[global::System.Runtime.Serialization.DataMember(Name = "x-meta")]""",
+            upload
+        );
+        // Ok is a JSON response, so it keeps the positional form.
+        Assert.Contains("public sealed record Ok(", CompilationHelper.FindFile(result, "Ok.cs"));
+
+        foreach (
+            var emit in new Func<ImportResult, JsonDocument>[]
+            {
+                CompilationHelper.EmitImported,
+                CompilationHelper.EmitImportedThroughContractJson,
+            }
+        )
+        {
+            using var emitted = emit(result);
+            var paths = emitted.RootElement.GetProperty("paths");
+            Assert.Equal(
+                "#/components/schemas/SessionForm",
+                paths
+                    .GetProperty("/api/sessions")
+                    .GetProperty("post")
+                    .GetProperty("requestBody")
+                    .GetProperty("content")
+                    .GetProperty("application/x-www-form-urlencoded")
+                    .GetProperty("schema")
+                    .GetProperty("$ref")
+                    .GetString()
+            );
+            var multipart = paths
+                .GetProperty("/api/uploads")
+                .GetProperty("post")
+                .GetProperty("requestBody")
+                .GetProperty("content")
+                .GetProperty("multipart/form-data")
+                .GetProperty("schema");
+            Assert.Equal(
+                ["file_name", "x-meta", "title"],
+                multipart
+                    .GetProperty("properties")
+                    .EnumerateObject()
+                    .Select(property => property.Name)
+            );
+            Assert.Equal(
+                ["file_name"],
+                multipart.GetProperty("required").EnumerateArray().Select(name => name.GetString())
+            );
+        }
     }
 
     // ========== Drift detection ==========
@@ -2139,7 +2427,7 @@ public sealed class OpenApiImporterTests
             }
             """,
             paths: """
-            "/api/items/{id}": {
+            "/api/items/current": {
                 "get": {
                     "operationId": "items_get",
                     "tags": ["Items"],
@@ -2704,7 +2992,7 @@ public sealed class OpenApiImporterTests
             }
             """,
             paths: """
-            "/api/items/{id}": {
+            "/api/items/current": {
                 "get": {
                     "operationId": "items_get",
                     "tags": ["Items"],

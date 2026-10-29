@@ -679,8 +679,8 @@ public sealed class ContractEmitterTests
                         new TsType.TaggedUnionVariant(
                             "hidden",
                             new TsType.InlineObject([
-                                ("kind", new TsType.StringUnion(["hidden"])),
-                                (
+                                new("kind", new TsType.StringUnion(["hidden"])),
+                                new(
                                     "workspaceKey",
                                     new TsType.Nullable(new TsType.TypeRef("WorkspaceKey"))
                                 ),
@@ -689,8 +689,8 @@ public sealed class ContractEmitterTests
                         new TsType.TaggedUnionVariant(
                             "shown",
                             new TsType.InlineObject([
-                                ("kind", new TsType.StringUnion(["shown"])),
-                                ("summary", new TsType.TypeRef("Summary")),
+                                new("kind", new TsType.StringUnion(["shown"])),
+                                new("summary", new TsType.TypeRef("Summary")),
                             ])
                         ),
                     ]

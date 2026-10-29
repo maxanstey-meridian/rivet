@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Text.Json;
-using Rivet.Tool;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -231,12 +230,7 @@ public sealed class FormFileTests
 
         // OpenAPI: named input type — multipart schema is a $ref into components,
         // and the component carries the binary file property
-        JsonDocument? emitted = null;
-        var stderr = CompilationHelper.CaptureStdErr(() =>
-            emitted = CompilationHelper.EmitOpenApi(source)
-        );
-        using var doc = emitted!;
-        Assert.DoesNotContain(Diagnostics.MultipartInputTypeMissing, stderr);
+        using var doc = CompilationHelper.EmitOpenApi(source);
         var operation = GetOperation(doc, "/api/files", "post");
         var schema = GetMultipartSchema(operation);
         Assert.Equal(
@@ -283,7 +277,7 @@ public sealed class FormFileTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<AttachRequest, AttachmentResult> Attach =
-                    Define.Post<AttachRequest, AttachmentResult>("/api/tasks/{id}/attachments");
+                    Define.Post<AttachRequest, AttachmentResult>("/api/tasks/{id:guid}/attachments");
             }
             """;
 
@@ -726,50 +720,200 @@ public sealed class FormFileTests
     }
 
     /// <summary>
-    /// Whether TInput carries files is worked out twice: from Roslyn symbols in the tool
-    /// (ContractWalker.HasFormFileProperty) and by reflection at runtime
-    /// (RequestInputLowering.CarriesFormFiles). Both must count what ASP.NET's form binder
-    /// binds, so each shape is compiled once, walked by the tool, then emitted, loaded and
-    /// put to the runtime, and the two must give the same answer.
+    /// Whether TInput carries files, and which parts its multipart body lists, are worked out
+    /// twice: from Roslyn symbols in the tool (FormBinding.FormBoundProperties) and by
+    /// reflection at runtime (RequestInputLowering.CarriesFormFiles). Both must count what
+    /// ASP.NET's form binder binds, so each shape is compiled once, walked by the tool, then
+    /// emitted, loaded and put to the runtime, and the two must give the same answer. When the
+    /// input is multipart, the parts are the bound members, less route and [RivetHeader] ones
+    /// and the non-file members the binder can't write.
     /// </summary>
     [Theory]
-    [InlineData("public IFormFile File { get; init; } = null!;", "", true)]
-    [InlineData("internal IFormFile? File { get; init; }", "", false)]
+    [InlineData("public IFormFile File { get; init; } = null!;", "", true, "file,title")]
+    [InlineData("internal IFormFile? File { get; init; }", "", false, "")]
     [InlineData(
         "public new string File { get; init; } = \"\";",
         "public IFormFile File { get; init; } = null!;",
-        false
+        false,
+        ""
     )]
     [InlineData(
         "internal new string File { get; init; } = \"\";",
         "public IFormFile File { get; init; } = null!;",
-        false
+        false,
+        ""
     )]
-    [InlineData("", "public List<IFormFile> Files { get; init; } = [];", true)]
-    [InlineData("public IFormFile[] Files { get; init; } = [];", "", true)]
-    [InlineData("public IList<IFormFile> Files { get; init; } = [];", "", true)]
-    [InlineData("public ICollection<IFormFile> Files { get; init; } = [];", "", true)]
-    [InlineData("public IEnumerable<IFormFile> Files { get; init; } = [];", "", true)]
-    [InlineData("public IReadOnlyList<IFormFile> Files { get; init; } = [];", "", true)]
-    [InlineData("public IReadOnlyCollection<IFormFile> Files { get; init; } = [];", "", true)]
-    [InlineData("public IFormFileCollection Files { get; init; } = null!;", "", false)]
-    [InlineData("public HashSet<IFormFile> Files { get; init; } = [];", "", false)]
+    [InlineData("", "public List<IFormFile> Files { get; init; } = [];", true, "files,title")]
+    [InlineData("public IFormFile[] Files { get; init; } = [];", "", true, "files,title")]
+    [InlineData("public IList<IFormFile> Files { get; init; } = [];", "", true, "files,title")]
+    [InlineData(
+        "public ICollection<IFormFile> Files { get; init; } = [];",
+        "",
+        true,
+        "files,title"
+    )]
+    [InlineData(
+        "public IEnumerable<IFormFile> Files { get; init; } = [];",
+        "",
+        true,
+        "files,title"
+    )]
+    [InlineData(
+        "public IReadOnlyList<IFormFile> Files { get; init; } = [];",
+        "",
+        true,
+        "files,title"
+    )]
+    [InlineData(
+        "public IReadOnlyCollection<IFormFile> Files { get; init; } = [];",
+        "",
+        true,
+        "files,title"
+    )]
+    [InlineData("public IFormFileCollection Files { get; init; } = null!;", "", false, "")]
+    [InlineData("public HashSet<IFormFile> Files { get; init; } = [];", "", false, "")]
+    // The form binder never reads [JsonIgnore], so the ignored file is still a part.
+    [InlineData(
+        "[System.Text.Json.Serialization.JsonIgnore] public IFormFile File { get; init; } = null!;",
+        "",
+        true,
+        "file,title"
+    )]
+    // A non-public member isn't bound, so it isn't a form field.
+    [InlineData(
+        "public IFormFile File { get; init; } = null!; internal string Secret { get; init; } = \"\";",
+        "",
+        true,
+        "file,title"
+    )]
+    // A computed member has nothing the binder can write.
+    [InlineData(
+        "public IFormFile File { get; init; } = null!; public string Display => Title;",
+        "",
+        true,
+        "file,title"
+    )]
+    // The [JsonExtensionData] remainder is no field of its own.
+    [InlineData(
+        "public IFormFile File { get; init; } = null!; [System.Text.Json.Serialization.JsonExtensionData] public Dictionary<string, System.Text.Json.JsonElement> Extra { get; init; } = [];",
+        "",
+        true,
+        "file,title"
+    )]
+    // A header member is a header param, not a part.
+    [InlineData(
+        "public IFormFile File { get; init; } = null!; [RivetHeader(\"X-Trace\")] public string Trace { get; init; } = \"\";",
+        "",
+        true,
+        "file,title"
+    )]
     public void Tool_and_runtime_agree_on_which_inputs_carry_files(
         string members,
         string baseMembers,
-        bool form
+        bool form,
+        string parts
     )
     {
-        var source = $$"""
+        var compilation = CompilationHelper.CreateCompilation(
+            UploadSource($"UploadBase", members, $"public class UploadBase {{ {baseMembers} }}")
+        );
+
+        AssertToolAndRuntimeAgree(compilation, packageImage: null, form, parts);
+    }
+
+    /// <summary>
+    /// The same table for a base class from a package: outside the assemblies the type walk
+    /// follows, and imported by Roslyn without its non-public members, which still hide a
+    /// base's property at runtime.
+    /// </summary>
+    [Theory]
+    [InlineData("", "", "public IFormFile File { get; init; } = null!;", true, "file,title")]
+    [InlineData(
+        "",
+        "public string Note { get; init; } = \"\"; internal string Secret { get; init; } = \"\";",
+        "public List<IFormFile> Files { get; init; } = [];",
+        true,
+        "files,note,title"
+    )]
+    [InlineData(
+        "public IFormFile File { get; init; } = null!;",
+        "",
+        "public string Note { get; init; } = \"\";",
+        true,
+        "file,note,title"
+    )]
+    [InlineData(
+        "",
+        "public IFormFile File { get; init; } = null!;",
+        "internal new string File { get; init; } = \"\";",
+        false,
+        ""
+    )]
+    [InlineData(
+        "",
+        "public IFormFile File { get; init; } = null!;",
+        "private new string File { get; init; } = \"\";",
+        false,
+        ""
+    )]
+    [InlineData("", "", "public static IFormFile? Shared { get; set; }", false, "")]
+    public void Tool_and_runtime_agree_on_which_inputs_carry_files_from_a_package_base(
+        string members,
+        string packageRootMembers,
+        string packageBaseMembers,
+        bool form,
+        string parts
+    )
+    {
+        var (compilation, packageImage) = CompilationHelper.CreateCompilationWithPackageReference(
+            UploadSource("Packaged.PackageBase", members, ""),
+            PackageSource(packageRootMembers, packageBaseMembers)
+        );
+
+        AssertToolAndRuntimeAgree(compilation, packageImage, form, parts);
+    }
+
+    /// <summary>
+    /// A file on a package's base class is a part of the emitted multipart body. The input's
+    /// component stops at the package, as the type walk does, so the body is built inline from
+    /// the parts rather than referencing a component that has no file.
+    /// </summary>
+    [Fact]
+    public void A_file_on_a_package_base_is_a_part_of_the_multipart_body()
+    {
+        var (compilation, _) = CompilationHelper.CreateCompilationWithPackageReference(
+            UploadSource("Packaged.PackageBase", "", ""),
+            PackageSource("", "public IFormFile File { get; init; } = null!;")
+        );
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        using var document = JsonDocument.Parse(
+            Rivet.Tool.Emit.OpenApiEmitter.Emit(
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                null
+            )
+        );
+
+        var schema = GetMultipartSchema(GetOperation(document, "/api/uploads", "post"));
+        Assert.False(schema.TryGetProperty("$ref", out _));
+        AssertBinaryFileProperty(schema, "file");
+        Assert.True(schema.GetProperty("properties").TryGetProperty("title", out _));
+    }
+
+    private static string UploadSource(string baseType, string members, string baseDeclaration) =>
+        $$"""
             using System.Collections.Generic;
             using Microsoft.AspNetCore.Http;
             using Rivet;
 
             namespace Test;
 
-            public class UploadBase { {{baseMembers}} }
+            {{baseDeclaration}}
 
-            public class Upload : UploadBase
+            public class Upload : {{baseType}}
             {
                 public string Title { get; init; } = "";
                 {{members}}
@@ -782,23 +926,72 @@ public sealed class FormFileTests
                     Define.Post<Upload, string>("/api/uploads");
             }
             """;
-        var compilation = CompilationHelper.CreateCompilation(source);
-        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
 
+    private static string PackageSource(string rootMembers, string baseMembers) =>
+        $$"""
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.Http;
+
+            namespace Packaged;
+
+            public class PackageRoot { {{rootMembers}} }
+
+            public class PackageBase : PackageRoot { {{baseMembers}} }
+            """;
+
+    private static void AssertToolAndRuntimeAgree(
+        Microsoft.CodeAnalysis.Compilation compilation,
+        byte[]? packageImage,
+        bool form,
+        string parts
+    )
+    {
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
         var endpoint = Assert.Single(
             CompilationHelper.WalkContracts(compilation, discovered, walker)
         );
-        Assert.Equal(
-            form,
-            endpoint.Params.Any(p => p.Source is ParamSource.File or ParamSource.FormField)
-        );
+        var listed = endpoint
+            .Params.Where(p => p.Source is ParamSource.File or ParamSource.FormField)
+            .Select(p => p.Name)
+            .Order(StringComparer.Ordinal);
+        Assert.Equal(parts, string.Join(",", listed));
 
         using var image = new MemoryStream();
         Assert.True(compilation.Emit(image).Success);
-        var upload = Assembly.Load(image.ToArray()).GetType("Test.Upload", throwOnError: true);
-        var carriesFormFiles = typeof(Define)
-            .Assembly.GetType("Rivet.RequestInputLowering", throwOnError: true)!
-            .GetMethod("CarriesFormFiles", BindingFlags.NonPublic | BindingFlags.Static)!;
-        Assert.Equal(form, carriesFormFiles.Invoke(null, [upload]));
+        var context = new UploadLoadContext(packageImage);
+        try
+        {
+            var upload = context
+                .LoadMain(image.ToArray())
+                .GetType("Test.Upload", throwOnError: true);
+            var carriesFormFiles = typeof(Define)
+                .Assembly.GetType("Rivet.RequestInputLowering", throwOnError: true)!
+                .GetMethod("CarriesFormFiles", BindingFlags.NonPublic | BindingFlags.Static)!;
+            Assert.Equal(form, carriesFormFiles.Invoke(null, [upload]));
+        }
+        finally
+        {
+            context.Unload();
+        }
+    }
+
+    /// <summary>Loads the compiled test assembly beside the package it references.</summary>
+    private sealed class UploadLoadContext(byte[]? packageImage)
+        : System.Runtime.Loader.AssemblyLoadContext(isCollectible: true)
+    {
+        private Assembly? _package;
+
+        public Assembly LoadMain(byte[] mainImage)
+        {
+            if (packageImage is not null)
+            {
+                _package = LoadFromStream(new MemoryStream(packageImage));
+            }
+
+            return LoadFromStream(new MemoryStream(mainImage));
+        }
+
+        protected override Assembly? Load(AssemblyName assemblyName) =>
+            assemblyName.Name == "PackageAssembly" ? _package : null;
     }
 }

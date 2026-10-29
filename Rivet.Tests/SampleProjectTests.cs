@@ -110,6 +110,13 @@ public sealed class SampleProjectTests
 
         using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
 
+        // The contract's bearer endpoints are [Authorize]d: no token, no entry.
+        var anonymousResponse = await http.GetAsync("/api/members", cts.Token);
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+
+        // The sample's bearer handler takes any token.
+        http.DefaultRequestHeaders.Authorization = new("Bearer", "sample-token");
+
         // GET /api/members → 200 + JSON object (PagedResult)
         var listResponse = await http.GetAsync("/api/members", cts.Token);
         Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
@@ -145,6 +152,21 @@ public sealed class SampleProjectTests
             cts.Token
         );
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
+
+        // GET /api/members/{id}/avatar?token=… → 200 image/jpeg: .QueryAuth() carries the
+        // token in the query, for clients that can't set a header.
+        using var mediaPlayer = new HttpClient { BaseAddress = new Uri(server.Url) };
+        var avatarResponse = await mediaPlayer.GetAsync(
+            $"/api/members/{Guid.NewGuid()}/avatar?token=sample-token",
+            cts.Token
+        );
+        Assert.Equal(HttpStatusCode.OK, avatarResponse.StatusCode);
+        Assert.Equal("image/jpeg", avatarResponse.Content.Headers.ContentType?.MediaType);
+
+        // GET /api/health → 200: the one .Anonymous() endpoint, on the minimal API.
+        using var anonymous = new HttpClient { BaseAddress = new Uri(server.Url) };
+        var healthResponse = await anonymous.GetAsync("/api/health", cts.Token);
+        Assert.Equal(HttpStatusCode.OK, healthResponse.StatusCode);
     }
 
     [Fact]
@@ -157,6 +179,7 @@ public sealed class SampleProjectTests
         );
 
         using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
+        http.DefaultRequestHeaders.Authorization = new("Bearer", "sample-token");
 
         // (a) DataAnnotations violation: role/nickname too short → 422
         // ValidationErrorDto with field errors; handler not invoked (no id, no 201).

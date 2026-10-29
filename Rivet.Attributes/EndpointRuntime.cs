@@ -711,6 +711,24 @@ internal static class RivetTerminal
         }
     }
 
+    /// <summary>
+    /// A <c>[JsonExtensionData]</c> key that repeats a declared member's name would be written
+    /// twice (<see cref="RivetExtensionDataKeys"/>).
+    /// </summary>
+    internal static void EnsureExtensionDataKeysAreFree(
+        RivetBodyResult result,
+        JsonSerializerOptions options
+    )
+    {
+        if (
+            RivetExtensionDataKeys.FindRepeatedKey(result.Value!, result.PayloadType!, options) is
+            { } problem
+        )
+        {
+            throw Violation(result.Contract, problem);
+        }
+    }
+
     private static RivetContractViolationException Violation(
         EndpointContract contract,
         string detail

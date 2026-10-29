@@ -42,9 +42,16 @@ internal sealed record GeneratedRecord(
     string? ComponentId = null,
     IReadOnlyList<GeneratedSchemaMetadata>? SchemaMetadata = null,
     bool HasExtensionData = false,
+    // The source schema wrote additionalProperties ({} or a schema) rather than leaving it
+    // out: the bag is then emitted as additionalProperties: {}, and otherwise not at all.
+    bool DeclaresAdditionalProperties = false,
     // On a polymorphic variant: the tag property's schema as the source authored it, when
     // it is not the single-value enum the emitter would synthesize.
-    string? DiscriminatorSchemaJson = null
+    string? DiscriminatorSchemaJson = null,
+    // A multipart or urlencoded request body (or a base of one): the hosts' form binders,
+    // not System.Text.Json, read its members, so a renamed part carries the names they read
+    // and the record takes the init form (see CSharpWriter.WriteRecord).
+    bool IsFormInput = false
 );
 
 internal sealed record GeneratedSchemaMetadata(string Pointer, TsScalarMetadata Metadata);

@@ -356,7 +356,9 @@ internal static class CSharpWriter
         sb.AppendLine(
             GeneratedTypeAttribute(
                 record.ComponentId,
-                discriminatorSchemaJson: record.DiscriminatorSchemaJson
+                discriminatorSchemaJson: record.DiscriminatorSchemaJson,
+                declaresAdditionalProperties: record.HasExtensionData
+                    && record.DeclaresAdditionalProperties
             )
         );
         // Derived polymorphic records are not [RivetType] entry points — the walker
@@ -391,8 +393,14 @@ internal static class CSharpWriter
         // A polymorphic base with members is written the same way: its descendants inherit
         // those members, which a positional base would make every one of them forward
         // through its constructor, and a redeclared (`new`) member has no positional form.
+        //
+        // A form input is written the same way: the minimal-API form mapper refuses a request
+        // that leaves out any constructor parameter, nullable ones included, so a positional
+        // form record would make every optional part required on that host (pinned by
+        // FormPartNameTests).
         if (
-            CarriesValidationAttribute(record)
+            record.IsFormInput
+            || CarriesValidationAttribute(record)
             || HasRequiredNullableProperty(record)
             || HasOptionalNonNullableProperty(record)
             || record.Polymorphism is not null && record.Properties.Count > 0
@@ -408,7 +416,7 @@ internal static class CSharpWriter
                     sb.AppendLine();
                 }
                 var prop = record.Properties[i];
-                EmitPropertyAttributes(sb, prop, target: "");
+                EmitPropertyAttributes(sb, prop, target: "", record.IsFormInput);
                 var requiredKeyword = prop.IsRequired ? "required " : "";
                 var newKeyword = prop.HidesInherited ? "new " : "";
                 // Optional non-nullable properties need a suppressed default — there is
@@ -456,7 +464,7 @@ internal static class CSharpWriter
         {
             var prop = record.Properties[i];
             var separator = i < record.Properties.Count - 1 ? "," : closeSuffix;
-            EmitPropertyAttributes(sb, prop, target: "property: ");
+            EmitPropertyAttributes(sb, prop, target: "property: ", formInput: false);
             sb.AppendLine($"    {prop.CSharpType} {prop.Name}{separator}");
         }
 
@@ -505,7 +513,12 @@ internal static class CSharpWriter
     private static bool HasOptionalNonNullableProperty(GeneratedRecord record) =>
         record.Properties.Any(p => !p.IsRequired && !p.CSharpType.EndsWith('?'));
 
-    private static void EmitPropertyAttributes(StringBuilder sb, RecordProperty prop, string target)
+    private static void EmitPropertyAttributes(
+        StringBuilder sb,
+        RecordProperty prop,
+        string target,
+        bool formInput
+    )
     {
         foreach (var metadata in prop.SchemaMetadata ?? [])
         {
@@ -514,6 +527,24 @@ internal static class CSharpWriter
         if (prop.WireName is not null)
         {
             sb.AppendLine($"    [{target}JsonPropertyName({StringLiteral(prop.WireName)})]");
+        }
+        // No form binder reads [JsonPropertyName]; both ignore case. A part whose name isn't
+        // the property's gets the rename each host reads: [DataMember] for the minimal-API form
+        // mapper and [FromForm] for MVC. Qualified, since the record's file imports neither
+        // namespace and Microsoft.AspNetCore.Mvc's types could shadow an imported name.
+        if (
+            formInput
+            && prop.HeaderName is null
+            && prop.WireName is { } partName
+            && !string.Equals(partName, prop.Name, StringComparison.OrdinalIgnoreCase)
+        )
+        {
+            sb.AppendLine(
+                $"    [{target}global::System.Runtime.Serialization.DataMember(Name = {StringLiteral(partName)})]"
+            );
+            sb.AppendLine(
+                $"    [{target}global::Microsoft.AspNetCore.Mvc.FromForm(Name = {StringLiteral(partName)})]"
+            );
         }
         if (prop.HeaderName is not null)
         {
@@ -726,7 +757,8 @@ internal static class CSharpWriter
     private static string GeneratedTypeAttribute(
         string? componentId,
         string prefix = "",
-        string? discriminatorSchemaJson = null
+        string? discriminatorSchemaJson = null,
+        bool declaresAdditionalProperties = false
     )
     {
         var id = componentId is null ? "null" : StringLiteral(componentId);
@@ -734,7 +766,10 @@ internal static class CSharpWriter
         var tagSchema = discriminatorSchemaJson is null
             ? ""
             : $", DiscriminatorSchemaJson = {StringLiteral(discriminatorSchemaJson)}";
-        return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance}{tagSchema})]";
+        var additionalProperties = declaresAdditionalProperties
+            ? ", DeclaresAdditionalProperties = true"
+            : "";
+        return $"[{prefix}RivetGeneratedType({id}, {prefix}RivetGeneratedTypeProvenance.{provenance}{tagSchema}{additionalProperties})]";
     }
 
     public static string WriteContract(GeneratedContract contract, string ns)

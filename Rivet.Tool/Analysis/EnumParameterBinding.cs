@@ -16,8 +16,8 @@ internal enum ParameterBindingHost
     Mvc,
 
     /// <summary>
-    /// An Azure Functions isolated worker: route values reach the worker's input converters,
-    /// which parse an enum's text as JSON.
+    /// An Azure Functions isolated worker: route and query values reach the worker's input
+    /// converters, which parse an enum's text as JSON.
     /// </summary>
     Functions,
 }
@@ -172,7 +172,7 @@ internal static class EnumParameterBinding
         if (value.Parser == EnumParser.FunctionsJson)
         {
             return $"Azure Functions parameter '{parameterPath}' gets enum '{enumName}' from the "
-                + "worker's input converters, which read the route value as JSON, so the unquoted "
+                + "worker's input converters, which read a route or query value as JSON, so the unquoted "
                 + $"'{value.WireValue}' the spec advertises for member {value.MemberName} fails to "
                 + "convert and the function never runs (only an integer converts). Use a plain enum "
                 + "(integers on the wire), or bind a string and parse it in the function.";

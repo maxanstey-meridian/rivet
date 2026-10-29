@@ -36,8 +36,8 @@ dotnet rivet --project path/to/Api.csproj --output ./generated \
 ```
 
 - `--title <text>` — `info.title` (default `API`).
-- `--version <text>` — `info.version` (default `1.0.0`). Rivet has no
-  print-tool-version flag, so `--version` always means the spec version.
+- `--version <text>` — `info.version` (default `1.0.0`). It always means the spec
+  version; `--tool-version` prints Rivet's own.
 - `--server <url>` — adds a `servers` entry; repeat for multiple. Accepts absolute
   `http(s)` URLs or paths starting with `/`. With no `--server`, no `servers`
   block is emitted at all.
@@ -94,7 +94,9 @@ generate with. Any finding, warning or error, exits
 with code `1`, with or without `--output`. `--routes` lists every discovered
 endpoint (method, route, handler) and exits. `-q`/`--quiet` suppresses generation
 output (useful with `--check` in CI). `-h`/`--help` prints usage to stdout and
-exits `0`, whatever else is on the command line.
+exits `0`, whatever else is on the command line. `--tool-version` prints Rivet's
+own release (`0.50.0`, no build metadata) to stdout and exits `0`; only `--help`
+beats it. rivet-ts runs it to check a binary it didn't download itself.
 
 ### Drift gate (`--verify`)
 

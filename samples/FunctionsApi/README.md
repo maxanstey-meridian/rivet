@@ -1,7 +1,8 @@
 # Functions contract sample
 
 .NET 10 isolated Azure Functions with ASP.NET integration, contract-owned file
-responses and a declared JSON error. No Azure account or external storage needed.
+responses, a JSON endpoint with an enum route value and an enum query parameter,
+and a declared JSON error. No Azure account or external storage needed.
 
 From the repository root:
 
@@ -11,12 +12,16 @@ cd samples/FunctionsApi
 FUNCTIONS_WORKER_RUNTIME=dotnet-isolated func start
 ```
 
-Request `/api/images/png`, `/api/images/jpeg`, or `/api/images/gif` (404).
+Request `/api/images/png`, `/api/images/jpeg`, or `/api/images/gif` (404), and
+`/api/images/png/thumbnails/1?fit=0` for a thumbnail description. The sizes and
+fits are plain enums, integers on the wire, because the worker reads a route or
+query value as JSON.
 The small byte payloads are transport fixtures, not complete displayable images.
 
 Run `task test:functions` at the root for the real-host regression gate. It uses
 disposable copies and checks default, empty and custom prefixes, response bytes,
-MIME selection, errors, methods, OpenAPI emission and implementation coverage.
+MIME selection, errors, methods, OpenAPI emission, implementation coverage, and
+what the worker binds into a function's parameters.
 
 See [the Functions guide](../../docs/guides/azure-functions.md) for route conventions,
 configuration and coverage limitations. This sample references Rivet's source

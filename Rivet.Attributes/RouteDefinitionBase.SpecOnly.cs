@@ -33,9 +33,22 @@ public abstract partial class RouteDefinitionBase<TSelf>
     /// <summary>
     /// Carries the source OpenAPI response key and primary response description through
     /// generated C#. Concrete runtime status behavior remains controlled by <see cref="Status"/>.
+    /// The key must be one OpenAPI can key a response by (an exact status, an nXX range, or
+    /// default), as for <see cref="Returns(string, string?)"/>: generation refuses anything
+    /// else as RIV1120.
     /// </summary>
     public TSelf StatusKey(string statusKey, string? description = null) =>
-        Mutate(state => state with { SuccessStatusKey = statusKey });
+        Mutate(state =>
+            state with
+            {
+                SuccessStatusKey = (
+                    ResponseStatusKey.Parse(statusKey)
+                    ?? throw new InvalidOperationException(
+                        $"{Method} {Route}: success status key '{statusKey}' is not an exact status, nXX range, or default."
+                    )
+                ).Key,
+            }
+        );
 
     /// <summary>
     /// Declares the request body's media type when it is not application/json

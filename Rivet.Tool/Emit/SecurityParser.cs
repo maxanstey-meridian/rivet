@@ -22,13 +22,15 @@ public static class SecurityParser
         {
             var (name, definition) =
                 Parse(spec)
-                ?? throw new RivetUserException(
-                    $"error: invalid --security value '{spec}'; expected bearer[:format], cookie:name, apikey:location:name, or name=<value>"
+                ?? throw Diagnostics.Error(
+                    Diagnostics.InvalidSecurityOption,
+                    $"invalid --security value '{spec}'; expected bearer[:format], cookie:name, apikey:location:name, or name=<value>"
                 );
             if (!schemes.TryAdd(name, definition))
             {
-                throw new RivetUserException(
-                    $"error {Diagnostics.DuplicateSecuritySchemeDefinition}: duplicate --security scheme name '{name}'"
+                throw Diagnostics.Error(
+                    Diagnostics.DuplicateSecuritySchemeDefinition,
+                    $"duplicate --security scheme name '{name}'"
                 );
             }
             primary ??= name;

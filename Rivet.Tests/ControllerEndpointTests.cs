@@ -666,9 +666,13 @@ public sealed class ControllerEndpointTests
 
         var endpoint = Assert.Single(endpoints);
         Assert.True(endpoint.IsFormEncoded);
-        var body = Assert.Single(endpoint.Params);
-        Assert.Equal(ParamSource.Body, body.Source);
-        Assert.True(body.Type is TsType.TypeRef { Name: "LoginRequest" });
+        // The [FromForm] record's members are its form fields, and the body is described
+        // from its definition.
+        Assert.Equal(
+            [("email", ParamSource.FormField), ("password", ParamSource.FormField)],
+            endpoint.Params.Select(param => (param.Name, param.Source))
+        );
+        Assert.Equal("LoginRequest", endpoint.InputTypeName);
         var requestExample = Assert.Single(endpoint.RequestExamples!);
         Assert.Equal("application/x-www-form-urlencoded", requestExample.MediaType);
         Assert.Equal("""{"email":"ada@example.com","password":"secret"}""", requestExample.Json);

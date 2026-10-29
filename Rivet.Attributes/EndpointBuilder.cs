@@ -479,14 +479,20 @@ public abstract partial class RouteDefinitionBase<TSelf>
 
     private TSelf AddRequiredHeader(string? statusKey, string name, bool required) =>
         Mutate(state =>
-            required
+            // OpenAPI ignores a response header named Content-Type, so generation refuses it
+            // (RIV2009) and a required one would hold handlers to a header no spec carries.
+            name.Equals("Content-Type", StringComparison.OrdinalIgnoreCase)
+                ? throw new InvalidOperationException(
+                    $"{Method} {Route}: response header '{name}' is ignored by OpenAPI. A response's media type is its content: declare it with .ProducesContentType(...)."
+                )
+            : required
                 ? state with
                 {
                     RequiredHeaders = state.RequiredHeaders.Add(
                         new RouteRequiredHeader(statusKey, name)
                     ),
                 }
-                : state
+            : state
         );
 
     private TSelf AddResponseContent(

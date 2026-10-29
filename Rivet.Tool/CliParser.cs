@@ -1,3 +1,4 @@
+using System.Reflection;
 using Rivet.Tool.Emit;
 
 namespace Rivet.Tool;
@@ -204,6 +205,21 @@ internal static class CliParser
     /// <summary>Help wins over every other argument, so a partial command line plus --help still shows usage.</summary>
     public static bool IsHelpRequest(string[] args) => args.Any(arg => arg is "--help" or "-h");
 
+    /// <summary>
+    /// --tool-version wins over everything but --help, like it. It isn't --version, which
+    /// has always been the spec's info.version.
+    /// </summary>
+    public static bool IsToolVersionRequest(string[] args) => args.Contains("--tool-version");
+
+    /// <summary>
+    /// The release this binary was built as (the csproj Version), without the SDK's
+    /// "+commit" build metadata, so callers such as rivet-ts can compare it as semver.
+    /// </summary>
+    public static string ToolVersion { get; } =
+        typeof(CliParser)
+            .Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+            .InformationalVersion.Split('+')[0];
+
     public static void PrintUsage(TextWriter writer) =>
         writer.WriteLine(
             """
@@ -225,7 +241,7 @@ internal static class CliParser
               --openapi [file]           Explicit spec path override (relative paths resolve against --output)
               --security <[name=]spec>   Emit security scheme (repeatable); import accepts one scheme name
               --title <text>             Spec info.title (default: API)
-              --version <text>           Spec info.version (default: 1.0.0) — there is no print-tool-version flag
+              --version <text>           Spec info.version (default: 1.0.0), not Rivet's (see --tool-version)
               --server <url>             Spec servers entry (repeatable; omitted entirely when not given)
               --from <contract.json>     Emit OpenAPI from a Rivet contract JSON file
               --from-openapi <spec.json> Onboarding scaffold: one-shot import of an OpenAPI spec
@@ -237,6 +253,7 @@ internal static class CliParser
                                          exit 1 on drift (CI gate for committed openapi.json)
               --routes                   List all discovered endpoints (method, route, handler)
               -q, --quiet                Suppress codegen output (useful with --check)
+              --tool-version             Print Rivet's own version and exit
               -h, --help                 Show this help
             """
         );

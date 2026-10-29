@@ -293,8 +293,9 @@ public sealed class KitchenSinkImportTests
         var result = _fixtureImport;
         var content = CompilationHelper.FindFile(result, "UsersContract.cs");
 
-        // DELETE with 204 → bare RouteDefinition (no type param), 204 is default for DELETE
-        Assert.Contains("public static readonly RouteDefinition Delete", content);
+        // DELETE with 204 → an input-only definition (its path parameter is the input, there
+        // is no output type), 204 is default for DELETE
+        Assert.Contains("public static readonly InputRouteDefinition<DeleteInput> Delete", content);
         Assert.Contains("Define.Delete(\"/api/users/{userId}\")", content);
         Assert.DoesNotContain(".Status(", content.Split("Delete =")[1].Split(";")[0]);
     }

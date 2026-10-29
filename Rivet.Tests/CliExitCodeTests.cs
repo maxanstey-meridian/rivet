@@ -249,7 +249,8 @@ public sealed class CliExitCodeTests
     }
 
     // --security replaces the source's security for --check as it does for emission: the
-    // apiKey header it names is the credential, not an undeclared input.
+    // apiKey header it names is the credential, not an undeclared input, and the authorized
+    // controller agrees with the secured contract (RIV4008).
     [Fact]
     public async Task Check_Reads_Security_From_The_Command_Line()
     {
@@ -269,6 +270,7 @@ public sealed class CliExitCodeTests
                     Define.Get<ItemDto>("/api/items");
             }
 
+            [Microsoft.AspNetCore.Authorization.Authorize]
             [ApiController]
             [Route("api")]
             public sealed class ItemsController : ControllerBase
@@ -294,7 +296,7 @@ public sealed class CliExitCodeTests
     }
 
     [Theory]
-    [InlineData("oauth2", "invalid --security value")]
+    [InlineData("oauth2", "error RIV2018: invalid --security value")]
     [InlineData("admin=bearer,admin=cookie:sid", "duplicate --security scheme name")]
     public async Task Invalid_Security_Exits_1_Without_Stack_Trace(
         string securitySchemes,

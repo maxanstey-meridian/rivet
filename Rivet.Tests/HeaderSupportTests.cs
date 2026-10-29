@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Rivet.Tool;
+using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -212,7 +213,7 @@ public sealed class HeaderSupportTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}"){{chain}};
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}"){{chain}};
             }
             """;
 
@@ -239,7 +240,7 @@ public sealed class HeaderSupportTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .WithResponseHeader("ETag")
                         .Returns(429)
                         .WithResponseHeader(429, "etag");
@@ -269,7 +270,7 @@ public sealed class HeaderSupportTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .WithResponseHeader(404, "X-Lost-And-Found");
             }
             """;
@@ -356,6 +357,213 @@ public sealed class HeaderSupportTests
     // OpenApiEmitter — responses[status].headers
     // ---------------------------------------------------------------
 
+    [Theory]
+    [InlineData(".WithResponseHeader(\"Content-Type\", required: true)", "200")]
+    [InlineData(".Returns(404).WithResponseHeader(404, \"content-type\")", "404")]
+    [InlineData(
+        ".StatusKey(\"2XX\").WithResponseHeaderKey<string>(\"2XX\", \"CONTENT-TYPE\")",
+        "2XX"
+    )]
+    public void Emitter_Refuses_A_Response_Header_Named_Content_Type_With_RIV2009(
+        string declaration,
+        string status
+    )
+    {
+        // G.11: OpenAPI says such a header "SHALL be ignored", so the spec would drop it
+        // while the adapters demand it.
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<string> ListItems =
+                    Define.Get<string>("/api/items"){{declaration}};
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source).Dispose()
+        );
+
+        Assert.StartsWith("error RIV2009:", exception.Message);
+        Assert.Contains($"on status {status} of endpoint 'items.listItems'", exception.Message);
+        Assert.Contains(".ProducesContentType(...)", exception.Message);
+    }
+
+    [Fact]
+    public void Contract_Json_Response_Header_Named_Content_Type_Fails_With_RIV2009()
+    {
+        var json = """
+            { "types": [], "enums": [], "endpoints": [{
+              "name": "get", "httpMethod": "GET", "routeTemplate": "/api/things", "params": [],
+              "controllerName": "things",
+              "responses": [{ "statusCode": 200, "headers": [
+                { "name": "Content-Type", "type": { "kind": "primitive", "type": "string" } }
+              ] }] }] }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApiFromJson(json)
+        );
+
+        Assert.StartsWith("error RIV2009:", exception.Message);
+        Assert.Contains("response header 'Content-Type' on status 200", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("Accept")]
+    [InlineData("Authorization")]
+    public void Only_Content_Type_Is_Reserved_On_A_Response(string header)
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<string> ListItems =
+                    Define.Get<string>("/api/items").WithResponseHeader("{{header}}");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+
+        Assert.True(
+            doc.RootElement.GetProperty("paths")
+                .GetProperty("/api/items")
+                .GetProperty("get")
+                .GetProperty("responses")
+                .GetProperty("200")
+                .GetProperty("headers")
+                .TryGetProperty(header, out _)
+        );
+    }
+
+    [Theory]
+    [InlineData("ItemDto", "the schema 'ItemDto'")]
+    [InlineData("string[]", "an array")]
+    public void A_Response_Header_SchemaType_On_A_Non_Primitive_Fails_With_RIV1117(
+        string type,
+        string mapsTo
+    )
+    {
+        // It only re-types a primitive leaf, so it used to vanish from the schema.
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<string> ListItems =
+                    Define.Get<string>("/api/items")
+                        .WithResponseHeader<{{type}}>("X-Item", schemaType: "string");
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source).Dispose()
+        );
+
+        Assert.StartsWith($"error {Diagnostics.SchemaTypeOnNonPrimitive}:", exception.Message);
+        Assert.Contains("schemaType: \"string\" on response header 'X-Item'", exception.Message);
+        Assert.Contains("endpoint 'listItems'", exception.Message);
+        Assert.Contains(mapsTo, exception.Message);
+        Assert.Contains("drop schemaType:", exception.Message);
+    }
+
+    [Fact]
+    public void Imported_Content_Type_Response_Headers_Stay_Out_Of_The_Contract_And_Come_Back_Verbatim()
+    {
+        // G.11's import side: OpenAPI ignores them, so the C# never declares them (emit would
+        // refuse it), and preserved-field provenance writes them back as the source had them.
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/markdown": {
+                "post": {
+                    "operationId": "render",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "headers": {
+                                "Content-Type": { "schema": { "type": "string" }, "example": "text/html" },
+                                "X-Version": { "schema": { "type": "string" } }
+                            }
+                        }
+                    }
+                }
+            },
+            "/raw": {
+                "get": {
+                    "operationId": "raw",
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "headers": { "content-type": { "schema": { "type": "string" } } }
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var imported = CompilationHelper.Import(spec);
+        var contractSource = CompilationHelper.FindFile(imported, "Contract.cs");
+        Assert.DoesNotContain(
+            "\"Content-Type\"",
+            contractSource,
+            StringComparison.OrdinalIgnoreCase
+        );
+        Assert.Contains("\"X-Version\"", contractSource);
+
+        var compilation = CompilationHelper.CompileImportResult(imported);
+        var (discovered, walker) = CompilationHelper.DiscoverAndWalk(compilation);
+        var endpoints = CompilationHelper.WalkContracts(compilation, discovered, walker);
+        using var emitted = JsonDocument.Parse(
+            OpenApiEmitter.Emit(
+                endpoints,
+                walker.Definitions,
+                walker.Brands,
+                walker.Enums,
+                security: null,
+                new OpenApiDocumentInfo(
+                    Provenance: OpenApiProvenanceWalker.Walk(compilation, walker)
+                )
+            )
+        );
+        var paths = emitted.RootElement.GetProperty("paths");
+        var markdown = paths
+            .GetProperty("/markdown")
+            .GetProperty("post")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("headers");
+        Assert.Equal(
+            "text/html",
+            markdown.GetProperty("Content-Type").GetProperty("example").GetString()
+        );
+        Assert.True(markdown.TryGetProperty("X-Version", out _));
+        var raw = paths
+            .GetProperty("/raw")
+            .GetProperty("get")
+            .GetProperty("responses")
+            .GetProperty("200")
+            .GetProperty("headers");
+        Assert.Equal(
+            "string",
+            raw.GetProperty("content-type").GetProperty("schema").GetProperty("type").GetString()
+        );
+    }
+
     [Fact]
     public void Emitter_Writes_Response_Headers_Shape()
     {
@@ -423,7 +631,7 @@ public sealed class HeaderSupportTests
             public static class TasksContract
             {
                 public static readonly RouteDefinition<TaskDto> GetTask =
-                    Define.Get<TaskDto>("/api/tasks/{id}")
+                    Define.Get<TaskDto>("/api/tasks/{id:guid}")
                         .WithResponseHeader<int>("X-Rate-Limit", {{argument}});
             }
             """;
@@ -432,6 +640,7 @@ public sealed class HeaderSupportTests
             CompilationHelper.EmitOpenApi(source)
         );
 
+        Assert.StartsWith("error RIV1123: ", exception.Message);
         Assert.Contains(expected, exception.Message);
         Assert.Contains("response header 'X-Rate-Limit' on endpoint '", exception.Message);
         Assert.Contains("getTask'", exception.Message);
@@ -467,6 +676,7 @@ public sealed class HeaderSupportTests
             CompilationHelper.EmitOpenApi(source)
         );
 
+        Assert.StartsWith("error RIV1123: ", exception.Message);
         Assert.Contains(expected, exception.Message);
         Assert.Contains("'X-Trace' on endpoint '", exception.Message);
         Assert.Contains("listTasks'", exception.Message);

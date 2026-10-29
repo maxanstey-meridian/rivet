@@ -344,6 +344,34 @@ public sealed class CliParserTests
     }
 
     [Fact]
+    public void ToolVersion_Is_The_Release_Without_Build_Metadata()
+    {
+        Assert.Matches(@"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$", CliParser.ToolVersion);
+        Assert.Equal(
+            typeof(CliParser).Assembly.GetName().Version!.ToString(3),
+            CliParser.ToolVersion.Split('-')[0]
+        );
+    }
+
+    [Fact]
+    public void IsToolVersionRequest_Is_Only_The_Tool_Flag()
+    {
+        Assert.True(CliParser.IsToolVersionRequest(["--project", "Api.csproj", "--tool-version"]));
+        Assert.False(
+            CliParser.IsToolVersionRequest(["--from", "contract.json", "--version", "2.0.0"])
+        );
+    }
+
+    [Fact]
+    public void PrintUsage_IncludesToolVersionFlag()
+    {
+        using var writer = new StringWriter();
+        CliParser.PrintUsage(writer);
+
+        Assert.Contains("--tool-version", writer.ToString());
+    }
+
+    [Fact]
     public void ParseArgs_FromOpenApi_Rejects_Generation_Security_Configuration()
     {
         string[][] invalidArguments =
