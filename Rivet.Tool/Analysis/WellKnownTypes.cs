@@ -57,6 +57,9 @@ public sealed class WellKnownTypes(Compilation c)
 
     // Binding and response attributes
     public INamedTypeSymbol? Route { get; } = c.GetTypeByMetadataName(Mvc + "RouteAttribute");
+
+    // [Area]: the value MVC substitutes for an [area] route token.
+    public INamedTypeSymbol? Area { get; } = c.GetTypeByMetadataName(Mvc + "AreaAttribute");
     public INamedTypeSymbol? FromBody { get; } = c.GetTypeByMetadataName(Mvc + "FromBodyAttribute");
     public INamedTypeSymbol? FromForm { get; } = c.GetTypeByMetadataName(Mvc + "FromFormAttribute");
     public INamedTypeSymbol? FromQuery { get; } =
@@ -300,6 +303,11 @@ public sealed class WellKnownTypes(Compilation c)
         c.GetTypeByMetadataName(Authorization + "AuthorizationPolicy");
     public INamedTypeSymbol? AuthorizationPolicyBuilder { get; } =
         c.GetTypeByMetadataName(Authorization + "AuthorizationPolicyBuilder");
+
+    // Where ASP.NET's UseStartup lives: the Startup type it's handed has its Configure…
+    // methods run by the host.
+    public INamedTypeSymbol? WebHostBuilderExtensions { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Hosting.WebHostBuilderExtensions");
 
     /// <summary>HTTP method attribute symbol → verb ("GET", "POST", …).</summary>
     public ImmutableDictionary<INamedTypeSymbol, string> HttpMethodAttributes { get; } =

@@ -3515,7 +3515,7 @@ public sealed class CoverageCheckerTests
             public static class NoteContextExtensions
             {
                 public static string? GetTenantId(this HttpContext context) =>
-                    context.Items["tenant"] as string;
+                    context.Request.RouteValues["tenant"] as string;
             }
         }
 
@@ -3992,15 +3992,19 @@ public sealed class CoverageCheckerTests
 
             public static int Status(this ControllerBase controller) =>
                 controller.Response.StatusCode;
+
+            public static string Audit(HttpContext context) => context.TraceIdentifier;
         }
         """;
 
     // A helper on this that never reads the request, or only names itself, still leaves the
-    // route value unbound.
+    // route value unbound, and so does one handed the HttpContext that never reads its request:
+    // a helper with source is judged by its body, not by what it's handed.
     [Theory]
     [InlineData("var id = Spin();", "private string? Spin() => Spin();")]
     [InlineData("var status = Status();", "private int Status() => Response.StatusCode;")]
     [InlineData("var status = RouteReader.Status(this);", "")]
+    [InlineData("var user = RouteReader.Audit(HttpContext);", "")]
     public void Handler_helper_that_reads_no_request_is_told_an_input_is_unbound(
         string body,
         string members

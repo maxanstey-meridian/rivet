@@ -6,7 +6,10 @@ namespace Rivet;
 /// absence of a format when the CLR type would otherwise infer one.
 /// </summary>
 [AttributeUsage(
-    AttributeTargets.Property | AttributeTargets.Class | AttributeTargets.Enum,
+    AttributeTargets.Property
+        | AttributeTargets.Class
+        | AttributeTargets.Struct
+        | AttributeTargets.Enum,
     Inherited = false
 )]
 public sealed class RivetFormatAttribute : Attribute

@@ -292,6 +292,15 @@ public static class JsonContractReader
             );
         }
 
+        if (RouteParser.HasLiteralBrace(endpoint.RouteTemplate))
+        {
+            throw new JsonException(
+                $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate}) "
+                    + "has a routeTemplate with a literal brace ('{{' or '}}'), which an OpenAPI path can't hold. "
+                    + "Write it as an OpenAPI path key with bare '{name}' tokens and no other braces."
+            );
+        }
+
         foreach (var token in tokens)
         {
             var syntax = new List<string>();

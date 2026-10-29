@@ -602,6 +602,82 @@ public sealed class MetadataAttributeTests
         Assert.Equal("uri-template", prop.GetProperty("format").GetString());
     }
 
+    // A [RivetScalar] brand may be a class or a struct, and RIV1117 tells either to take
+    // its format from a [RivetFormat] on the brand, so the attribute must reach both.
+    [Theory]
+    [InlineData("sealed record")]
+    [InlineData("readonly record struct")]
+    public void RivetFormat_On_A_Scalar_Brand_Sets_The_Brand_Format(string declaration)
+    {
+        var source = $$"""
+            using Rivet;
+
+            [RivetScalar, RivetFormat("email")]
+            public {{declaration}} Email(string Value);
+
+            [RivetType]
+            public sealed record ContactDto(Email Address);
+
+            [RivetContract]
+            public static class ContactContract
+            {
+                public static readonly RouteDefinition<ContactDto> Get = Define.Get<ContactDto>("/api/contact");
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var brand = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("Email");
+
+        Assert.Equal("string", brand.GetProperty("type").GetString());
+        Assert.Equal("email", brand.GetProperty("format").GetString());
+        Assert.Equal("Email", brand.GetProperty("x-rivet-brand").GetString());
+    }
+
+    // An older Rivet.Attributes writes a shorter [RivetGeneratedSchemaMetadata]: the arguments
+    // it lacks read as absent, as IntAt, StringAt, and BoolAt read them, never out of range.
+    [Fact]
+    public void Generated_Schema_Metadata_From_An_Older_Version_Reads_Missing_Arguments_As_Absent()
+    {
+        var source = """
+            using System;
+            using Rivet;
+
+            [RivetType]
+            public sealed record ResultDto(
+                [property: RivetGeneratedSchemaMetadata("", null, "Older metadata.", null, null, null, -1, -1, null)]
+                double Ratio);
+
+            [RivetContract]
+            public static class ResultContract
+            {
+                public static readonly RouteDefinition<ResultDto> Get = Define.Get<ResultDto>("/api/result");
+            }
+
+            namespace Rivet
+            {
+                [AttributeUsage(AttributeTargets.Property)]
+                public sealed class RivetGeneratedSchemaMetadataAttribute(
+                    string pointer, string? title, string? description, string? defaultValue,
+                    string? example, string? examples, int minLength, int maxLength,
+                    string? pattern) : Attribute;
+            }
+            """;
+
+        using var doc = CompilationHelper.EmitOpenApi(source);
+        var ratio = doc
+            .RootElement.GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("ResultDto")
+            .GetProperty("properties")
+            .GetProperty("ratio");
+
+        Assert.Equal("Older metadata.", ratio.GetProperty("description").GetString());
+        Assert.False(ratio.TryGetProperty("minimum", out _));
+    }
+
     // ========== Enum wire representation ==========
 
     [Fact]

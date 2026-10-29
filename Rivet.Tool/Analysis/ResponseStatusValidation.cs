@@ -10,12 +10,6 @@ namespace Rivet.Tool.Analysis;
 internal static class ResponseStatusValidation
 {
     /// <summary>
-    /// rivet-contract-schema.json's statusKey pattern: <see cref="IsStatusKey"/>'s rule in the
-    /// schema's (ECMA) regex dialect.
-    /// </summary>
-    internal const string StatusKeyPattern = "^(default|[1-5](?:[0-9]{2}|[Xx]{2}))$";
-
-    /// <summary>
     /// A response key contract JSON can carry: one the runtime takes
     /// (<see cref="ResponseStatusKey.Parse"/>: a three-digit code, a range like <c>4XX</c> or
     /// <c>4xx</c>, or default), with default spelled as OpenAPI's lowercase field, since the

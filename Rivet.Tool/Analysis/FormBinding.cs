@@ -108,10 +108,12 @@ internal static class FormBinding
     /// <summary>
     /// The members <paramref name="binder"/> binds on <paramref name="type"/>: each parameter
     /// of the constructor it calls (<see cref="BoundConstructor"/>) with the property it sets,
-    /// then every other property it can see with a public setter or init accessor, less those
-    /// an attribute takes out for it (<see cref="Skips"/>); none when it can't create the type
-    /// (<see cref="CantCreate"/>). The properties are <see cref="FormBoundProperties"/>, so a
-    /// derived member hides its base's however accessible it is, and a package base counts.
+    /// then every other property it can see and set (<see cref="Sets"/>), less those an
+    /// attribute takes out for it (<see cref="Skips"/>); none when it can't create the type
+    /// (<see cref="CantCreate"/>). <c>[AsParameters]</c> stops at the constructor: given one
+    /// with parameters, RequestDelegateFactory binds its arguments and sets no property. The
+    /// properties are <see cref="FormBoundProperties"/>, so a derived member hides its base's
+    /// however accessible it is, and a package base counts.
     /// </summary>
     internal static IReadOnlyList<BoundMember> BoundMembers(
         Compilation compilation,
@@ -128,7 +130,8 @@ internal static class FormBinding
         }
 
         var bound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var parameter in BoundConstructor(type, properties, binder)?.Parameters ?? [])
+        var constructor = BoundConstructor(type, properties, binder);
+        foreach (var parameter in constructor?.Parameters ?? [])
         {
             var property = properties.FirstOrDefault(candidate =>
                 string.Equals(candidate.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)
@@ -144,10 +147,15 @@ internal static class FormBinding
             );
         }
 
+        if (binder == Binder.AsParameters && constructor is not null)
+        {
+            return members;
+        }
+
         members.AddRange(
             properties
                 .Where(property =>
-                    property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
+                    Sets(binder, property)
                     && !bound.Contains(property.Name)
                     && Skips(wkt, binder, property) is null
                 )
@@ -155,6 +163,33 @@ internal static class FormBinding
         );
         return members;
     }
+
+    /// <summary>
+    /// Whether <paramref name="binder"/> fills <paramref name="property"/> outside a
+    /// constructor: through a public setter or init accessor, or, for MVC, in place. MVC binds
+    /// a get-only property of a reference type that isn't an array or a string
+    /// (ComplexObjectModelBinder.CanUpdateReadOnlyProperty), and a collection binder then adds
+    /// to the collection the getter returns (ModelBindingHelper.GetCompatibleCollection), so a
+    /// get-only <c>ICollection&lt;T&gt;</c> such as <c>List&lt;IFormFile&gt; Files { get; } = [];</c>
+    /// is bound. Any other member a binder replaces, and with no setter the new value is thrown
+    /// away, so a get-only <c>IFormFile</c> stays unbound. Pinned on real hosts by
+    /// <c>FormPartNameTests.The_hosts_skip_these_members_differently</c>.
+    /// </summary>
+    private static bool Sets(Binder binder, IPropertySymbol property) =>
+        property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
+        || binder == Binder.Mvc
+            && property.Type
+                is INamedTypeSymbol
+                {
+                    IsReferenceType: true,
+                    SpecialType: not SpecialType.System_String
+                } collection
+            && collection
+                .AllInterfaces.Append(collection)
+                .Any(candidate =>
+                    candidate.OriginalDefinition.SpecialType
+                    == SpecialType.System_Collections_Generic_ICollection_T
+                );
 
     /// <summary>
     /// The constructor <paramref name="binder"/> creates <paramref name="type"/> with, when its
@@ -169,7 +204,8 @@ internal static class FormBinding
     /// matching parameters to properties ignoring case. With several, the form mapper binds
     /// nothing and <c>[AsParameters]</c> calls the parameterless one.</item>
     /// </list>
-    /// Pinned on real hosts by <c>FormPartNameTests.The_hosts_construct_these_types_differently</c>.
+    /// Pinned on real hosts by <c>FormPartNameTests.The_hosts_construct_these_types_differently</c>
+    /// and <c>MinimalApiBindingHostTests.AsParameters_binds_what_its_constructor_allows</c>.
     /// </summary>
     internal static IMethodSymbol? BoundConstructor(
         INamedTypeSymbol type,
@@ -198,29 +234,66 @@ internal static class FormBinding
 
     /// <summary>
     /// Why <paramref name="binder"/> binds no member of <paramref name="type"/> at all, or null
-    /// when it can create it. MVC needs its record constructor (<see cref="BoundConstructor"/>),
-    /// a public parameterless constructor, or a struct, and otherwise fails the request; the
-    /// form mapper answers a type with more than one public constructor with nothing bound.
+    /// when it can create it.
+    /// <list type="bullet">
+    /// <item>MVC (ComplexObjectModelBinder.CreateModel) fails the request for an abstract type,
+    /// and for one with neither its record constructor (<see cref="BoundConstructor"/>) nor a
+    /// public parameterless constructor, which covers a struct or record struct that declares
+    /// none: reflection lists no implicit one.</item>
+    /// <item>The form mapper binds nothing on an abstract type or one with more than one public
+    /// constructor.</item>
+    /// <item><c>[AsParameters]</c> (ParameterBindingMethodCache.FindConstructor) refuses the
+    /// endpoint at startup for an abstract type, for a class with several public constructors
+    /// and no parameterless one, or none at all, and for a constructor parameter that matches
+    /// no property by its name (ignoring case) and type.</item>
+    /// </list>
+    /// Pinned on real hosts by <c>FormPartNameTests.The_hosts_construct_these_types_differently</c>
+    /// and <c>MinimalApiBindingHostTests.AsParameters_refuses_a_type_it_cant_create</c>.
     /// </summary>
     internal static string? CantCreate(
         INamedTypeSymbol type,
         IReadOnlyList<IPropertySymbol> properties,
         Binder binder
-    ) =>
-        binder switch
+    )
+    {
+        var constructors = PublicConstructors(type);
+        var parameterless = constructors.Any(constructor => constructor.Parameters.Length == 0);
+        return binder switch
         {
+            Binder.Mvc when type.IsAbstract => "MVC's model binder can't create an abstract type",
             Binder.Mvc
-                when !type.IsValueType
-                    && BoundConstructor(type, properties, Binder.Mvc) is null
-                    && !PublicConstructors(type)
-                        .Any(constructor => constructor.Parameters.Length == 0) =>
+                when BoundConstructor(type, properties, Binder.Mvc) is null && !parameterless =>
                 "MVC's model binder can't create it: it needs a public parameterless constructor, or a "
-                    + "record's one public constructor whose every parameter matches a property by its "
-                    + "exact name and type",
-            Binder.FormMapper when PublicConstructors(type).Count > 1 =>
+                    + "record class's one public constructor whose every parameter matches a property by "
+                    + "its exact name and type",
+            Binder.FormMapper when type.IsAbstract =>
+                "the minimal-API form mapper binds nothing on an abstract type",
+            Binder.FormMapper when constructors.Count > 1 =>
                 "the minimal-API form mapper binds nothing on a type with more than one public constructor",
+            Binder.AsParameters when type.IsAbstract =>
+                "[AsParameters] refuses an abstract type at startup",
+            Binder.AsParameters
+                when !type.IsValueType && constructors.Count != 1 && !parameterless =>
+                "[AsParameters] refuses it at startup: it needs one public constructor, or a "
+                    + "parameterless one among several",
+            Binder.AsParameters
+                when constructors is [{ Parameters: var parameters }]
+                    && parameters.FirstOrDefault(parameter =>
+                        !properties.Any(property =>
+                            string.Equals(
+                                property.Name,
+                                parameter.Name,
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                            && SymbolEqualityComparer.Default.Equals(property.Type, parameter.Type)
+                        )
+                    )
+                        is { } unmatched =>
+                $"[AsParameters] refuses it at startup: its constructor's parameter '{unmatched.Name}' "
+                    + "matches no public property by its name and type",
             _ => null,
         };
+    }
 
     // What reflection's GetConstructors() lists: a struct's implicit parameterless
     // constructor isn't one.
@@ -285,9 +358,9 @@ internal static class FormBinding
             {
                 throw Diagnostics.Error(
                     Diagnostics.UnresolvedBindingSource,
-                    $"form input '{named.Name}' on {where} binds no part: {why}. Give it one public "
-                        + "constructor: a parameterless one with settable properties, or a positional "
-                        + "record's."
+                    $"form input '{named.Name}' on {where} binds no part: {why}. Make it a class "
+                        + "with one public constructor: a parameterless one with settable properties, or "
+                        + "a positional record's."
                 );
             }
         }
@@ -334,20 +407,31 @@ internal static class FormBinding
                 continue;
             }
 
-            // All null was handled above, so this is one host binding what the other skips.
+            // All null was handled above, so this is one host binding what the other skips,
+            // or what only MVC can fill in place.
             if (binders.Where(binder => members[binder] is null).ToList() is [var dropped])
             {
+                var (droppedBy, keptBy) =
+                    dropped == Binder.Mvc
+                        ? ("MVC's model binder", "the minimal-API form mapper")
+                        : ("the minimal-API form mapper", "MVC's model binder");
                 var skippedBy = Skips(wkt, dropped, property);
                 throw Diagnostics.Error(
                     Diagnostics.UnresolvedBindingSource,
                     $"form input member '{property.Name}' on {where} is "
                         + (
-                            dropped == Binder.Mvc
-                                ? $"skipped by MVC's model binder ({skippedBy}) but bound by the minimal-API form mapper"
-                                : $"skipped by the minimal-API form mapper ({skippedBy}) but bound by MVC's model binder"
+                            skippedBy is null
+                                ? $"bound by {keptBy}, which fills the collection its getter returns, but "
+                                    + $"left unset by {droppedBy}, which needs a public setter or init accessor"
+                                : $"skipped by {droppedBy} ({skippedBy}) but bound by {keptBy}"
                         )
                         + ", so no one form body describes what every host that can serve the contract "
-                        + "reads. Skip it for both ([BindNever] and [IgnoreDataMember]) or neither."
+                        + "reads. "
+                        + (
+                            skippedBy is null
+                                ? "Give it a public setter or init accessor."
+                                : "Skip it for both ([BindNever] and [IgnoreDataMember]) or neither."
+                        )
                 );
             }
 

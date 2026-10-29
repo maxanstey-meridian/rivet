@@ -24,28 +24,41 @@ public static class EndpointMerger
             contractEndpoints.Count + annotationEndpoints.Count
         );
         var byTransportIdentity =
-            new Dictionary<(string Method, string Route), TsEndpointDefinition>();
+            new Dictionary<
+                (string Method, string Route),
+                (TsEndpointDefinition Endpoint, bool FromContract)
+            >();
 
         // Contract-first ordering is the deterministic representative choice for
         // equivalent declarations (same precedence as the previous (ControllerName,
         // Name) merge): contract endpoints are seeded first, annotation endpoints
         // only fill transport identities no contract endpoint declared.
-        foreach (var endpoint in contractEndpoints.Concat(annotationEndpoints))
+        foreach (
+            var (endpoint, fromContract) in contractEndpoints
+                .Select(endpoint => (endpoint, true))
+                .Concat(annotationEndpoints.Select(endpoint => (endpoint, false)))
+        )
         {
             var key = TransportIdentity.Key(endpoint.HttpMethod, endpoint.RouteTemplate);
             if (byTransportIdentity.TryGetValue(key, out var existing))
             {
-                if (EndpointSurfaceEquivalent(existing, endpoint))
+                if (EndpointSurfaceEquivalent(existing.Endpoint, endpoint))
                 {
                     // Equivalent representations of one operation collapse; the first
                     // (contract-first) representative stays.
                     continue;
                 }
 
-                throw Conflict(key.Method, key.Route, existing, endpoint);
+                throw Conflict(
+                    key.Method,
+                    key.Route,
+                    existing.Endpoint,
+                    endpoint,
+                    SecurityRemedy(existing.FromContract, fromContract)
+                );
             }
 
-            byTransportIdentity[key] = endpoint;
+            byTransportIdentity[key] = (endpoint, fromContract);
             merged.Add(endpoint);
         }
 
@@ -55,13 +68,16 @@ public static class EndpointMerger
     /// <summary>
     /// RIV2012 for two endpoints at one transport identity that aren't
     /// <see cref="EndpointSurfaceEquivalent"/>. When security is all that differs, it says
-    /// what each one's security is and how to align them; otherwise it names both.
+    /// what each one's security is and how to align them, in the caller's terms
+    /// (<paramref name="securityRemedy"/>: what the pair's sources declare security with);
+    /// otherwise it names both.
     /// </summary>
     internal static RivetUserException Conflict(
         string method,
         string route,
         TsEndpointDefinition existing,
-        TsEndpointDefinition endpoint
+        TsEndpointDefinition endpoint,
+        string securityRemedy
     ) =>
         EndpointSurfaceEquivalent(existing, endpoint with { Security = existing.Security })
             ? Diagnostics.Error(
@@ -69,8 +85,7 @@ public static class EndpointMerger
                 $"transport identity {method} {route} is declared by two endpoints that agree on everything but security: "
                     + $"'{existing.ControllerName}.{existing.Name}' {DescribeSecurity(existing.Security)}, and "
                     + $"'{endpoint.ControllerName}.{endpoint.Name}' {DescribeSecurity(endpoint.Security)}. "
-                    + "Declare the same security on both: an action that serves a contract's operation repeats it with "
-                    + "[RivetSecure(...)], [RivetAndSecure(...)], [RivetOrAnonymous], or [RivetAnonymous]."
+                    + $"Declare the same security on both: {securityRemedy}."
             )
             : Diagnostics.Error(
                 Diagnostics.ConflictingOperations,
@@ -78,6 +93,26 @@ public static class EndpointMerger
                     + $"'{existing.ControllerName}.{existing.Name}' and '{endpoint.ControllerName}.{endpoint.Name}'. "
                     + "Resolve the contradiction at the source — first-wins/last-wins cannot resolve conflicting declarations."
             );
+
+    /// <summary>
+    /// How a merged pair aligns its security, by what each side declares it with: a contract
+    /// definition with builder calls, an annotated action (or abstract contract method) with
+    /// attributes (<see cref="SecurityDeclaration"/>'s two spellings).
+    /// </summary>
+    private static string SecurityRemedy(bool existingFromContract, bool endpointFromContract) =>
+        (existingFromContract, endpointFromContract) switch
+        {
+            (true, true) =>
+                $"give both definitions the same {Steps(SecurityDeclaration.BuilderCalls)} calls",
+            (false, false) =>
+                $"give both actions the same {Steps(SecurityDeclaration.Attributes)} attributes",
+            _ =>
+                $"repeat the contract's {Steps(SecurityDeclaration.BuilderCalls)} calls on the action as "
+                    + Steps(SecurityDeclaration.Attributes),
+        };
+
+    private static string Steps(SecurityDeclaration.Spelling spelling) =>
+        $"{spelling.Secure}, {spelling.AndSecure}, {spelling.OrAnonymous}, or {spelling.Anonymous}";
 
     /// <summary>
     /// True when two endpoint definitions describe the same supported HTTP surface:

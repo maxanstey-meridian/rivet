@@ -66,6 +66,14 @@ internal sealed class HandlerAuthorization
     // app may set another.
     private readonly Tri _defaultPolicy = Tri.True;
 
+    // The calls that hand UseStartup a Startup type, by that type.
+    private Dictionary<INamedTypeSymbol, List<SyntaxNode>>? _startups;
+
+    // The places a type the framework dispatches into is named, by that type.
+    private readonly Dictionary<INamedTypeSymbol, List<SyntaxNode>> _namings = new(
+        SymbolEqualityComparer.Default
+    );
+
     private HandlerAuthorization(Compilation compilation, WellKnownTypes wkt)
     {
         _compilation = compilation;
@@ -150,10 +158,7 @@ internal sealed class HandlerAuthorization
 
         // A route group the chain doesn't reach a MapGroup call for (a parameter, or a helper's
         // answer) has conventions --check can't see.
-        if (
-            root?.Type is { } rootType
-            && CoverageChecker.DerivesFrom(rootType, _wkt.RouteGroupBuilder)
-        )
+        if (root?.Type is { } rootType && rootType.DerivesFrom(_wkt.RouteGroupBuilder))
         {
             facts.Add(
                 new Fact(
@@ -333,7 +338,7 @@ internal sealed class HandlerAuthorization
 
             var source =
                 $"[{type.Name.Replace("Attribute", "", StringComparison.Ordinal)}] on {on}";
-            if (IsAllowAnonymous(_wkt, type))
+            if (SecurityDeclaration.IsAllowAnonymous(_wkt, type))
             {
                 yield return new Fact(FactKind.AllowAnonymous, Tri.True, Tri.True, source);
             }
@@ -354,17 +359,8 @@ internal sealed class HandlerAuthorization
         }
     }
 
-    /// <summary>
-    /// Whether an attribute is ASP.NET's <c>[AllowAnonymous]</c>: any <c>IAllowAnonymous</c>, or
-    /// a class derived from <c>AllowAnonymousAttribute</c>. Spec (K.3) and check (K.5) read it
-    /// by this one rule.
-    /// </summary>
-    internal static bool IsAllowAnonymous(WellKnownTypes wkt, ITypeSymbol? attributeClass) =>
-        Implements(attributeClass, wkt.IAllowAnonymous)
-        || CoverageChecker.DerivesFrom(attributeClass, wkt.AllowAnonymous);
-
     private bool IsAuthorizeData(ITypeSymbol? type) =>
-        Implements(type, _wkt.IAuthorizeData) || CoverageChecker.DerivesFrom(type, _wkt.Authorize);
+        type.Implements(_wkt.IAuthorizeData) || type.DerivesFrom(_wkt.Authorize);
 
     // A policy name or a role list: ASP.NET reads an empty or blank one as not given.
     private static bool IsNamed(object? value) =>
@@ -433,12 +429,9 @@ internal sealed class HandlerAuthorization
                 // It may reach any endpoint whose builder has this type.
                 var builder = Unwrap(receiver.Value).Type;
                 var mvc =
-                    !CoverageChecker.DerivesFrom(builder, _wkt.RouteHandlerBuilder)
-                    && !CoverageChecker.DerivesFrom(builder, _wkt.RouteGroupBuilder);
-                var minimal = !CoverageChecker.DerivesFrom(
-                    builder,
-                    _wkt.ControllerActionEndpointConventionBuilder
-                );
+                    !builder.DerivesFrom(_wkt.RouteHandlerBuilder)
+                    && !builder.DerivesFrom(_wkt.RouteGroupBuilder);
+                var minimal = !builder.DerivesFrom(_wkt.ControllerActionEndpointConventionBuilder);
                 _untraced.Add(
                     (
                         fact with
@@ -671,7 +664,7 @@ internal sealed class HandlerAuthorization
         if (
             call.TargetMethod.Name is not ("Add" or "Insert" or "AddService")
             || call.Instance?.Type is not { } collection
-            || !CoverageChecker.DerivesFrom(collection, _wkt.FilterCollection)
+            || !collection.DerivesFrom(_wkt.FilterCollection)
         )
         {
             return;
@@ -681,7 +674,7 @@ internal sealed class HandlerAuthorization
         Tri requires;
         if (call.TargetMethod.TypeArguments is [var typeArgument])
         {
-            if (!CoverageChecker.DerivesFrom(typeArgument, _wkt.AuthorizeFilter))
+            if (!typeArgument.DerivesFrom(_wkt.AuthorizeFilter))
             {
                 return;
             }
@@ -696,7 +689,7 @@ internal sealed class HandlerAuthorization
             { } typeOf
         )
         {
-            if (!CoverageChecker.DerivesFrom(typeOf.TypeOperand, _wkt.AuthorizeFilter))
+            if (!typeOf.TypeOperand.DerivesFrom(_wkt.AuthorizeFilter))
             {
                 return;
             }
@@ -711,7 +704,7 @@ internal sealed class HandlerAuthorization
         )
         {
             var filter = Provenance(filterArgument.Value);
-            if (!CoverageChecker.DerivesFrom(filter.Type, _wkt.AuthorizeFilter))
+            if (!filter.Type.DerivesFrom(_wkt.AuthorizeFilter))
             {
                 return;
             }
@@ -839,8 +832,9 @@ internal sealed class HandlerAuthorization
 
     /// <summary>
     /// A policy's verdict over every site that sets it, <paramref name="unset"/> when none
-    /// does. Sets that all agree, at least one of them unconditional, decide it; anything else
-    /// is unknown, since which set runs last can't be read.
+    /// does. When every site is conditional, none may run, so <paramref name="unset"/> is one
+    /// more value it may take. Values that all agree decide it; anything else is unknown, since
+    /// which set runs last can't be read.
     /// </summary>
     private static Tri Settled(
         IReadOnlyList<(Tri Requires, string? Condition, string Source)> sites,
@@ -852,16 +846,18 @@ internal sealed class HandlerAuthorization
             return unset;
         }
 
-        var values = sites.Select(site => site.Requires.Value).Distinct().ToList();
-        if (values is [{ } value] && sites.Any(site => site.Condition is null))
+        var always = sites.Where(site => site.Condition is null).ToList();
+        var values = sites
+            .Select(site => site.Requires.Value)
+            .Concat(always.Count == 0 ? [unset.Value] : [])
+            .Distinct()
+            .ToList();
+        if (values is [{ } value])
         {
             return new Tri(
                 value,
                 null,
-                string.Join(
-                    ", ",
-                    sites.Where(site => site.Condition is null).Select(site => site.Source)
-                )
+                string.Join(", ", (always.Count > 0 ? always : sites).Select(site => site.Source))
             );
         }
 
@@ -885,11 +881,13 @@ internal sealed class HandlerAuthorization
     /// Whether app-wide setup at <paramref name="site"/> (an MVC filter, or a default or
     /// fallback policy) runs: always (true), never (false), or only under a condition
     /// (unknown, saying which). In a method or local function, past any configure lambda it's
-    /// passed in, it runs where the method is called, and always when any call always runs. A
-    /// method handed to a call as a method group (<c>AddControllers(Configure)</c>) runs
-    /// where that call does; one handed on any other way can't be followed. A method nothing
-    /// calls runs only when the host calls it: the entry point, or a Startup class's public
-    /// <c>Configure…</c> methods, which ASP.NET finds by name.
+    /// passed in, it runs where the method is called, and always when any call always runs.
+    /// A call through an interface member the method implements, or a method it overrides,
+    /// counts too. A method handed to a call as a method group (<c>AddControllers(Configure)</c>)
+    /// runs where that call does; one handed on any other way can't be followed. Beyond
+    /// those, the host runs only what ASP.NET's own rules run: the entry point, the Startup
+    /// methods <c>StartupLoader</c> finds on a type handed to <c>UseStartup</c>, and a framework
+    /// interface's or virtual's implementation, where its type is handed to the framework.
     /// </summary>
     private Tri Presence(SyntaxNode site) =>
         Presence(site, new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default));
@@ -903,7 +901,7 @@ internal sealed class HandlerAuthorization
                         or LocalFunctionStatementSyntax
                         or AccessorDeclarationSyntax
             );
-        if (ConditionWhy(site, null, function) is { } condition)
+        if (ConditionWhy(site, null) is { } condition)
         {
             return Tri.Unknown(condition);
         }
@@ -923,6 +921,16 @@ internal sealed class HandlerAuthorization
         }
 
         var definition = method.OriginalDefinition;
+        if (
+            SymbolEqualityComparer.Default.Equals(
+                definition,
+                _compilation.GetEntryPoint(CancellationToken.None)
+            )
+        )
+        {
+            return Tri.True;
+        }
+
         if (!visiting.Add(definition))
         {
             // A call from inside its own call graph adds no way in.
@@ -931,40 +939,7 @@ internal sealed class HandlerAuthorization
 
         try
         {
-            var (calls, escapes) = CallsTo(method);
-            if (calls.Count == 0 && escapes.Count == 0)
-            {
-                return RunByHost(method) ? Tri.True : Tri.False;
-            }
-
-            var ways = calls
-                .Select(call =>
-                    Presence(call.Syntax, visiting) switch
-                    {
-                        { Value: null, Why: var why } => Tri.Unknown(
-                            $"{why}, where {method.Name}() is called"
-                        ),
-                        var way => way,
-                    }
-                )
-                .Concat(
-                    escapes.Select(reference =>
-                        reference.Parent
-                            is ArgumentSyntax
-                            {
-                                Parent: ArgumentListSyntax
-                                {
-                                    Parent: InvocationExpressionSyntax call
-                                },
-                            }
-                            ? Presence(call, visiting)
-                            : Tri.Unknown(
-                                $"where {method.Name}() runs, which --check can't follow: it's "
-                                    + $"handed on as a delegate at {reference.SourcePosition()}"
-                            )
-                    )
-                )
-                .ToList();
+            var ways = WaysIn(definition, visiting);
             return ways.Any(way => way.Value == true) ? Tri.True
                 : ways.FirstOrDefault(way => way.Value is null) is { Why: not null } unknown
                     ? unknown
@@ -974,15 +949,329 @@ internal sealed class HandlerAuthorization
         {
             visiting.Remove(definition);
         }
+    }
 
-        bool RunByHost(IMethodSymbol method) =>
-            SymbolEqualityComparer.Default.Equals(
-                definition,
-                _compilation.GetEntryPoint(CancellationToken.None)
+    /// <summary>Every way <paramref name="method"/> can come to run, each true, false or unknown.</summary>
+    private List<Tri> WaysIn(IMethodSymbol method, HashSet<IMethodSymbol> visiting)
+    {
+        var ways = new List<Tri>();
+        var dispatchedByFramework = false;
+        foreach (var target in Dispatches(method).Prepend(method))
+        {
+            if (target.OriginalDefinition.DeclaringSyntaxReferences.IsEmpty)
+            {
+                dispatchedByFramework = true;
+                continue;
+            }
+
+            var (calls, escapes) = CallsTo(target);
+            ways.AddRange(
+                calls.Select(call =>
+                    Presence(call.Syntax, visiting) switch
+                    {
+                        { Value: null, Why: var why } => Tri.Unknown(
+                            $"{why}, where {target.Name}() is called"
+                        ),
+                        var way => way,
+                    }
+                )
+            );
+            ways.AddRange(
+                escapes.Select(reference =>
+                    reference.Parent
+                        is ArgumentSyntax
+                        {
+                            Parent: ArgumentListSyntax { Parent: InvocationExpressionSyntax call },
+                        }
+                        ? Presence(call, visiting)
+                        : Tri.Unknown(
+                            $"where {target.Name}() runs, which --check can't follow: it's "
+                                + $"handed on as a delegate at {reference.SourcePosition()}"
+                        )
+                )
+            );
+        }
+
+        if (dispatchedByFramework)
+        {
+            ways.AddRange(HandedToTheFramework(method, visiting));
+        }
+
+        ways.AddRange(StartupWays(method, visiting));
+        return ways;
+    }
+
+    /// <summary>The interface members <paramref name="method"/> implements, and the methods it overrides.</summary>
+    private static IEnumerable<IMethodSymbol> Dispatches(IMethodSymbol method)
+    {
+        var type = method.ContainingType;
+        foreach (
+            var member in type.AllInterfaces.SelectMany(candidate =>
+                candidate.GetMembers().OfType<IMethodSymbol>()
             )
-            || method
-                is { MethodKind: MethodKind.Ordinary, DeclaredAccessibility: Accessibility.Public }
-                && method.Name.StartsWith("Configure", StringComparison.Ordinal);
+        )
+        {
+            if (
+                SymbolEqualityComparer.Default.Equals(
+                    type.FindImplementationForInterfaceMember(member),
+                    method
+                )
+            )
+            {
+                yield return member;
+            }
+        }
+
+        for (var overridden = method.OverriddenMethod; overridden is not null; )
+        {
+            yield return overridden;
+            overridden = overridden.OverriddenMethod;
+        }
+    }
+
+    /// <summary>
+    /// A method the framework calls through its own interface or virtual runs where its type
+    /// is handed to the framework: each place the project names the type outside its own
+    /// declaration (<c>ConfigureOptions&lt;T&gt;()</c>, <c>AddSingleton&lt;I, T&gt;()</c>,
+    /// <c>typeof(T)</c>, <c>new T()</c>). A type it never names is found some way --check
+    /// can't see, if at all.
+    /// </summary>
+    private IEnumerable<Tri> HandedToTheFramework(
+        IMethodSymbol method,
+        HashSet<IMethodSymbol> visiting
+    )
+    {
+        var type = method.ContainingType.OriginalDefinition;
+        if (!_namings.TryGetValue(type, out var namings))
+        {
+            namings = [];
+            foreach (var tree in _compilation.SyntaxTrees)
+            {
+                if (!tree.GetText().ToString().Contains(type.Name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var semanticModel = _compilation.GetSemanticModel(tree);
+                namings.AddRange(
+                    tree.GetRoot()
+                        .DescendantNodes()
+                        .OfType<SimpleNameSyntax>()
+                        .Where(name =>
+                            name.Identifier.ValueText == type.Name
+                            && !type.DeclaringSyntaxReferences.Any(declaration =>
+                                declaration.SyntaxTree == tree
+                                && declaration.Span.Contains(name.Span)
+                            )
+                            && SymbolEqualityComparer.Default.Equals(
+                                semanticModel.GetSymbolInfo(name).Symbol?.OriginalDefinition,
+                                type
+                            )
+                        )
+                );
+            }
+
+            _namings[type] = namings;
+        }
+
+        if (namings.Count == 0)
+        {
+            return
+            [
+                Tri.Unknown(
+                    $"where the framework calls {type.Name}.{method.Name}(), and nothing in the "
+                        + $"project hands it {type.Name}, so --check can't tell whether it does"
+                ),
+            ];
+        }
+
+        return namings.Select(naming =>
+            Presence(naming, visiting) switch
+            {
+                { Value: null, Why: var why } => Tri.Unknown(
+                    $"{why}, where {type.Name} is handed to the framework"
+                ),
+                var way => way,
+            }
+        );
+    }
+
+    /// <summary>
+    /// <c>StartupLoader</c>'s rule: on a type handed to <c>UseStartup&lt;T&gt;()</c> or
+    /// <c>UseStartup(typeof(T))</c>, the host runs the public <c>Configure{Env}Services</c>,
+    /// <c>Configure{Env}Container</c> and <c>Configure{Env}</c> methods, matching names without
+    /// regard to case, where the <c>UseStartup</c> call runs. An environment's own method runs
+    /// only in that environment, and the plain one only outside every environment that has its
+    /// own.
+    /// </summary>
+    private IEnumerable<Tri> StartupWays(IMethodSymbol method, HashSet<IMethodSymbol> visiting)
+    {
+        if (
+            method
+                is not {
+                    MethodKind: MethodKind.Ordinary,
+                    DeclaredAccessibility: Accessibility.Public
+                }
+            || StartupRole(method.Name) is not (var family, var environment)
+        )
+        {
+            yield break;
+        }
+
+        foreach (var (startup, sites) in Startups())
+        {
+            if (
+                method.IsStatic
+                    ? !SymbolEqualityComparer.Default.Equals(startup, method.ContainingType)
+                    : !startup.DerivesFrom(method.ContainingType)
+            )
+            {
+                continue;
+            }
+
+            var others = PublicMethods(startup)
+                .Select(other => (other.Name, Role: StartupRole(other.Name)))
+                .Where(other =>
+                    other.Role is (var otherFamily, var otherEnvironment)
+                    && otherFamily == family
+                    && otherEnvironment.Length > 0
+                )
+                .Select(other => other.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var only =
+                environment.Length > 0
+                    ? $"when the environment is {environment}, since ASP.NET runs "
+                        + $"{startup.Name}.{method.Name}() only then"
+                : others.Count > 0
+                    ? $"when the environment has no method of its own ({string.Join(", ", others)}), "
+                        + $"since ASP.NET runs {startup.Name}.{method.Name}() only then"
+                : null;
+            foreach (var site in sites)
+            {
+                var way = Presence(site, visiting);
+                yield return only is null || way.Value == false ? way
+                : way.Value == true ? Tri.Unknown(only)
+                : Tri.Unknown($"{way.Why}, and {only}");
+            }
+        }
+
+        static IEnumerable<IMethodSymbol> PublicMethods(INamedTypeSymbol type)
+        {
+            for (INamedTypeSymbol? current = type; current is not null; current = current.BaseType)
+            {
+                foreach (
+                    var candidate in current
+                        .GetMembers()
+                        .OfType<IMethodSymbol>()
+                        .Where(candidate =>
+                            candidate
+                                is {
+                                    MethodKind: MethodKind.Ordinary,
+                                    DeclaredAccessibility: Accessibility.Public,
+                                }
+                            && (
+                                !candidate.IsStatic
+                                || current.Equals(type, SymbolEqualityComparer.Default)
+                            )
+                        )
+                )
+                {
+                    yield return candidate;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Which Startup method <paramref name="name"/> is to <c>StartupLoader</c>: its family
+    /// (<c>Services</c>, <c>Container</c>, or empty for <c>Configure</c>) and the environment
+    /// it's for (empty for every environment). Null when it isn't one.
+    /// </summary>
+    private static (string Family, string Environment)? StartupRole(string name)
+    {
+        const string prefix = "Configure";
+        if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var rest = name[prefix.Length..];
+        foreach (var family in (string[])["Services", "Container"])
+        {
+            if (rest.EndsWith(family, StringComparison.OrdinalIgnoreCase))
+            {
+                return (family, rest[..^family.Length]);
+            }
+        }
+
+        return ("", rest);
+    }
+
+    /// <summary>
+    /// The types handed to ASP.NET's <c>UseStartup</c>, as a type argument or a
+    /// <c>typeof</c>, with the calls that hand them over.
+    /// </summary>
+    private Dictionary<INamedTypeSymbol, List<SyntaxNode>> Startups()
+    {
+        if (_startups is not null)
+        {
+            return _startups;
+        }
+
+        _startups = new Dictionary<INamedTypeSymbol, List<SyntaxNode>>(
+            SymbolEqualityComparer.Default
+        );
+        if (_wkt.WebHostBuilderExtensions is null)
+        {
+            return _startups;
+        }
+
+        foreach (var tree in _compilation.SyntaxTrees)
+        {
+            if (!tree.GetText().ToString().Contains("UseStartup", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var semanticModel = _compilation.GetSemanticModel(tree);
+            foreach (
+                var node in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            )
+            {
+                if (
+                    semanticModel.GetOperation(node) is not IInvocationOperation call
+                    || call.TargetMethod.Name != "UseStartup"
+                    || !IsType(call.TargetMethod.ContainingType, _wkt.WebHostBuilderExtensions)
+                )
+                {
+                    continue;
+                }
+
+                var startup = call.TargetMethod.TypeArguments is [INamedTypeSymbol typeArgument]
+                    ? typeArgument
+                    : call
+                        .Arguments.Select(argument => Provenance(argument.Value))
+                        .OfType<ITypeOfOperation>()
+                        .Select(typeOf => typeOf.TypeOperand)
+                        .OfType<INamedTypeSymbol>()
+                        .FirstOrDefault();
+                if (startup is null)
+                {
+                    continue;
+                }
+
+                if (!_startups.TryGetValue(startup.OriginalDefinition, out var sites))
+                {
+                    sites = [];
+                    _startups[startup.OriginalDefinition] = sites;
+                }
+
+                sites.Add(node);
+            }
+        }
+
+        return _startups;
     }
 
     // ---------------------------------------------------------------
@@ -1137,14 +1426,12 @@ internal sealed class HandlerAuthorization
     /// endpoint isn't conditional): an <c>if</c> or <c>else</c>, a <c>?:</c> branch, a switch
     /// section or arm, a <c>catch</c>, a loop body, the right of <c>&amp;&amp;</c>,
     /// <c>||</c>, <c>??</c> or <c>??=</c>, a <c>?.</c>, or a <c>return</c> earlier in an
-    /// enclosing block, up to <paramref name="function"/> when it's given. Null when it always
-    /// runs.
+    /// enclosing block. The walk stops at the method or local function holding the site, unless
+    /// that holds the origin too: a function runs where it's called, so its callers' conditions
+    /// are theirs to add, and a <c>return</c> above a local function's declaration never stops
+    /// it. Null when it always runs.
     /// </summary>
-    private static string? ConditionWhy(
-        SyntaxNode site,
-        SyntaxNode? origin,
-        SyntaxNode? function = null
-    )
+    private static string? ConditionWhy(SyntaxNode site, SyntaxNode? origin)
     {
         if (Contains(site, origin))
         {
@@ -1152,13 +1439,23 @@ internal sealed class HandlerAuthorization
         }
 
         var child = site;
-        foreach (var ancestor in site.Ancestors().TakeWhile(ancestor => ancestor != function))
+        foreach (var ancestor in site.Ancestors())
         {
             // Past the origin's own statement, the site runs whenever its endpoint is mapped,
             // unless a return between the two can leave first.
             if (Contains(ancestor, origin))
             {
                 return ancestor is BlockSyntax shared ? EarlyReturn(shared, child, origin) : null;
+            }
+
+            if (
+                ancestor
+                is BaseMethodDeclarationSyntax
+                    or LocalFunctionStatementSyntax
+                    or AccessorDeclarationSyntax
+            )
+            {
+                return null;
             }
 
             var why = ancestor switch
@@ -1271,13 +1568,6 @@ internal sealed class HandlerAuthorization
     private static bool IsType(INamedTypeSymbol? actual, INamedTypeSymbol? expected) =>
         expected is not null
         && SymbolEqualityComparer.Default.Equals(actual?.OriginalDefinition, expected);
-
-    private static bool Implements(ITypeSymbol? type, INamedTypeSymbol? target) =>
-        target is not null
-        && type is not null
-        && type.AllInterfaces.Any(candidate =>
-            SymbolEqualityComparer.Default.Equals(candidate, target)
-        );
 
     private enum FactKind
     {

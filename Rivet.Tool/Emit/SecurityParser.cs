@@ -74,27 +74,13 @@ public static class SecurityParser
             "apikey"
                 when parts.Length == 3
                     && parts[2].Length > 0
-                    && ParseApiKeyLocation(parts[1]) is { } location => (
+                    && SecurityApiKeyLocations.Parse(parts[1]) is { } location => (
                 "apiKeyAuth",
                 new ApiKeySecurityScheme(parts[2], location)
             ),
             _ => null,
         };
     }
-
-    /// <summary>
-    /// The three locations OpenAPI gives an apiKey, by name and ignoring case, else null.
-    /// <c>Enum.TryParse</c> would also take a number ("1" is header, "7" is nothing) and a
-    /// comma-joined list.
-    /// </summary>
-    private static SecurityApiKeyLocation? ParseApiKeyLocation(string value) =>
-        value.ToLowerInvariant() switch
-        {
-            "query" => SecurityApiKeyLocation.Query,
-            "header" => SecurityApiKeyLocation.Header,
-            "cookie" => SecurityApiKeyLocation.Cookie,
-            _ => null,
-        };
 
     internal static bool IsValidSchemeName(string name) =>
         name.Length > 0

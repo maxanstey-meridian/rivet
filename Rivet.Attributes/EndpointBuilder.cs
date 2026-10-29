@@ -443,8 +443,9 @@ public abstract partial class RouteDefinitionBase<TSelf>
         );
 
     /// <summary>
-    /// A builder call that records nothing for the runtime but names a status: it refuses
-    /// the keys generation refuses, like every other status-taking call.
+    /// Records a <c>.Returns(...)</c> error response under a status the caller has already
+    /// validated with <see cref="RequireStatus(int, string)"/> or
+    /// <see cref="RequireStatus(string, string)"/>.
     /// </summary>
     private TSelf AddErrorResponse(ResponseStatusKey status, Type? responseType) =>
         Mutate(state => AddErrorResponse(state, status, responseType));

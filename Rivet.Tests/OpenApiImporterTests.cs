@@ -13,17 +13,14 @@ namespace Rivet.Tests;
 public sealed class OpenApiImporterTests
 {
     // G.1's import side keeps [RivetSchemaType] only on a member whose C# type the walker
-    // maps to a primitive leaf; the walker refuses it anywhere else (RIV1117). The framework
-    // scalars are the walker's own table; the keyword scalars are held here against the
-    // walker's SpecialType mapping, so neither side can gain or lose one alone.
+    // maps to a primitive leaf; the walker refuses it anywhere else (RIV1117). The keyword and
+    // framework scalars are tables both sides read (BuiltInScalars). What's held here is the
+    // rest of the walker: byte[], its one array scalar, is a primitive, and nothing outside
+    // the tables maps to one.
     [Fact]
     public void The_Importers_Built_In_Scalars_Are_The_Walkers_Primitives()
     {
-        var scalars = SchemaMapper
-            .KeywordScalars.Concat(
-                BuiltInScalars.FrameworkTypes.Select(scalar => "global::" + scalar.MetadataName)
-            )
-            .ToList();
+        string[] scalars = [BuiltInScalars.ByteArray.Keyword];
         string[] notScalars =
         [
             "global::System.Text.Json.Nodes.JsonObject",
@@ -54,7 +51,7 @@ public sealed class OpenApiImporterTests
         TsType Mapped(int index) =>
             walker.MapType(((IPropertySymbol)probe.GetMembers($"M{index}").Single()).Type);
 
-        for (var index = 0; index < scalars.Count; index++)
+        for (var index = 0; index < scalars.Length; index++)
         {
             Assert.True(
                 Mapped(index) is TsType.Primitive,
@@ -63,7 +60,7 @@ public sealed class OpenApiImporterTests
         }
         for (var index = 0; index < notScalars.Length; index++)
         {
-            var mapped = Mapped(scalars.Count + index);
+            var mapped = Mapped(scalars.Length + index);
             Assert.False(
                 mapped is TsType.Primitive,
                 $"'{notScalars[index]}' maps to a primitive the importer doesn't know: {mapped}"
@@ -6488,6 +6485,17 @@ public sealed class OpenApiImporterTests
                         }
                     }
                 }
+            },
+            "/api/raw": {
+                "get": {
+                    "operationId": "items_raw",
+                    "tags": ["Items"],
+                    "parameters": [
+                        { "name": "Authorization", "in": "header", "content": { "text/plain": { "schema": { "type": "string" } } } },
+                        { "name": "Accept", "in": "header" }
+                    ],
+                    "responses": { "204": { "description": "No Content" } }
+                }
             }
             """
         );
@@ -6502,6 +6510,20 @@ public sealed class OpenApiImporterTests
         Assert.Contains(
             "RIV3023: Reserved header parameter dropped: GET /api/items declares 'Accept'; response media types are represented by responses[*].content.",
             result.Warnings
+        );
+        // OpenAPI ignores a reserved header whatever its shape, so a schema-less one is the
+        // same reserved-header drop, not a schema-less parameter (RIV3025).
+        Assert.Contains(
+            "RIV3022: Reserved header parameter dropped: GET /api/raw declares 'Authorization'; authentication is represented by security and components.securitySchemes.",
+            result.Warnings
+        );
+        Assert.Contains(
+            "RIV3023: Reserved header parameter dropped: GET /api/raw declares 'Accept'; response media types are represented by responses[*].content.",
+            result.Warnings
+        );
+        Assert.DoesNotContain(
+            result.Warnings,
+            warning => warning.StartsWith("RIV3025", StringComparison.Ordinal)
         );
         Assert.DoesNotContain("[rivet:unsupported param name=Authorization", contract);
         Assert.DoesNotContain("[rivet:unsupported param name=Accept", contract);
@@ -7707,8 +7729,8 @@ public sealed class OpenApiImporterTests
         var headers = emitted["paths"]!["/raw"]!["get"]!["responses"]!["200"]!["headers"]!;
         Assert.True(
             JsonNode.DeepEquals(
-                JsonNode.Parse("""{ "type": "string" }"""),
-                headers["Content-Type"]!["schema"]
+                JsonNode.Parse("""{ "Content-Type": { "schema": { "type": "string" } } }"""),
+                headers
             ),
             headers.ToJsonString()
         );
@@ -7750,6 +7772,51 @@ public sealed class OpenApiImporterTests
             emitted["paths"]!["/b"]!["get"]!["responses"]!["200"]!["headers"]!["Content-Type"]![
                 "example"
             ]!.GetValue<string>()
+        );
+    }
+
+    // A request body the import inlines from a reference that isn't a request body component
+    // keeps its media encoding at the referencing operation, as the response does.
+    [Fact]
+    public void Media_Encoding_Survives_An_Inlined_Request_Body_Reference()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/a": {
+                "put": {
+                    "operationId": "putA",
+                    "requestBody": {
+                        "content": {
+                            "multipart/form-data": {
+                                "schema": { "type": "object", "properties": { "name": { "type": "string" } } },
+                                "encoding": { "name": { "contentType": "text/plain" } }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            },
+            "/b": {
+                "put": {
+                    "operationId": "putB",
+                    "requestBody": { "$ref": "#/paths/~1a/put/requestBody" },
+                    "responses": { "204": { "description": "No Content" } }
+                }
+            }
+            """
+        );
+
+        var emitted = EmitWithProvenance(CompilationHelper.Import(spec));
+
+        var encoding = emitted["paths"]!["/b"]!["put"]!["requestBody"]!["content"]![
+            "multipart/form-data"
+        ]!["encoding"];
+        Assert.True(
+            JsonNode.DeepEquals(
+                JsonNode.Parse("""{ "name": { "contentType": "text/plain" } }"""),
+                encoding
+            ),
+            emitted["paths"]!["/b"]!.ToJsonString()
         );
     }
 

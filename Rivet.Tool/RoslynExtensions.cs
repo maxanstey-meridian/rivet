@@ -37,6 +37,37 @@ internal static class RoslynExtensions
     public static bool HasAttribute(this ISymbol symbol, INamedTypeSymbol? type) =>
         symbol.GetAttribute(type) is not null;
 
+    /// <summary>
+    /// <paramref name="type"/> is <paramref name="target"/> or derives from it. A generic
+    /// <paramref name="target"/> matches any construction of it.
+    /// </summary>
+    public static bool DerivesFrom(this ITypeSymbol? type, INamedTypeSymbol? target)
+    {
+        if (target is null)
+        {
+            return false;
+        }
+
+        for (var current = type; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, target))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary><paramref name="type"/> is the interface <paramref name="target"/> or implements it.</summary>
+    public static bool Implements(this ITypeSymbol? type, INamedTypeSymbol? target) =>
+        target is not null
+        && type is not null
+        && (
+            SymbolEqualityComparer.Default.Equals(type, target)
+            || type.AllInterfaces.Contains(target, SymbolEqualityComparer.Default)
+        );
+
     /// <summary>The first constructor argument as a string, or null.</summary>
     public static string? StringArgument(this AttributeData? attribute) =>
         attribute?.ConstructorArguments is [{ Value: string value }, ..] ? value : null;

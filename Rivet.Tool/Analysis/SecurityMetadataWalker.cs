@@ -103,6 +103,24 @@ internal static class SecurityMetadataWalker
             {
                 hasEmptyGlobalSecurity = true;
             }
+            else if (
+                attribute.Is(schemeType)
+                || attribute.Is(flowType)
+                || attribute.Is(globalType)
+                || attribute.Is(globalSchemeType)
+            )
+            {
+                // One of ours whose arguments don't have the shape read above: skipping it
+                // would drop the scheme, flow, or requirement from the spec without a word.
+                throw Diagnostics.Error(
+                    Diagnostics.InvalidSecuritySchemeMetadata,
+                    $"[{attribute.AttributeClass!.Name.Replace("Attribute", "", StringComparison.Ordinal)}] "
+                        + $"at {attribute.ApplicationSyntaxReference?.GetSyntax().SourcePosition() ?? "assembly level"} "
+                        + "has arguments Rivet can't read: a null scheme name or flow, or arguments "
+                        + "from a Rivet.Attributes version other than the rivet tool's. Give it every "
+                        + "argument its constructor names, and use the same version of both."
+                );
+            }
         }
 
         var schemes = new Dictionary<string, SecuritySchemeDefinition>(StringComparer.Ordinal);
@@ -126,7 +144,7 @@ internal static class SecurityMetadataWalker
     )
     {
         var arguments = attribute.ConstructorArguments;
-        var type = arguments[1].Value as string;
+        var type = RequiredStringArgument(arguments, 1, name, "type");
         var description = StringArgument(arguments, 2);
         return type switch
         {
@@ -171,19 +189,12 @@ internal static class SecurityMetadataWalker
     private static IReadOnlyList<string> ReadStrings(TypedConstant argument) =>
         argument.Values.Select(value => value.Value as string ?? "").ToList();
 
-    // By name only, as ParseFlowType reads flows: Enum.TryParse would also take a number
-    // ("1" is header) and a comma-joined list, and the spec would say "in": "7".
     private static SecurityApiKeyLocation ParseLocation(string value, string schemeName) =>
-        value.ToLowerInvariant() switch
-        {
-            "query" => SecurityApiKeyLocation.Query,
-            "header" => SecurityApiKeyLocation.Header,
-            "cookie" => SecurityApiKeyLocation.Cookie,
-            _ => throw Diagnostics.Error(
-                Diagnostics.InvalidSecuritySchemeMetadata,
-                $"Rivet apiKey security scheme '{schemeName}' has unsupported location '{value}'."
-            ),
-        };
+        SecurityApiKeyLocations.Parse(value)
+        ?? throw Diagnostics.Error(
+            Diagnostics.InvalidSecuritySchemeMetadata,
+            $"Rivet apiKey security scheme '{schemeName}' has unsupported location '{value}'."
+        );
 
     private static OAuth2FlowType ParseFlowType(string value, string schemeName) =>
         value switch

@@ -1,4 +1,4 @@
-using System.Text;
+using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Rivet.Tool.Model;
@@ -265,7 +265,7 @@ public static class EndpointWalker
         }
 
         var route = CombineRoutes(ExtractControllerRoute(wkt, method.ContainingType), methodRoute);
-        return (httpMethod, route is null ? null : SubstituteRouteTokens(route, method));
+        return (httpMethod, route is null ? null : SubstituteRouteTokens(wkt, route, method));
     }
 
     /// <summary>
@@ -625,47 +625,60 @@ public static class EndpointWalker
     }
 
     /// <summary>
-    /// Substitutes ASP.NET <c>[controller]</c>/<c>[action]</c> route tokens and unescapes
-    /// doubled brackets. <c>[controller]</c> resolves to the controller class name minus the
-    /// "Controller" suffix; <c>[action]</c> to the action method name.
-    /// Token matching is case-insensitive, matching ASP.NET conventions.
+    /// The attribute route with its <c>[controller]</c>, <c>[action]</c> and <c>[area]</c>
+    /// tokens replaced and its doubled brackets unescaped, by MVC's own
+    /// <see cref="AttributeRouteModel.ReplaceTokens(string, IDictionary{string, string})"/>, so an
+    /// MVC route spells a regex class <c>[[a-z]]</c> and routing reads <c>[a-z]</c>. The values
+    /// are the action's route values: its controller's name less the "Controller" suffix, its
+    /// method's name, and the area an <c>[Area]</c> on the action, else on its controller or a
+    /// base class, names. A token with no value, or an unclosed bracket, is a route MVC refuses
+    /// at startup, so it stops generation with <c>RIV1125</c> as a template routing refuses does.
     /// </summary>
-    private static string SubstituteRouteTokens(string route, IMethodSymbol method)
+    private static string SubstituteRouteTokens(
+        WellKnownTypes wkt,
+        string route,
+        IMethodSymbol method
+    )
     {
-        // AttributeRouteModel.ReplaceTokens: [controller] and [action] (any case) become their
-        // values, and a doubled bracket is the escape for a literal one, so an MVC route spells
-        // a regex class [[a-z]] and routing reads [a-z].
-        var builder = new StringBuilder(route.Length);
-        for (var index = 0; index < route.Length; index++)
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
-            var c = route[index];
-            if (c is '[' or ']' && index + 1 < route.Length && route[index + 1] == c)
-            {
-                builder.Append(c);
-                index++;
-                continue;
-            }
-
-            if (c == '[' && route.IndexOf(']', index + 1) is var close and > 0)
-            {
-                var token = route[(index + 1)..close];
-                var value =
-                    token.Equals("controller", StringComparison.OrdinalIgnoreCase)
-                        ? ControllerBaseName(method.ContainingType)
-                    : token.Equals("action", StringComparison.OrdinalIgnoreCase) ? method.Name
-                    : null;
-                if (value is not null)
-                {
-                    builder.Append(value);
-                    index = close;
-                    continue;
-                }
-            }
-
-            builder.Append(c);
+            ["controller"] = ControllerBaseName(method.ContainingType),
+            ["action"] = method.Name,
+        };
+        if (AreaOf(wkt, method) is { } area)
+        {
+            values["area"] = area;
         }
 
-        return builder.ToString();
+        try
+        {
+            return AttributeRouteModel.ReplaceTokens(route, values);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw Diagnostics.Error(
+                Diagnostics.RouteConstraintContradictsType,
+                $"route template '{route}' on endpoint '{MethodOwner(method)}.{method.Name}': MVC "
+                    + $"refuses it at startup ({exception.Message.TrimEnd('.')}). Fix the template."
+            );
+        }
+    }
+
+    // The [area] route value: an [Area] on the action wins over one on its controller, which
+    // MVC reads with inheritance.
+    private static string? AreaOf(WellKnownTypes wkt, IMethodSymbol method)
+    {
+        IEnumerable<ISymbol> owners = [method];
+        for (var type = method.ContainingType; type is not null; type = type.BaseType)
+        {
+            owners = owners.Append(type);
+        }
+
+        return owners
+            .Select(owner => owner.GetAttribute(wkt.Area))
+            .OfType<AttributeData>()
+            .Select(attribute => attribute.ConstructorArguments.FirstOrDefault().Value as string)
+            .FirstOrDefault();
     }
 
     /// <summary>
@@ -717,15 +730,15 @@ public static class EndpointWalker
         string routeTemplate
     )
     {
-        // Extract route param names from the template for implicit classification
-        var routeParamNames = RouteParser.ParseRouteParamNames(routeTemplate);
         var where =
             $"{RouteParser.StripRouteConstraints(routeTemplate)} (endpoint '{MethodOwner(method)}.{method.Name}')";
-        var routeTokens = new Dictionary<string, RouteToken>(StringComparer.OrdinalIgnoreCase);
-        foreach (var token in RouteConstraints.Tokens(routeTemplate, where))
-        {
-            routeTokens.TryAdd(token.Name, token);
-        }
+        // Routing's own reading of the template, which refuses a repeated token as the host
+        // does at startup: unlike a contract, nothing here was imported.
+        var routeTokens = RouteConstraints
+            .Tokens(routeTemplate, where, readRepeats: false)
+            .ToDictionary(token => token.Name, StringComparer.OrdinalIgnoreCase);
+        // The route param names, for implicit classification.
+        var routeParamNames = routeTokens.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var parameters = new List<TsEndpointParam>();
         // MVC rejects multiple body-bound parameters on one action; extraction must
         // not confidently emit a body surface MVC cannot execute. Any Body-classified
@@ -811,15 +824,15 @@ public static class EndpointWalker
                             typeWalker,
                             param.Type,
                             new HashSet<string>(),
-                            method.IsStatic
+                            HostOf(method) == ParameterBindingHost.MinimalApi
                                 ? FormBinding.FormHosts.MinimalApi
                                 : FormBinding.FormHosts.Mvc,
                             where
                         ),
                         formInputTypeName,
-                        method.IsStatic
-                            ? null
-                            : FormBinding.MvcModelName(wkt, param.GetAttributes(), param.Type)
+                        HostOf(method) == ParameterBindingHost.Mvc
+                            ? FormBinding.MvcModelName(wkt, param.GetAttributes(), param.Type)
+                            : null
                     )
                 );
                 bodySeen = true;
@@ -932,15 +945,11 @@ public static class EndpointWalker
         string httpMethod
     )
     {
-        var (host, infersBody) = method.IsStatic
-            ? (
-                ParameterBindingHost.MinimalApi,
-                EnumParameterBinding.MinimalApiInfersBody([httpMethod])
-            )
-            : (
-                ParameterBindingHost.Mvc,
-                EnumParameterBinding.MvcInfersBody(wkt, method.ContainingType)
-            );
+        var host = HostOf(method);
+        var infersBody =
+            host == ParameterBindingHost.MinimalApi
+                ? EnumParameterBinding.MinimalApiInfersBody([httpMethod])
+                : EnumParameterBinding.MvcInfersBody(wkt, method.ContainingType);
         var (path, unbindable) = method
             .Parameters.SelectMany(param =>
                 EnumParameterBinding.FindUnbindableValues(wkt, param, host, infersBody)
@@ -1028,15 +1037,6 @@ public static class EndpointWalker
         return null;
     }
 
-    /// <summary>
-    /// True for System.Threading.CancellationToken regardless of which referenced
-    /// assembly supplied the symbol. GetTypeByMetadataName returns null when two referenced assemblies
-    /// declare the same full name (System.Runtime.dll and System.Private.CoreLib.dll
-    /// both do) — so the ct guards must not rely on symbol equality.
-    /// </summary>
-    private static bool IsCancellationToken(WellKnownTypes wkt, ITypeSymbol type) =>
-        SymbolEqualityComparer.Default.Equals(type, wkt.CancellationToken);
-
     private enum BindingSource
     {
         Body,
@@ -1101,7 +1101,7 @@ public static class EndpointWalker
             ThrowContradictoryBinding(param, explicitSources);
         }
 
-        if (IsCancellationToken(wkt, param.Type))
+        if (SymbolEqualityComparer.Default.Equals(param.Type, wkt.CancellationToken))
         {
             if (explicitSources.Any(source => source != BindingSource.Services))
             {
@@ -1516,6 +1516,14 @@ public static class EndpointWalker
 
         return responses;
     }
+
+    /// <summary>
+    /// The host that serves a <c>[RivetEndpoint]</c> method or a handler: a static one is a
+    /// minimal-API handler (MVC never routes a static method), and an instance one is an MVC
+    /// action. Generation's form and enum rules and <c>--check</c>'s verdicts all read it.
+    /// </summary>
+    internal static ParameterBindingHost HostOf(IMethodSymbol method) =>
+        method.IsStatic ? ParameterBindingHost.MinimalApi : ParameterBindingHost.Mvc;
 
     /// <summary>
     /// The operations a [RivetClient] class declares: its public methods with an [Http*]

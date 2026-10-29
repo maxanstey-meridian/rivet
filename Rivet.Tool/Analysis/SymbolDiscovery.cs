@@ -10,7 +10,8 @@ public sealed record DiscoveredSymbols(
     IReadOnlyList<INamedTypeSymbol> RivetTypes,
     IReadOnlyList<INamedTypeSymbol> ContractTypes,
     IReadOnlyList<INamedTypeSymbol> ClientTypes,
-    IReadOnlyList<IMethodSymbol> EndpointMethods
+    IReadOnlyList<IMethodSymbol> EndpointMethods,
+    IReadOnlyList<IMethodSymbol> Overrides
 );
 
 public static class SymbolDiscovery
@@ -26,6 +27,7 @@ public static class SymbolDiscovery
         var contractTypes = new List<INamedTypeSymbol>();
         var clientTypes = new List<INamedTypeSymbol>();
         var endpointMethods = new List<IMethodSymbol>();
+        var overrides = new List<IMethodSymbol>();
 
         // Single pass over source assembly types only — not referenced assemblies
         foreach (var type in RoslynExtensions.GetAllTypes(compilation.Assembly.GlobalNamespace))
@@ -47,18 +49,28 @@ public static class SymbolDiscovery
                 clientTypes.Add(type);
             }
 
-            if (endpointAttr is not null)
+            foreach (var member in type.GetMembers().OfType<IMethodSymbol>())
             {
-                foreach (var member in type.GetMembers().OfType<IMethodSymbol>())
+                if (endpointAttr is not null && member.GetAttributes().Any(a => a.Is(endpointAttr)))
                 {
-                    if (member.GetAttributes().Any(a => a.Is(endpointAttr)))
-                    {
-                        endpointMethods.Add(member);
-                    }
+                    endpointMethods.Add(member);
+                }
+
+                // A concrete override may implement an abstract [RivetContract] method, which
+                // --check compares against the contract method's security.
+                if (member is { IsOverride: true, IsAbstract: false })
+                {
+                    overrides.Add(member);
                 }
             }
         }
 
-        return new DiscoveredSymbols(rivetTypes, contractTypes, clientTypes, endpointMethods);
+        return new DiscoveredSymbols(
+            rivetTypes,
+            contractTypes,
+            clientTypes,
+            endpointMethods,
+            overrides
+        );
     }
 }

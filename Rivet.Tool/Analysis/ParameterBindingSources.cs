@@ -756,12 +756,12 @@ internal static class ParameterBindingSources
     /// <c>Request</c>, <c>context.Request</c>, <c>accessor.HttpContext!.Request</c>) or a
     /// RouteData-typed one (a controller's <c>RouteData</c>), or an HttpContext or HttpRequest
     /// passed to a call, even as <c>object</c>, since the callee may read anything from it. An
-    /// extension's receiver is an argument, so <c>HttpContext.GetRouteValue("id")</c> and an
-    /// app's own <c>HttpContext.GetTenantId()</c> both count. Reading the context's User,
+    /// extension's receiver is an argument, so <c>HttpContext.GetRouteValue("id")</c> and a
+    /// package's <c>HttpContext.GetTenantId()</c> both count. Reading the context's User,
     /// RequestAborted or Response isn't: they carry no input. This judges one operation; a
     /// helper whose source is in the compilation is followed into by
-    /// <c>ContractInputBinding.ReadsRequestInBody</c>, so the argument rule decides only for a
-    /// helper metadata alone knows.
+    /// <c>ContractInputBinding.RequestReads</c>, and counts only when its own body reads the
+    /// request, so the argument rule decides only for a helper metadata alone knows.
     /// </summary>
     public static bool ReadsRequest(WellKnownTypes wkt, IOperation operation) =>
         operation switch
@@ -800,17 +800,12 @@ internal static class ParameterBindingSources
     private static bool IsFormFile(WellKnownTypes wkt, ITypeSymbol type) =>
         wkt.IFormFile is { } formFile
         && (
-            Implements(type, formFile)
-            || type is IArrayTypeSymbol { ElementType: var element }
-                && Implements(element, formFile)
+            type.Implements(formFile)
+            || type is IArrayTypeSymbol { ElementType: var element } && element.Implements(formFile)
             || type is INamedTypeSymbol { TypeArguments: [var item] } collection
                 && IsEnumerableOf(collection, item)
-                && Implements(item, formFile)
+                && item.Implements(formFile)
         );
-
-    private static bool Implements(ITypeSymbol type, INamedTypeSymbol target) =>
-        SymbolEqualityComparer.Default.Equals(type, target)
-        || type.AllInterfaces.Contains(target, SymbolEqualityComparer.Default);
 
     /// <summary>
     /// A type <paramref name="host"/> binds from one string: a primitive, string, decimal,

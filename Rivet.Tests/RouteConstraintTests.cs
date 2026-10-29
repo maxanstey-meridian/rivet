@@ -222,6 +222,67 @@ public sealed class RouteConstraintTests
         Assert.Contains("routing refuses it at startup", exception.Message);
     }
 
+    [Theory]
+    [InlineData("/literal/{{x}}/things")]
+    [InlineData("/literal/a}}b")]
+    public void A_Literal_Brace_In_A_Contract_Route_Is_RIV1125(string route)
+    {
+        // Routing reads {{x}} as the literal text {x}, which is no parameter, but an OpenAPI
+        // path has no escape for a brace, so the path can't be emitted.
+        var source = Contract($"RouteDefinition<ThingDto> Get = Define.Get<ThingDto>(\"{route}\")");
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains("carries a literal brace", exception.Message);
+        Assert.Contains("ThingsContract.Get", exception.Message);
+    }
+
+    [Fact]
+    public void A_Literal_Brace_In_An_Action_Route_Is_RIV1125()
+    {
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkMerged(AttributeRoute("", "api/[controller]/{{x}}"))
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains("carries a literal brace", exception.Message);
+        Assert.Contains("ThingsController.Get", exception.Message);
+    }
+
+    [Fact]
+    public void A_Repeated_Token_On_An_Endpoint_Method_Is_RIV1125()
+    {
+        // Unlike a contract, which import can write with a repeat, an MVC action is
+        // hand-written, and routing refuses its template at startup.
+        var source = """
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            public sealed class ThingsController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet("/repeated/{id}/maps/{ID}")]
+                public ThingDto Get(string id) => new(id);
+            }
+            """;
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkMerged(source)
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains("routing refuses it at startup", exception.Message);
+        Assert.Contains("appears more than one time", exception.Message);
+    }
+
     [Fact]
     public void A_Repeated_Token_Is_Read_Rather_Than_Refused()
     {
@@ -498,6 +559,59 @@ public sealed class RouteConstraintTests
 
         Assert.Equal("/api/Codes/{code}", endpoint.RouteTemplate);
         Assert.Equal("^[a-zA-Z]{2}$", Assert.Single(endpoint.Params).Constraints?.Pattern);
+    }
+
+    private static string AttributeRoute(string classAttributes, string route) =>
+        $$"""
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            {{classAttributes}}
+            public sealed class ThingsController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpGet("{{route}}")]
+                public ThingDto Get() => new("x");
+            }
+            """;
+
+    [Theory]
+    // [area] takes the [Area]'s value, and every token is matched ignoring case.
+    [InlineData("[Area(\"Admin\")]", "api/[area]/[Controller]/[ACTION]", "/api/Admin/Things/Get")]
+    [InlineData("", "api/[controller]/x[[y]]", "/api/Things/x[y]")]
+    public void Controller_Route_Tokens_Are_Replaced_As_MVC_Does(
+        string classAttributes,
+        string route,
+        string expected
+    )
+    {
+        var endpoint = Assert.Single(
+            CompilationHelper.WalkMerged(AttributeRoute(classAttributes, route)).Endpoints
+        );
+
+        Assert.Equal(expected, endpoint.RouteTemplate);
+    }
+
+    [Theory]
+    // A token the action has no value for (no [Area], or a typo), and an unclosed bracket:
+    // MVC refuses each at startup.
+    [InlineData("api/[area]/things")]
+    [InlineData("api/[controler]")]
+    [InlineData("api/[controller")]
+    public void Controller_Route_MVC_Refuses_Is_RIV1125(string route)
+    {
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkMerged(AttributeRoute("", route))
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains("MVC refuses it at startup", exception.Message);
+        Assert.Contains("ThingsController.Get", exception.Message);
     }
 
     private static string UnboundControllerToken(string token) =>

@@ -1283,6 +1283,25 @@ public sealed class JsonContractReaderTests
         Assert.Contains("has a routeTemplate routing can't read", message);
     }
 
+    [Theory]
+    [InlineData("/literal/{{x}}/things")]
+    [InlineData("/things/a}}b")]
+    public void A_Route_Template_With_A_Literal_Brace_Fails_With_RIV2017(string routeTemplate)
+    {
+        // Routing reads a doubled brace as a literal one, but an OpenAPI path key has no
+        // escape for it.
+        var json = $$"""
+            { "types": [], "enums": [], "endpoints": [{
+              "name": "get", "httpMethod": "GET", "routeTemplate": "{{routeTemplate}}", "controllerName": "things",
+              "params": [], "responses": [{ "statusCode": 200 }] }] }
+            """;
+
+        var message = Assert.Throws<JsonException>(() => JsonContractReader.Read(json)).Message;
+
+        Assert.Contains($"endpoint 'things.get' (GET {routeTemplate})", message);
+        Assert.Contains("a literal brace", message);
+    }
+
     [Fact]
     public void A_Bare_Route_Token_Reads()
     {
@@ -1736,6 +1755,11 @@ public sealed class JsonContractReaderTests
         Assert.Contains("agree on everything but security", exception.Message);
         Assert.Contains(
             "'things.get' declares none, so it inherits the document's, and 'things.getAnonymously' is anonymous",
+            exception.Message
+        );
+        // Contract JSON has no builder calls or attributes: its remedy is the endpoint's field.
+        Assert.EndsWith(
+            "Declare the same security on both: give both endpoints the same 'security' in the contract JSON.",
             exception.Message
         );
     }

@@ -37,11 +37,16 @@ read it, so a file that makes the body multipart is always one of its parts:
 
 Which members a binder sets depends on how it creates the type, and the two don't agree:
 
-- **MVC** calls a record's one public constructor when every parameter matches a property
-  by its exact name and type, and otherwise needs a public parameterless constructor. A
-  class whose only constructor takes parameters fails every request.
-- **The form mapper** calls a type's one public constructor, whatever it is. Give it two
-  and it binds nothing at all.
+- **MVC** calls a record class's one public constructor when every parameter matches a
+  property by its exact name and type, and otherwise needs a public parameterless
+  constructor. A class whose only constructor takes parameters fails every request, and so
+  does an abstract class, a struct, or a record struct (reflection lists no implicit
+  parameterless constructor, and a record struct isn't a record class to MVC).
+- **The form mapper** calls a type's one public constructor, whatever it is. Give it two,
+  or make it abstract, and it binds nothing at all.
+- MVC also fills a get-only collection in place: `public List<IFormFile> Files { get; } = [];`
+  gets every file, because MVC adds them to the list the getter hands back. The form mapper
+  can't set it, so on a contract that's `RIV1100` until it has a setter or an `init`.
 - MVC skips a `[BindNever]` member; the form mapper skips an `[IgnoreDataMember]` one.
   Each ignores the other's attribute.
 

@@ -282,6 +282,22 @@ public sealed class FormPartNameTests
         HttpStatusCode.OK,
         "{\"Title\":\"Title\",\"Plain\":\"Plain\"}"
     )]
+    // A struct or a record struct: MVC needs a public parameterless constructor, which
+    // neither declares (reflection lists no implicit one), and a record struct has no
+    // record constructor for it either; the form mapper binds both.
+    [InlineData(true, "struct", HttpStatusCode.InternalServerError, "")]
+    [InlineData(false, "struct", HttpStatusCode.OK, "{\"Title\":\"Title\",\"Plain\":\"Plain\"}")]
+    [InlineData(true, "record-struct", HttpStatusCode.InternalServerError, "")]
+    [InlineData(
+        false,
+        "record-struct",
+        HttpStatusCode.OK,
+        "{\"Title\":\"Title\",\"Plain\":\"Plain\"}"
+    )]
+    // An abstract class, parameterless constructor or not, is one MVC can't create, and the
+    // form mapper binds nothing on it.
+    [InlineData(true, "abstract", HttpStatusCode.InternalServerError, "")]
+    [InlineData(false, "abstract", HttpStatusCode.OK, "null")]
     public async Task The_hosts_construct_these_types_differently(
         bool mvc,
         string shape,
@@ -308,6 +324,14 @@ public sealed class FormPartNameTests
     [InlineData(typeof(FormCtorOnly), "Any", "MVC's model binder can't create it")]
     [InlineData(typeof(FormCtorOnly), "Mvc", "MVC's model binder can't create it")]
     [InlineData(typeof(FormRecordMismatch), "Any", "exact name and type")]
+    [InlineData(typeof(FormStruct), "Mvc", "public parameterless constructor")]
+    [InlineData(typeof(FormRecordStruct), "Any", "record class's one public constructor")]
+    [InlineData(typeof(FormAbstract), "Mvc", "MVC's model binder can't create an abstract type")]
+    [InlineData(
+        typeof(FormAbstract),
+        "MinimalApi",
+        "form mapper binds nothing on an abstract type"
+    )]
     public void Generation_refuses_a_form_input_a_host_can_t_create(
         Type type,
         string hosts,
@@ -337,12 +361,23 @@ public sealed class FormPartNameTests
             GenerationParts(typeof(FormCtorOnly), FormBinding.FormHosts.MinimalApi)
                 .Select(part => (part.Name, part.Required))
         );
+        // A struct it sets property by property; a record struct it calls the constructor of.
+        Assert.Equal(
+            [("title", false), ("plain", false)],
+            GenerationParts(typeof(FormStruct), FormBinding.FormHosts.MinimalApi)
+                .Select(part => (part.Name, part.Required))
+        );
+        Assert.Equal(
+            [("title", true), ("plain", true)],
+            GenerationParts(typeof(FormRecordStruct), FormBinding.FormHosts.MinimalApi)
+                .Select(part => (part.Name, part.Required))
+        );
     }
 
     [Theory]
     // MVC skips [BindNever] and binds [IgnoreDataMember]; the form mapper the reverse.
     // Neither binds a file nothing can set.
-    [InlineData(true, "{\"Skipped\":\"Skipped\",\"Plain\":\"Plain\"}")]
+    [InlineData(true, "{\"Skipped\":\"Skipped\",\"Plain\":\"Plain\",\"Files\":\"file:Files\"}")]
     [InlineData(false, "{\"Never\":\"Never\",\"Plain\":\"Plain\"}")]
     public async Task The_hosts_skip_these_members_differently(bool mvc, string bound)
     {
@@ -356,6 +391,7 @@ public sealed class FormPartNameTests
                 ("Plain", false),
                 ("ReadOnlyFile", true),
                 ("PrivateSet", true),
+                ("Files", true),
             ])
         );
 
@@ -408,6 +444,34 @@ public sealed class FormPartNameTests
 
         // A member both hosts skip is no part, and refused by neither.
         Assert.Empty(GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, "Both"));
+    }
+
+    [Fact]
+    public void A_get_only_file_collection_is_a_part_only_MVC_fills()
+    {
+        // MVC adds the files to the list the getter returns; the form mapper can't set it.
+        var part = Assert.Single(
+            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Mvc, "Files")
+        );
+        Assert.Equal(("files", true), (part.Name, part.IsFile));
+
+        Assert.Contains(
+            "nothing can set it",
+            Assert
+                .Throws<RivetUserException>(() =>
+                    GenerationParts(typeof(FormSkips), FormBinding.FormHosts.MinimalApi, "Files")
+                )
+                .Message
+        );
+        var error = Assert.Throws<RivetUserException>(() =>
+            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, "Files")
+        );
+        Assert.Contains("RIV1100", error.Message);
+        Assert.Contains(
+            "bound by MVC's model binder, which fills the collection its getter returns, but left "
+                + "unset by the minimal-API form mapper",
+            error.Message
+        );
     }
 
     // ---------------------------------------------------------------
@@ -479,6 +543,50 @@ public sealed class FormPartNameTests
         // SignupForm is a component, whose name import gives the component, so the inline
         // body's record is pinned by the importer's {fieldName}Request convention instead.
         Assert.Equal("SignupRequest", schema.GetProperty("x-rivet-input-type").GetString());
+    }
+
+    [Fact]
+    public void An_inline_form_body_pins_a_name_no_component_holds_when_its_record_is_named_by_convention()
+    {
+        // The house input record {Op}Request is a component and holds the convention's name
+        // too, so the pin moves on to the first free candidate, the one import synthesizes.
+        var source = """
+            using System.Collections.Generic;
+            using System.Text.Json;
+            using System.Text.Json.Serialization;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record AddCommentRequest
+            {
+                public required string Text { get; init; }
+
+                [JsonExtensionData]
+                public Dictionary<string, JsonElement>? Extra { get; init; }
+            }
+
+            [RivetType]
+            public sealed record CommentDto(string Id);
+
+            [RivetContract]
+            public static class CommentsContract
+            {
+                public static readonly RouteDefinition<AddCommentRequest, CommentDto> AddComment =
+                    Define.Post<AddCommentRequest, CommentDto>("/api/comments").FormEncoded();
+            }
+            """;
+
+        using var document = CompilationHelper.EmitOpenApi(source);
+        var schema = RequestSchema(document, "/api/comments", "application/x-www-form-urlencoded");
+        Assert.False(schema.TryGetProperty("$ref", out _));
+        var pinned = schema.GetProperty("x-rivet-input-type").GetString();
+        Assert.Equal("AddCommentRequest_2", pinned);
+
+        var imported = CompilationHelper.Import(document.RootElement.GetRawText());
+        var contract = CompilationHelper.FindFile(imported, "CommentsContract.cs");
+        Assert.Contains($"<{pinned}, CommentDto>", contract);
     }
 
     [Fact]
@@ -755,6 +863,9 @@ public sealed class FormPartNameTests
                 Map<FormTwoCtor>(app, "two-ctor");
                 Map<FormCtorOnly>(app, "ctor-only");
                 Map<FormRecordMismatch>(app, "record-mismatch");
+                Map<FormStruct>(app, "struct");
+                Map<FormRecordStruct>(app, "record-struct");
+                Map<FormAbstract>(app, "abstract");
                 Map<FormSkips>(app, "skips");
             }
         );
@@ -799,7 +910,10 @@ public sealed class FormPartNameTests
             .GetProperty("schema");
 }
 
-/// <summary>What a form handler bound: each non-null member's value, a file as its file name.</summary>
+/// <summary>
+/// What a form handler bound: each non-null, non-empty member's value, a file as its file
+/// name and a collection of files as theirs.
+/// </summary>
 internal static class FormEcho
 {
     public static string Of(object? value) =>
@@ -808,13 +922,19 @@ internal static class FormEcho
                 ?.GetType()
                 .GetProperties()
                 .Select(property => (property.Name, Value: property.GetValue(value)))
-                .Where(pair => pair.Value is not null)
+                .Where(pair => pair.Value is not (null or ICollection<IFormFile> { Count: 0 }))
                 .ToDictionary(
                     pair => pair.Name,
                     pair =>
-                        pair.Value is IFormFile file
-                            ? $"file:{file.FileName}"
-                            : pair.Value!.ToString()
+                        pair.Value switch
+                        {
+                            IFormFile file => $"file:{file.FileName}",
+                            IEnumerable<IFormFile> files => string.Join(
+                                ',',
+                                files.Select(file => $"file:{file.FileName}")
+                            ),
+                            var other => other!.ToString(),
+                        }
                 )
         );
 }
@@ -910,6 +1030,22 @@ public sealed record FormRecordMismatch
     public string? Plain { get; set; }
 }
 
+public struct FormStruct
+{
+    public string? Title { get; set; }
+
+    public string? Plain { get; set; }
+}
+
+public record struct FormRecordStruct(string? Title, string? Plain);
+
+public abstract class FormAbstract
+{
+    public string? Title { get; set; }
+
+    public string? Plain { get; set; }
+}
+
 public sealed class FormSkips
 {
     [IgnoreDataMember]
@@ -927,6 +1063,8 @@ public sealed class FormSkips
     public IFormFile? ReadOnlyFile { get; }
 
     public IFormFile? PrivateSet { get; private set; }
+
+    public List<IFormFile> Files { get; } = [];
 }
 
 /// <summary>The MVC handlers for <see cref="FormPartNameTests"/>.</summary>
@@ -962,6 +1100,15 @@ public sealed class FormPartController : ControllerBase
 
     [HttpPost("/form-parts/mvc/record-mismatch")]
     public string RecordMismatch([FromForm] FormRecordMismatch form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/struct")]
+    public string Struct([FromForm] FormStruct form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/record-struct")]
+    public string RecordStruct([FromForm] FormRecordStruct form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/abstract")]
+    public string Abstract([FromForm] FormAbstract form) => FormEcho.Of(form);
 
     [HttpPost("/form-parts/mvc/skips")]
     public string Skips([FromForm] FormSkips form) => FormEcho.Of(form);

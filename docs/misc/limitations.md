@@ -147,19 +147,21 @@ combination:
   unattributed array comes from the query when the endpoint is mapped to a body-less
   verb such as GET, written in capitals the way `MapGet` passes it (a `MapMethods`
   `"get"` still infers a body), and any other unattributed collection is a body. An
-  `[AsParameters]` type is bound member by member, and so is a `[FromForm]` complex
-  type, which goes through the form mapper: it binds each member by name and, unlike
-  the rest of the minimal-API binder, ignores case. It names a member by its C# name or
-  its `[DataMember(Name = ...)]`, never by a member's `[FromForm(Name = ...)]`, and
-  reads every member from the form, whatever binding attribute it carries. On a
-  positional record it also refuses (400) a request that leaves out any constructor
-  parameter, nullable ones included; MVC binds the missing one as null. On MVC an
-  unattributed collection or complex type is a body under `[ApiController]`, with the
-  same two exceptions MVC makes: a complex type whose members carry their own binding
-  source (a `[FromQuery]` property, an `IFormFile`) is bound piece by piece, and so is
-  everything once the app sets `SuppressInferBindingSourcesForParameters`. Without a
-  body, a collection is checked as it stands and a complex type member by member, all
-  the way down, since MVC binds `?Filter.Kind=` into a nested type just as happily.
+  `[AsParameters]` type is bound member by member (with a parameterised constructor,
+  only that constructor's arguments bind, and a type the host can't create binds
+  nothing), and so is a `[FromForm]` complex type, which goes through the form mapper:
+  it binds each member by name and, unlike the rest of the minimal-API binder, ignores
+  case. It names a member by its C# name or its `[DataMember(Name = ...)]`, never by a
+  member's `[FromForm(Name = ...)]`, and reads every member from the form, whatever
+  binding attribute it carries. On a positional record it also refuses (400) a request
+  that leaves out any constructor parameter, nullable ones included; MVC binds the
+  missing one as null. On MVC an unattributed collection or complex type is a body under
+  `[ApiController]`, with the same two exceptions MVC makes: a complex type whose
+  members carry their own binding source (a `[FromQuery]` property, an `IFormFile`) is
+  bound piece by piece, and so is everything once the app sets
+  `SuppressInferBindingSourcesForParameters`. Without a body, a collection is checked as
+  it stands and a complex type member by member, all the way down, since MVC binds
+  `?Filter.Kind=` into a nested type just as happily.
 - **`RIV1110`** (generation): the same rule, with the same parameters counted, for a
   `[RivetEndpoint]` or `[RivetClient]` action. An instance method is an MVC action and
   gets the ignore-case rule; a static `[RivetEndpoint]` is a minimal-API handler and

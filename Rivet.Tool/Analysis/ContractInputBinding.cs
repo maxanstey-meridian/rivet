@@ -55,7 +55,8 @@ internal static class ContractInputBinding
         IMethodSymbol handler,
         ParameterBindingHost host,
         bool infersBody,
-        string? route
+        string? route,
+        RequestReads requestReads
     )
     {
         var body = DeclaredBody(endpoint);
@@ -70,7 +71,7 @@ internal static class ContractInputBinding
             .ToList();
         var readsRequest =
             inputs.Any(input => input.Source == InputSource.WholeRequest)
-            || ReadsRequestInBody(wkt, handler);
+            || requestReads.InBody(wkt, handler);
         var readsWholeForm = inputs.Any(input => input.Source == InputSource.WholeForm);
 
         var settled = new HashSet<DeclaredInput>();
@@ -442,37 +443,79 @@ internal static class ContractInputBinding
         };
 
     /// <summary>
-    /// True when the handler's body reaches the request or its route values
-    /// (<see cref="ParameterBindingSources.ReadsRequest"/>), so it can pick any input out by
-    /// hand. Every method or property getter it calls whose source is in the compilation is
-    /// followed, transitively, each once, and counts when its own body reads the request: a
-    /// controller's private helper reads the same <c>Request</c>, an extension handed
-    /// <c>this</c> reads it through its receiver, and a static helper handed an
-    /// <c>IHttpContextAccessor</c> through the accessor. A helper only metadata knows is
-    /// judged by what the call hands it.
+    /// Which handlers' bodies reach the request or its route values, worked out once per
+    /// handler for a whole --check run, however many mappings and terminals compare it.
     /// </summary>
-    private static bool ReadsRequestInBody(WellKnownTypes wkt, IMethodSymbol handler) =>
-        ReadsRequestInBody(
-            wkt,
-            handler,
-            new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)
+    internal sealed class RequestReads
+    {
+        private readonly Dictionary<IMethodSymbol, bool> _handlers = new(
+            SymbolEqualityComparer.Default
+        );
+        private readonly Dictionary<IMethodSymbol, IOperation?> _bodies = new(
+            SymbolEqualityComparer.Default
         );
 
-    private static bool ReadsRequestInBody(
-        WellKnownTypes wkt,
-        IMethodSymbol method,
-        HashSet<IMethodSymbol> followed
-    ) =>
-        followed.Add(method.OriginalDefinition)
-        && CoverageChecker.SourceBody(method) is { } body
-        && body.Descendants()
-            .Any(operation =>
-                ParameterBindingSources.ReadsRequest(wkt, operation)
-                || Callee(operation) is { } callee && ReadsRequestInBody(wkt, callee, followed)
-            );
+        /// <summary>
+        /// True when the handler's body reaches the request or its route values
+        /// (<see cref="ParameterBindingSources.ReadsRequest"/>), so it can pick any input out
+        /// by hand. Every method or property getter it calls whose source is in the
+        /// compilation is followed, transitively, each once, and counts only when its own body
+        /// reads the request: a controller's private helper reads the same <c>Request</c>, an
+        /// extension handed <c>this</c> reads it through its receiver, and a static helper
+        /// handed an <c>IHttpContextAccessor</c> through the accessor, while one handed the
+        /// <c>HttpContext</c> that reads only its <c>User</c> doesn't. A callee only metadata
+        /// knows, or a constructor, is judged by what the call hands it.
+        /// </summary>
+        public bool InBody(WellKnownTypes wkt, IMethodSymbol handler)
+        {
+            var definition = handler.OriginalDefinition;
+            if (!_handlers.TryGetValue(definition, out var reads))
+            {
+                reads = InBody(
+                    wkt,
+                    definition,
+                    new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)
+                );
+                _handlers[definition] = reads;
+            }
+
+            return reads;
+        }
+
+        private bool InBody(
+            WellKnownTypes wkt,
+            IMethodSymbol method,
+            HashSet<IMethodSymbol> followed
+        ) =>
+            followed.Add(method.OriginalDefinition)
+            && Body(method) is { } body
+            && body.Descendants()
+                .Any(operation =>
+                    operation switch
+                    {
+                        // Handed to a callee whose body is followed: that body decides.
+                        IArgumentOperation { Parent: var call }
+                            when Callee(call) is { } callee && Body(callee) is not null => false,
+                        _ => ParameterBindingSources.ReadsRequest(wkt, operation)
+                            || Callee(operation) is { } callee && InBody(wkt, callee, followed),
+                    }
+                );
+
+        private IOperation? Body(IMethodSymbol method)
+        {
+            var definition = method.OriginalDefinition;
+            if (!_bodies.TryGetValue(definition, out var body))
+            {
+                body = CoverageChecker.SourceBody(definition);
+                _bodies[definition] = body;
+            }
+
+            return body;
+        }
+    }
 
     /// <summary>The method or property getter <paramref name="operation"/> calls.</summary>
-    private static IMethodSymbol? Callee(IOperation operation) =>
+    private static IMethodSymbol? Callee(IOperation? operation) =>
         operation switch
         {
             IInvocationOperation { TargetMethod: var method } => method,

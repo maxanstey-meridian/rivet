@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 using Rivet.Tool.Model;
 
@@ -6,13 +7,14 @@ namespace Rivet.Tool.Import;
 /// <summary>
 /// Accounts for every authored OpenAPI field the typed contract model has no slot for, so
 /// the import never drops one silently: documentation fields (path-item summary and
-/// description, operation externalDocs, links, media-type encoding, info.summary,
+/// description, operation externalDocs, links, media-type encoding, info.summary, and
 /// jsonSchemaDialect) are carried as preserved fields and re-emitted verbatim; callbacks,
-/// webhooks and path-item components, which describe requests outside this API's
+/// webhooks, and path-item components, which describe requests outside this API's
 /// contracts, are reported. Runs before reference normalisation, so a <c>$ref</c> is still a
-/// reference: referenced responses and request bodies are handled once, at their component,
-/// component responses and parameters (kept as raw provenance) are skipped, and a
-/// referenced path item, which the import inlines, is read through its reference.
+/// reference: a request body component is handled once, at the component; response
+/// components and parameters, kept as raw provenance, are skipped; and any other reference
+/// the import inlines (a path item, a request body, or a response) is read through it, the
+/// way the import reads it.
 /// </summary>
 internal static class UnrepresentedFieldReporter
 {
@@ -152,19 +154,21 @@ internal static class UnrepresentedFieldReporter
                     )
                 );
             }
-            PreserveMediaEncodings(
-                operation["requestBody"],
-                $"{operationPointer}/requestBody",
-                preserved
-            );
+            // A request body or response component keeps its own fields as raw provenance;
+            // any other reference is inlined by the import, so its fields belong to this pointer.
+            if (
+                operation["requestBody"] is JsonObject requestBodyReference
+                && OpenApiImporter.InlinedRequestBody(requestBodyReference, root) is { } requestBody
+            )
+            {
+                PreserveMediaEncodings(requestBody, $"{operationPointer}/requestBody", preserved);
+            }
             if (operation["responses"] is not JsonObject responses)
             {
                 continue;
             }
             foreach (var (status, value) in responses)
             {
-                // A response component keeps its own fields as raw provenance; any other
-                // reference is inlined by the import, so its fields belong to this pointer.
                 if (
                     value is not JsonObject reference
                     || OpenApiImporter.InlinedResponse(reference, root) is not { } response
@@ -208,15 +212,18 @@ internal static class UnrepresentedFieldReporter
         var ignored = new List<string>();
         foreach (var (name, _) in headers)
         {
-            switch (ContractBuilder.ResponseHeaderNameDrop(name, kept))
+            var into = ContractBuilder.ResponseHeaderNameDrop(name, kept) switch
             {
-                case null:
-                    kept.Add(name);
-                    break;
-                case ContractBuilder.IgnoredResponseHeader:
-                    ignored.Add(name);
-                    break;
-            }
+                null => kept,
+                ContractBuilder.ResponseHeaderDrop.Ignored => ignored,
+                // Reported as an unsupported-header marker, so it doesn't come back.
+                ContractBuilder.ResponseHeaderDrop.EmptyName
+                or ContractBuilder.ResponseHeaderDrop.DuplicateName => null,
+                var unknown => throw new UnreachableException(
+                    $"Unknown response header drop {unknown}."
+                ),
+            };
+            into?.Add(name);
         }
         if (ignored.Count == 0)
         {
@@ -224,10 +231,12 @@ internal static class UnrepresentedFieldReporter
         }
         if (kept.Count == 0)
         {
+            // Only what OpenAPI ignores comes back: a header the contract reports as dropped
+            // stays dropped, whatever its neighbours.
             var whole = new JsonObject();
-            foreach (var (name, header) in headers)
+            foreach (var name in ignored)
             {
-                whole[name] = Header(header, swagger2);
+                whole[name] = Header(headers[name], swagger2);
             }
             PreserveValue(preserved, responsePointer, "headers", whole);
             return;

@@ -139,13 +139,16 @@ A handler that can read the request itself is trusted to pick inputs out by hand
 handler body that reads the request or route data through a property (a controller's
 `Request` or `RouteData`, `ControllerContext.HttpContext.Request`, an
 `IHttpContextAccessor`'s `HttpContext.Request`), calls `HttpContext.GetRouteValue`, or
-hands the `HttpContext` or `HttpRequest` to another method (`HttpContext.GetTenantId()`).
-Touching only `HttpContext.User`, `Response`, or `RequestAborted` doesn't count. A method
-or property the handler calls is read too when its source is in your project, as deep as
-the calls go, so a controller's private `RouteId()` that reads `Request.RouteValues`
-counts, and so do an extension it hands `this` (`this.RouteId()`) and a static helper it
-hands an `IHttpContextAccessor`. A method only a package knows is judged by what it's
-handed. Such a handler is never told an input is unbound, though what it does bind is
+hands the `HttpContext` or `HttpRequest` to a method only a package knows. Touching only
+`HttpContext.User`, `Response`, or `RequestAborted` doesn't count. A method or property the
+handler calls is read too when its source is in your project, as deep as the calls go, and
+it counts only when its own body reads the request. So a controller's private `RouteId()`
+that reads `Request.RouteValues` counts, and so do an extension it hands `this`
+(`this.RouteId()`), a static helper it hands an `IHttpContextAccessor`, and your own
+`HttpContext.GetTenantId()` that reads a request header. An `Audit(HttpContext)` that only
+looks at `context.User` doesn't, however much of the context it's handed. A method only a
+package knows can't be read, so it's judged by what it's handed. Such a handler is never
+told an input is unbound, though what it does bind is
 still checked. That's also the only way to read a cookie the contract declares: ASP.NET
 has no attribute that binds one, so `--check` reports a declared cookie unless the
 handler can read `Request.Cookies`. An unattributed complex parameter that
@@ -276,9 +279,22 @@ App-wide setup in a helper (an `AuthorizeFilter`, or a fallback or default polic
 where the helper is called: under that call's condition, unconditionally if any call is, and
 not at all if nothing calls it. A helper handed to a call as a method group, as in
 `services.AddControllers(ConfigureMvc)`, runs where that call does; one stored in a delegate
-can't be followed, so it's unknown. A method nothing calls runs only when the host calls it:
-the entry point, or a Startup class's public `Configure…` methods, which ASP.NET finds by
-name.
+can't be followed, so it's unknown. A call through an interface the helper implements, or a
+method it overrides, counts as a call to it, so a module's `AddServices` runs where
+`module.AddServices(services)` does.
+
+Past your own calls, `--check` holds the host to the rules ASP.NET actually follows, and
+nothing friendlier. The entry point runs. A Startup class runs where `UseStartup<Startup>()`
+or `UseStartup(typeof(Startup))` hands it over, and only the methods `StartupLoader` looks
+for: `ConfigureServices`, `Configure`, and `ConfigureContainer`, or an environment's own
+`ConfigureDevelopmentServices` and friends. An environment's own method runs only in that
+environment, and the plain one only outside it, so either is unknown. A class the framework
+calls through its own interface, such as an `IConfigureOptions<MvcOptions>` or
+`IPostConfigureOptions<MvcOptions>` that adds the filter, runs where you hand the framework
+its type (`services.ConfigureOptions<RequireSignIn>()`), and is unknown when your project
+never names it, since assembly scanning may still find it. A public
+`ConfigureAuthorization(this IServiceCollection services)` that nothing calls runs nowhere:
+the `Configure` prefix means something to ASP.NET only on a Startup class.
 
 ### What it can't see
 
@@ -306,13 +322,17 @@ Whether those actions need authentication depends on configuration `--check` nev
 so each one is `RIV4009`, naming the site and the condition. An `if`, an `else`, a `?:`
 branch, a `switch`, a loop, a `catch`, the right of `&&`, `||`, or `??`, a `?.`, and a
 `return` that may leave before the call all count. A condition around both the endpoint and
-its requirement doesn't: the requirement holds whenever the endpoint exists.
+its requirement doesn't: the requirement holds whenever the endpoint exists. Nor does a
+`return` above a local function's declaration, the usual spot for one, since the function
+runs where it's called, not where it's written.
 
 It's never a guess, though, and it isn't blanket: `--check` works the verdict out for every
 way the unknowns could fall, and reports only when they disagree. An `[AllowAnonymous]`
 action under that conditional `RequireAuthorization()` is anonymous either way, and an
 `[Authorize]` one requires authentication either way, so neither is `RIV4009`. Neither is
-a conditional requirement on an endpoint that the fallback policy would secure anyway.
+a conditional requirement on an endpoint that the fallback policy would secure anyway, nor a
+bare `[Authorize]` under a default policy set only when `entraEnabled`, if that policy
+requires an authenticated user just as ASP.NET's own default does.
 
 The cure is to apply authorization unconditionally. If a development environment really
 does run without authentication, give it a development authentication handler that signs

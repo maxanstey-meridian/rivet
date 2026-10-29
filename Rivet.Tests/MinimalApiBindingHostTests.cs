@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -15,8 +16,8 @@ using Rivet.Tool.Analysis;
 namespace Rivet.Tests;
 
 /// <summary>
-/// What a real minimal-API host binds for the members of a <c>[FromForm]</c> complex
-/// parameter, against <see cref="ParameterBindingSources"/>' reading of the same handlers
+/// What a real minimal-API host binds for the members of a <c>[FromForm]</c> or
+/// <c>[AsParameters]</c> complex parameter, against <see cref="ParameterBindingSources"/>' reading of the same handlers
 /// (RIV4005 and RIV4006 read binding through it). The form mapper reads each member as a form
 /// field under its C# name, or its <c>[DataMember(Name =)]</c>, and a nested member under
 /// <c>Outer.Name</c>. It ignores a <c>Name =</c> on the parameter (no prefix) and every binding
@@ -103,6 +104,155 @@ public sealed class MinimalApiBindingHostTests
             )
         );
     }
+
+    [Theory]
+    // One public constructor with parameters: RequestDelegateFactory binds its arguments
+    // and sets no property, so a settable one beside them stays unbound.
+    [InlineData(nameof(AsParametersHandlers.Ctor), new[] { "Title" })]
+    // Several, one of them parameterless: it calls that one and sets every settable property.
+    [InlineData(nameof(AsParametersHandlers.TwoCtor), new[] { "Title", "Plain" })]
+    public async Task AsParameters_binds_what_its_constructor_allows(string handler, string[] bound)
+    {
+        var path = $"/as-parameters/{handler}";
+        await using var host = await BindingHost.StartAsync(
+            mvc: false,
+            app => app.MapGet(path, AsParametersHandlers.ByName[handler])
+        );
+
+        foreach (var member in new[] { "Title", "Plain" })
+        {
+            Assert.Equal(
+                bound.Contains(member) ? BindingHost.Value : null,
+                await host.BoundAsync(HttpMethod.Get, path, [(InputSource.Query, member)], member)
+            );
+        }
+        Assert.Equal(
+            bound.Select(member => $"p.{member}"),
+            BindingHost
+                .CheckerInputs(
+                    typeof(AsParametersHandlers),
+                    handler,
+                    ParameterBindingHost.MinimalApi,
+                    infersBody: false,
+                    route: path
+                )
+                .Select(input => input.Path)
+        );
+    }
+
+    [Theory]
+    // Several public constructors and none parameterless, a constructor parameter no
+    // property matches, and an abstract type: the endpoint never starts serving.
+    [InlineData(nameof(AsParametersHandlers.NoParameterless), "parameterless one among several")]
+    [InlineData(
+        nameof(AsParametersHandlers.Mismatch),
+        "parameter 'heading' matches no public property"
+    )]
+    [InlineData(nameof(AsParametersHandlers.Abstract), "abstract type")]
+    public async Task AsParameters_refuses_a_type_it_cant_create(string handler, string why)
+    {
+        var path = $"/as-parameters/{handler}";
+        await using var host = await BindingHost.StartAsync(
+            mvc: false,
+            app => app.MapGet(path, AsParametersHandlers.ByName[handler])
+        );
+
+        Assert.Equal(HttpStatusCode.InternalServerError, (await host.GetAsync(path)).Status);
+        var (compilation, _) = BindingHost.Probe;
+        var type = (INamedTypeSymbol)
+            compilation
+                .GetTypeByMetadataName(typeof(AsParametersHandlers).FullName!)!
+                .GetMembers(handler)
+                .OfType<IMethodSymbol>()
+                .Single()
+                .Parameters.Single()
+                .Type;
+        Assert.Contains(
+            why,
+            FormBinding.CantCreate(
+                type,
+                FormBinding.FormBoundProperties(compilation, type),
+                FormBinding.Binder.AsParameters
+            )
+        );
+        Assert.Empty(
+            BindingHost.CheckerInputs(
+                typeof(AsParametersHandlers),
+                handler,
+                ParameterBindingHost.MinimalApi,
+                infersBody: false,
+                route: path
+            )
+        );
+    }
+}
+
+public sealed record AsParametersCtor(string? Title)
+{
+    public string? Plain { get; set; }
+}
+
+public sealed class AsParametersTwoCtor
+{
+    public AsParametersTwoCtor() { }
+
+    public AsParametersTwoCtor(string? title) => Title = title;
+
+    public string? Title { get; set; }
+
+    public string? Plain { get; set; }
+}
+
+public sealed class AsParametersNoParameterless
+{
+    public AsParametersNoParameterless(string? title) => Title = title;
+
+    public AsParametersNoParameterless(string? title, string? plain)
+    {
+        Title = title;
+        Plain = plain;
+    }
+
+    public string? Title { get; set; }
+
+    public string? Plain { get; set; }
+}
+
+public sealed class AsParametersMismatch(string? heading)
+{
+    public string? Title { get; set; } = heading;
+
+    public string? Plain { get; set; }
+}
+
+public abstract class AsParametersAbstract
+{
+    public string? Title { get; set; }
+
+    public string? Plain { get; set; }
+}
+
+public static class AsParametersHandlers
+{
+    public static string Ctor([AsParameters] AsParametersCtor p) => BindingHost.Echo(p);
+
+    public static string TwoCtor([AsParameters] AsParametersTwoCtor p) => BindingHost.Echo(p);
+
+    public static string NoParameterless([AsParameters] AsParametersNoParameterless p) =>
+        BindingHost.Echo(p);
+
+    public static string Mismatch([AsParameters] AsParametersMismatch p) => BindingHost.Echo(p);
+
+    public static string Abstract([AsParameters] AsParametersAbstract p) => BindingHost.Echo(p);
+
+    public static readonly Dictionary<string, Delegate> ByName = new()
+    {
+        [nameof(Ctor)] = Ctor,
+        [nameof(TwoCtor)] = TwoCtor,
+        [nameof(NoParameterless)] = NoParameterless,
+        [nameof(Mismatch)] = Mismatch,
+        [nameof(Abstract)] = Abstract,
+    };
 }
 
 public sealed class MinimalForm
@@ -329,6 +479,13 @@ internal sealed class BindingHost : IAsyncDisposable
         }
 
         return element.ValueKind == JsonValueKind.String ? element.GetString() : null;
+    }
+
+    /// <summary>Sends a GET to <paramref name="path"/> and returns the status and body.</summary>
+    public async Task<(HttpStatusCode Status, string Body)> GetAsync(string path)
+    {
+        using var response = await _client.GetAsync(path);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
     /// <summary>Sends <paramref name="content"/> as a POST and returns the status and body.</summary>

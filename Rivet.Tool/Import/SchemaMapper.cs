@@ -1330,30 +1330,11 @@ internal sealed class SchemaMapper
     internal string? ResolveLeafSchemaType(IOpenApiSchema schema, string csharpType) =>
         IsBuiltInScalar(csharpType) ? ResolveSchemaType(schema) : null;
 
-    /// <summary>
-    /// The C# keyword scalars the walker maps through Roslyn's <c>SpecialType</c> (and
-    /// <c>byte[]</c>, which it maps to a base64 string). The framework scalars come from the
-    /// walker's own table, <see cref="BuiltInScalars"/>.
-    /// </summary>
-    internal static readonly IReadOnlySet<string> KeywordScalars = new HashSet<string>
-    {
-        "string",
-        "bool",
-        "sbyte",
-        "byte",
-        "short",
-        "ushort",
-        "int",
-        "uint",
-        "long",
-        "ulong",
-        "float",
-        "double",
-        "decimal",
-        "char",
-        "object",
-        "byte[]",
-    };
+    private static readonly HashSet<string> _keywordScalars =
+    [
+        .. BuiltInScalars.KeywordTypes.Select(scalar => scalar.Keyword),
+        BuiltInScalars.ByteArray.Keyword,
+    ];
 
     private static readonly HashSet<string> _frameworkScalars = BuiltInScalars
         .FrameworkTypes.Select(scalar => scalar.MetadataName)
@@ -1367,7 +1348,7 @@ internal sealed class SchemaMapper
     internal bool IsBuiltInScalar(string csharpType)
     {
         var name = csharpType.TrimEnd('?');
-        if (KeywordScalars.Contains(name))
+        if (_keywordScalars.Contains(name))
         {
             return true;
         }

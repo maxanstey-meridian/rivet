@@ -38,13 +38,21 @@ internal static class RouteConstraints
     /// <summary>
     /// <paramref name="template"/>'s route tokens (<see cref="RouteParser.ParseRouteTokens"/>).
     /// A template routing refuses at startup (an unclosed parameter, an optional one with a
-    /// default, two parameters in a row) stops generation here rather than reaching the spec.
+    /// default, two parameters in a row, and a repeated name unless
+    /// <paramref name="readRepeats"/> lets a contract's through) stops generation here rather
+    /// than reaching the spec. So does a literal brace (<c>{{</c> or <c>}}</c>), which routing
+    /// serves but an OpenAPI path can't hold (<see cref="RouteParser.HasLiteralBrace"/>).
     /// </summary>
-    public static IReadOnlyList<RouteToken> Tokens(string template, string where)
+    public static IReadOnlyList<RouteToken> Tokens(
+        string template,
+        string where,
+        bool readRepeats = true
+    )
     {
+        IReadOnlyList<RouteToken> tokens;
         try
         {
-            return RouteParser.ParseRouteTokens(template);
+            tokens = RouteParser.ParseRouteTokens(template, readRepeats);
         }
         catch (RoutePatternException exception)
         {
@@ -54,6 +62,18 @@ internal static class RouteConstraints
                     + $"({exception.Message.TrimEnd('.')}). Fix the template."
             );
         }
+
+        if (RouteParser.HasLiteralBrace(template))
+        {
+            throw Diagnostics.Error(
+                Diagnostics.RouteConstraintContradictsType,
+                $"route template '{template}' on {where} carries a literal brace ('{{{{' or "
+                    + "'}}'), which an OpenAPI path can't hold: path templating has no escape for "
+                    + "one. Take the brace out of the path."
+            );
+        }
+
+        return tokens;
     }
 
     /// <summary>

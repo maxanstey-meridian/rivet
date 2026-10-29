@@ -328,7 +328,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3022` | `reserved-authorization-header-dropped` | `Authorization` is declared as a header parameter instead of a security scheme. |
 | `RIV3023` | `reserved-accept-header-dropped` | `Accept` is declared as a header parameter instead of response content. |
 | `RIV3024` | `body-forbidden-status-content-dropped` | Response content or an example sits on a body-forbidden status (1xx/204/205/304); the content is dropped, the status kept. |
-| `RIV3025` | `schemaless-parameter-dropped` | Parameter declares `content` instead of a `schema`, or neither; the parameter is dropped from the operation. |
+| `RIV3025` | `schemaless-parameter-dropped` | Parameter declares `content` instead of a `schema`, or neither; the parameter is dropped from the operation. A path parameter with neither stops import instead (`RIV3032`). |
 | `RIV3027` | `callback-dropped` | Operation or component `callbacks` entry; contracts describe requests the API receives. |
 | `RIV3028` | `path-item-outside-paths-dropped` | `webhooks` or `components.pathItems` entry; only path items under `paths` become endpoints. |
 | `RIV3029` | `equivalent-path-template-merged` | A path repeats an earlier path's template under other parameter names, which OpenAPI forbids; its operations merge into the earlier path and adopt its parameter names. |

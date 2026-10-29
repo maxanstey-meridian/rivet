@@ -46,6 +46,45 @@ public sealed class ContractEndpointTests
     }
 
     [Fact]
+    public void A_request_content_body_keeps_a_name_the_route_binds_from_the_input()
+    {
+        // The emitter writes .RequestContent<T>() as T's whole schema, whatever the route
+        // binds from TInput, so a T member sharing a route-bound input member's name is still
+        // a body field.
+        var source = """
+            using System;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record NoteInput(Guid ItemId);
+
+            [RivetType]
+            public sealed record NoteBody(Guid ItemId, string Title);
+
+            [RivetType]
+            public sealed record NoteDto(string Id);
+
+            [RivetContract]
+            public static class NotesContract
+            {
+                public static readonly RouteDefinition<NoteInput, NoteDto> Create =
+                    Define.Post<NoteInput, NoteDto>("/api/items/{item_id}/notes")
+                        .RequestContent<NoteBody>("application/json");
+            }
+            """;
+
+        var endpoint = Assert.Single(Generate(source));
+
+        Assert.Contains(
+            endpoint.Params,
+            param => param is { Name: "item_id", Source: ParamSource.Route }
+        );
+        Assert.Equal(["itemId", "title"], endpoint.BodyFieldNames);
+    }
+
+    [Fact]
     public void Nested_Contract_Class_Is_Discovered()
     {
         var source = """

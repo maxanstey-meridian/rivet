@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -587,28 +588,57 @@ internal static class ContractBuilder
 
     private sealed record ScalarLeafProvenance(string SchemaType, string? Format);
 
+    /// <summary>Why the contract leaves a response header out, judged by its name.</summary>
+    internal enum ResponseHeaderDrop
+    {
+        /// <summary>A header needs a name.</summary>
+        EmptyName,
+
+        /// <summary>
+        /// OpenAPI's own rule: it ignores a response header named Content-Type, so the
+        /// contract leaves it out unreported (the adapters would demand it, and emit refuses
+        /// it, RIV2009). UnrepresentedFieldReporter keeps it verbatim instead.
+        /// </summary>
+        Ignored,
+
+        /// <summary>HTTP header names are case-insensitive, so a second spelling is the same header.</summary>
+        DuplicateName,
+    }
+
+    /// <summary>
+    /// Why the contract leaves a response header out, judged by its name against the names it
+    /// already keeps for that status, or null when it keeps it. UnrepresentedFieldReporter
+    /// reads this same rule to keep an ignored header verbatim beside the ones the contract
+    /// emits.
+    /// </summary>
+    internal static ResponseHeaderDrop? ResponseHeaderNameDrop(
+        string name,
+        IEnumerable<string> keptNames
+    ) =>
+        string.IsNullOrEmpty(name) ? ResponseHeaderDrop.EmptyName
+        : OpenApiStructure.IsReservedHeaderName(name, isResponseHeader: true)
+            ? ResponseHeaderDrop.Ignored
+        : keptNames.Contains(name, StringComparer.OrdinalIgnoreCase)
+            ? ResponseHeaderDrop.DuplicateName
+        : null;
+
+    /// <summary>
+    /// The reason an unsupported-header marker names for a dropped header, or null for one
+    /// OpenAPI ignores, which the contract leaves out unreported.
+    /// </summary>
+    private static string? ResponseHeaderDropMarker(ResponseHeaderDrop drop) =>
+        drop switch
+        {
+            ResponseHeaderDrop.EmptyName => "empty-name",
+            ResponseHeaderDrop.Ignored => null,
+            ResponseHeaderDrop.DuplicateName => "duplicate-name",
+            _ => throw new UnreachableException($"Unknown response header drop {drop}."),
+        };
+
     /// <summary>
     /// Response headers (previously out-of-scope) become .WithResponseHeader()
     /// calls. Headers on a status the contract cannot declare are dropped loudly.
     /// </summary>
-    internal const string IgnoredResponseHeader = "ignored";
-
-    /// <summary>
-    /// Why the contract leaves a response header out, judged by its name against the names it
-    /// already keeps for that status, or null when it keeps it: a header needs a name, and
-    /// HTTP header names are case-insensitive, so a second spelling is the same header.
-    /// <see cref="IgnoredResponseHeader"/> is OpenAPI's own rule: it ignores a response header
-    /// named Content-Type, so the contract leaves it out unreported (the adapters would demand
-    /// it, and emit refuses it, RIV2009). UnrepresentedFieldReporter reads this same rule to
-    /// keep that header verbatim beside the ones the contract emits.
-    /// </summary>
-    internal static string? ResponseHeaderNameDrop(string name, IEnumerable<string> keptNames) =>
-        string.IsNullOrEmpty(name) ? "empty-name"
-        : OpenApiStructure.IsReservedHeaderName(name, isResponseHeader: true)
-            ? IgnoredResponseHeader
-        : keptNames.Contains(name, StringComparer.OrdinalIgnoreCase) ? "duplicate-name"
-        : null;
-
     private static IReadOnlyList<GeneratedResponseHeader> ResolveResponseHeaders(
         OpenApiOperation operation,
         SchemaMapper mapper,
@@ -652,13 +682,12 @@ internal static class ContractBuilder
                         )
                         .Select(existing => existing.Name)
                 );
-                if (drop == IgnoredResponseHeader)
+                if (drop is { } dropped)
                 {
-                    continue;
-                }
-                if (drop is not null)
-                {
-                    unsupported.Add($"header name={name} status={statusStr} reason={drop}");
+                    if (ResponseHeaderDropMarker(dropped) is { } reason)
+                    {
+                        unsupported.Add($"header name={name} status={statusStr} reason={reason}");
+                    }
                     continue;
                 }
 

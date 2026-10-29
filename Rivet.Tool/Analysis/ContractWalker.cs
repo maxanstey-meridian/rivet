@@ -41,22 +41,8 @@ public static class ContractWalker
             // Abstract class contract: read HTTP attributes from abstract methods
             if (type.IsAbstract && !type.IsStatic)
             {
-                foreach (var member in type.GetMembers())
+                foreach (var method in AbstractOperations(type))
                 {
-                    // Ordinary methods only: an abstract property's or event's accessors
-                    // are abstract methods too, but never operations.
-                    if (
-                        member
-                        is not IMethodSymbol
-                        {
-                            MethodKind: MethodKind.Ordinary,
-                            IsAbstract: true
-                        } method
-                    )
-                    {
-                        continue;
-                    }
-
                     var endpoint = EndpointWalker.BuildControllerEndpoint(
                         method,
                         controllerName,
@@ -931,7 +917,10 @@ public static class ContractWalker
         bool isFormEncoded
     )
     {
-        var routeParamNames = RouteParser.ParseRouteParamNames(route);
+        // The tokens routing reads, so a literal {{ in the template is no parameter.
+        var routeParamNames = routeTokens
+            .Select(token => token.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         // Wire-name pinning for params: a route token and a
         // C# property are the same param when they match under normalization
         // ({thing_id} ↔ ThingId, {enterprise-team} ↔ EnterpriseTeam). The param
@@ -1069,7 +1058,7 @@ public static class ContractWalker
                 field,
                 declaredRequestBody,
                 tInput,
-                route,
+                routeParamNames,
                 typeWalker
             );
 
@@ -1320,7 +1309,8 @@ public static class ContractWalker
 
         // A JSON body declared only by .RequestContent<T>(json) lowers no param, but its
         // top-level names are as closed as a lowered body's, so --check holds a Functions
-        // parameter to them the same way.
+        // parameter to them the same way. The emitter writes such a body as T's whole schema,
+        // whatever the route binds from TInput, so only T's read-only members drop.
         if (
             !parameters.Any(parameter =>
                 parameter.Source is ParamSource.Body or ParamSource.File or ParamSource.FormField
@@ -1337,7 +1327,7 @@ public static class ContractWalker
                 .Select(content =>
                     content.Schema is null
                         ? null
-                        : ClosedBodyFieldNames(typeWalker, content.Schema, parameters)
+                        : ClosedBodyFieldNames(typeWalker, content.Schema, [])
                 )
                 .ToList();
             bodyFieldNames = names.Contains(null)
@@ -1459,22 +1449,6 @@ public static class ContractWalker
             ),
             member
         );
-
-    /// <summary>
-    /// A member's [RivetExample] as the one-item schema <c>examples</c> array a body
-    /// property's schema carries, so the param says what the property would.
-    /// </summary>
-    internal static JsonElement? SchemaExamples(string? example, string what)
-    {
-        if (example is null)
-        {
-            return null;
-        }
-
-        var value = ParseJsonArgument(example, what)!.Value;
-        using var array = JsonDocument.Parse($"[{value.GetRawText()}]");
-        return array.RootElement.Clone();
-    }
 
     private static TsEndpointParam ToDeclaredParameter(
         IInvocationOperation call,
@@ -1650,7 +1624,7 @@ public static class ContractWalker
         IFieldSymbol field,
         DeclaredRequestBody? declaredRequestBody,
         ITypeSymbol? inputType,
-        string route,
+        IReadOnlySet<string> routeParamNames,
         TypeWalker typeWalker
     )
     {
@@ -1661,7 +1635,7 @@ public static class ContractWalker
 
         if (
             inputType is null
-            || !IsCompatibleRequestBodyType(bodyType, inputType, route, typeWalker)
+            || !IsCompatibleRequestBodyType(bodyType, inputType, routeParamNames, typeWalker)
         )
         {
             throw Diagnostics.Error(
@@ -1680,15 +1654,15 @@ public static class ContractWalker
     private static bool IsCompatibleRequestBodyType(
         ITypeSymbol bodyType,
         ITypeSymbol inputType,
-        string route,
+        IReadOnlySet<string> routeParamNames,
         TypeWalker typeWalker
     )
     {
         // Like-surface comparison:
         // both sides are request surfaces — a response-only accessibility exclusion on
         // one side must not by itself make equivalent request declarations incompatible.
-        var routeNames = RouteParser
-            .ParseRouteParamNames(route)
+        // The route's names are the tokens routing reads, so a literal brace is no parameter.
+        var routeNames = routeParamNames
             .Select(RouteParser.NormalizeForMatching)
             .ToHashSet(StringComparer.Ordinal);
         if (
@@ -1784,6 +1758,20 @@ public static class ContractWalker
                 Name: "RouteDefinition" or "InputRouteDefinition" or "FileRouteDefinition",
                 ContainingNamespace: { Name: "Rivet", ContainingNamespace.IsGlobalNamespace: true },
             };
+
+    /// <summary>
+    /// The operations an abstract <c>[RivetContract]</c> class declares: its ordinary abstract
+    /// methods. An abstract property's or event's accessors are abstract methods too, but never
+    /// operations. A static or concrete contract declares its operations as fields instead, so
+    /// it has none here. <see cref="Walk"/> emits them and <c>--check</c> compares their
+    /// overrides' security.
+    /// </summary>
+    internal static IEnumerable<IMethodSymbol> AbstractOperations(INamedTypeSymbol type) =>
+        type is { IsAbstract: true, IsStatic: false }
+            ? type.GetMembers()
+                .OfType<IMethodSymbol>()
+                .Where(method => method is { MethodKind: MethodKind.Ordinary, IsAbstract: true })
+            : [];
 
     /// <summary>
     /// Strips "Contract" suffix and camelCases. TasksContract → tasks.

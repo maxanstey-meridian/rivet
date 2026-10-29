@@ -43,10 +43,26 @@ the spec would tell every client any string will do. Untyped verbs count too:
 Constraints are read by ASP.NET routing's own template parser, stacked, optional, and
 with defaults (`{id:int:min(1)}`, `{id:int?}`, `{page:int=1}`). A template routing would
 refuse at startup (`{a}{b}`, `{id?=5}`, an unclosed `{`) stops generation with `RIV1125`
-instead of reaching the spec. On a controller, an attribute route spells a regex class
-with doubled brackets, `regex(^[[a-z]]{{2}}$)`, because a single `[` starts a
-`[controller]`-style token; Rivet unescapes them as MVC does before reading the
-constraint.
+instead of reaching the spec. So does one routing is perfectly happy with: a doubled brace
+outside a token (<span v-pre>`/literal/{{x}}`</span>) is routing's escape for a literal `{`, but an OpenAPI path
+has no escape for a brace at all, so there's no path to write. A constraint argument's
+doubled braces (<span v-pre>`regex(^\d{{4}}$)`</span>) belong to its pattern and are fine.
+
+One refusal gets a pass, for now. Routing won't start with a name used twice
+(`/accounts/{id}/maps/{id}`), and neither will Rivet on a controller action or a
+`[RivetEndpoint]` method. A contract, though, is often what `--from-openapi` wrote, and
+some published specs repeat a parameter (Cloudflare's paths do). Whether import should
+refuse such a path or rename the repeat is still an open decision, so until it's made, a
+contract's template reads each repeat as its own token and the walk goes on.
+
+On a controller, MVC replaces the route's `[controller]`, `[action]`, and `[area]` tokens
+before routing ever sees it, and Rivet calls MVC's own `ReplaceTokens` to do the same:
+the controller's name less its `Controller` suffix, the method's name, and the name an
+`[Area]` gives. A token MVC has no value for (`[area]` with no `[Area]`, or a typo like
+`[controler]`) or an unclosed `[` stops MVC at startup, so it's `RIV1125` here too. That's
+also why an attribute route spells a regex class with doubled brackets,
+<span v-pre>`regex(^[[a-z]]{{2}}$)`</span>: a single `[` starts a token, and the replacement unescapes them
+before the constraint is read.
 
 | Constraint | Path parameter schema |
 |---|---|

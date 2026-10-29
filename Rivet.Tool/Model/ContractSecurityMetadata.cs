@@ -68,6 +68,24 @@ public enum SecurityApiKeyLocation
     Cookie,
 }
 
+internal static class SecurityApiKeyLocations
+{
+    /// <summary>
+    /// The three locations OpenAPI gives an apiKey, by name and ignoring case, else null.
+    /// <c>Enum.TryParse</c> would also take a number ("1" is header, "7" is nothing) and a
+    /// comma-joined list. <c>[RivetSecurityScheme]</c> and <c>--security</c> both read it; each
+    /// words its own error (RIV1121, RIV2018).
+    /// </summary>
+    internal static SecurityApiKeyLocation? Parse(string value) =>
+        value.ToLowerInvariant() switch
+        {
+            "query" => SecurityApiKeyLocation.Query,
+            "header" => SecurityApiKeyLocation.Header,
+            "cookie" => SecurityApiKeyLocation.Cookie,
+            _ => null,
+        };
+}
+
 public enum OAuth2FlowType
 {
     Implicit,

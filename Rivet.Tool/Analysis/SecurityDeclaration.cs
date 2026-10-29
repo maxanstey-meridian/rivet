@@ -90,6 +90,15 @@ internal sealed class SecurityDeclaration(
     }
 
     /// <summary>
+    /// Whether an attribute is ASP.NET's <c>[AllowAnonymous]</c>: any <c>IAllowAnonymous</c>, or
+    /// a class derived from <c>AllowAnonymousAttribute</c>. The spec (K.3) and <c>--check</c>
+    /// (K.5) read it by this one rule.
+    /// </summary>
+    internal static bool IsAllowAnonymous(WellKnownTypes wkt, ITypeSymbol? attributeClass) =>
+        attributeClass.Implements(wkt.IAllowAnonymous)
+        || attributeClass.DerivesFrom(wkt.AllowAnonymous);
+
+    /// <summary>
     /// The security a <c>[RivetEndpoint]</c>/<c>[RivetClient]</c> action (or an abstract
     /// <c>[RivetContract]</c> method) declares with <c>[RivetSecure]</c>, <c>[RivetAndSecure]</c>,
     /// <c>[RivetOrAnonymous]</c> and <c>[RivetAnonymous]</c>, or null when it inherits the
@@ -120,11 +129,7 @@ internal sealed class SecurityDeclaration(
                 .ToList();
             if (declared.Count == 0)
             {
-                if (
-                    attributes.Any(attribute =>
-                        HandlerAuthorization.IsAllowAnonymous(wkt, attribute.AttributeClass)
-                    )
-                )
+                if (attributes.Any(attribute => IsAllowAnonymous(wkt, attribute.AttributeClass)))
                 {
                     return new SecurityRequirements([]);
                 }

@@ -50,7 +50,8 @@ internal static class SchemaEnricher
     /// The annotations a property's schema carries beside its type, whether the property is a
     /// record's or a form field's: a description, deprecated, a default, and an example, each
     /// an authored JSON literal. JSON Schema 2020-12 has no singular <c>example</c>, so it
-    /// joins the schema's <c>examples</c>.
+    /// joins the schema's <c>examples</c>, ahead of any its type already carries: the
+    /// importer reads <c>examples[0]</c> back as the property's example.
     /// </summary>
     public static void Annotate(
         JsonObject schema,
@@ -81,7 +82,7 @@ internal static class SchemaEnricher
             var example = ParseJsonLiteral(exampleJson, $"example of {what}");
             if (schema["examples"] is JsonArray examples)
             {
-                examples.Add(example);
+                examples.Insert(0, example);
             }
             else
             {

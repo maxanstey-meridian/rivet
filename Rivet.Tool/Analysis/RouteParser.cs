@@ -73,14 +73,20 @@ public static class RouteParser
     /// constraints in order (<c>{id:int:min(1)}</c>), the optional marker (<c>{id?}</c>), a
     /// default value (<c>{page=1}</c>) and the catch-all prefix, with a constraint argument's
     /// doubled braces (<c>regex(^\d{{4}}$)</c>, the template's escape) come back single.
-    /// A template routing refuses at startup throws its <see cref="RoutePatternException"/>,
-    /// except for a token that repeats an earlier one's name: routing refuses that too, but
-    /// an imported OpenAPI path can repeat one, so each repeat comes back as its own token
-    /// under its own name rather than stopping the read.
+    /// A template routing refuses at startup throws its <see cref="RoutePatternException"/>.
+    /// So does a token that repeats an earlier one's name, unless <paramref name="readRepeats"/>
+    /// is set: an imported OpenAPI path can repeat one (whether import should refuse or rename
+    /// it is still open), so a contract's template reads each repeat as its own token under its
+    /// own name rather than stopping the read.
     /// </summary>
-    public static IReadOnlyList<RouteToken> ParseRouteTokens(string template)
+    public static IReadOnlyList<RouteToken> ParseRouteTokens(
+        string template,
+        bool readRepeats = true
+    )
     {
-        var (parseable, repeats) = RenameRepeats(template);
+        var (parseable, repeats) = readRepeats
+            ? RenameRepeats(template)
+            : (template, new Dictionary<string, string>());
         return
         [
             .. RoutePatternFactory
@@ -98,6 +104,21 @@ public static class RouteParser
                 )),
         ];
     }
+
+    /// <summary>
+    /// Whether <paramref name="template"/>'s path carries a literal brace, which routing reads
+    /// from a doubled one (<c>{{</c> or <c>}}</c>). A constraint argument's doubled braces
+    /// (<c>regex(^\d{{4}}$)</c>) belong to its pattern and don't count. OpenAPI path
+    /// templating has no escape for a brace, so a path that carries one can't be emitted. A
+    /// template routing refuses throws its <see cref="RoutePatternException"/>, as
+    /// <see cref="ParseRouteTokens"/> does.
+    /// </summary>
+    public static bool HasLiteralBrace(string template) =>
+        RoutePatternFactory
+            .Parse(RenameRepeats(template).Template)
+            .PathSegments.SelectMany(segment => segment.Parts)
+            .OfType<RoutePatternLiteralPart>()
+            .Any(part => part.Content.AsSpan().IndexOfAny('{', '}') >= 0);
 
     // The template with each repeated parameter name (compared ignoring case, as routing
     // does) replaced by a placeholder routing accepts, and the placeholder-to-name map.

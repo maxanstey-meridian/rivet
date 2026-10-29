@@ -376,6 +376,7 @@ public static class CoverageChecker
     )
     {
         var warnings = new List<CoverageWarning>();
+        var requestReads = new ContractInputBinding.RequestReads();
         foreach (var (field, endpoint) in fieldMap)
         {
             if (!implementations.TryGetValue(field, out var fieldImplementations))
@@ -396,14 +397,31 @@ public static class CoverageChecker
             // Every mapping of a handler is read, for RIV4005 and RIV4006 alike: its route
             // values and its body inference both depend on the Map* call, and a method group
             // mapped with both MapGet and MapPost binds an unattributed array from the query on
-            // one and the body on the other. A warning more than one mapping gives (they point
-            // at the handler or its parameter) is reported once.
+            // one and the body on the other. Each mapping is read once, however many terminals
+            // it returns, and a warning more than one mapping gives (they point at the handler
+            // or its parameter) is reported once.
             var reported = new HashSet<CoverageWarning>();
+            var mappings = new HashSet<(IMethodSymbol, SyntaxTree?, TextSpan?, string?, bool)>();
             foreach (var implementation in fieldImplementations)
             {
                 if (
-                    implementation.Context is
-                    { Handler: { } handler, BindingHost: { } host, InfersBody: var infersBody }
+                    implementation.Context
+                        is {
+                            Handler: { } handler,
+                            BindingHost: { } host,
+                            InfersBody: var infersBody,
+                            MapCall: var mapCall,
+                            Route: var mappedRoute,
+                        }
+                    && mappings.Add(
+                        (
+                            handler.OriginalDefinition,
+                            mapCall?.Syntax.SyntaxTree,
+                            mapCall?.Syntax.Span,
+                            mappedRoute,
+                            infersBody
+                        )
+                    )
                 )
                 {
                     warnings.AddRange(
@@ -417,7 +435,8 @@ public static class CoverageChecker
                                         handler,
                                         host,
                                         infersBody,
-                                        implementation.Context.Route
+                                        implementation.Context.Route,
+                                        requestReads
                                     )
                                     .Select(mismatch => new CoverageWarning(
                                         CoverageWarningKind.InputBindingMismatch,
@@ -527,7 +546,7 @@ public static class CoverageChecker
         MapHandlerIndex? mapHandlers
     )
     {
-        var operations = AttributeOperations(compilation, wkt, discovered).ToList();
+        var operations = AttributeOperations(wkt, discovered).ToList();
         if (fieldMap.Count == 0 && operations.Count == 0)
         {
             yield break;
@@ -596,7 +615,7 @@ public static class CoverageChecker
             }
 
             IEnumerable<Verdict> verdicts;
-            if (handler.IsStatic)
+            if (EndpointWalker.HostOf(handler) == ParameterBindingHost.MinimalApi)
             {
                 mapHandlers ??= IndexMapHandlers(compilation, wkt);
                 verdicts = SourceBody(handler) is { } body
@@ -642,48 +661,36 @@ public static class CoverageChecker
     /// Every operation whose spec is declared by attributes, with that spec: an override of
     /// an abstract <c>[RivetContract]</c> method (the contract method's security), then a
     /// <c>[RivetEndpoint]</c> method or a <c>[RivetClient]</c> controller's action (its own),
-    /// the way <see cref="EndpointWalker.Walk"/> finds them. An abstract method has no handler
-    /// of its own, and a method that isn't an operation (no [Http*] verb) has no spec.
+    /// as <see cref="ContractWalker.AbstractOperations"/> and <see cref="EndpointWalker.Walk"/>
+    /// find them. An abstract method has no handler of its own, and a method that isn't an
+    /// operation (no [Http*] verb) has no spec.
     /// </summary>
     private static IEnumerable<(IMethodSymbol Handler, SecuritySpec Spec)> AttributeOperations(
-        Compilation compilation,
         WellKnownTypes wkt,
         DiscoveredSymbols discovered
     )
     {
         var contractMethods = discovered
-            .ContractTypes.Where(type => type is { IsAbstract: true, IsStatic: false })
-            .SelectMany(type => type.GetMembers().OfType<IMethodSymbol>())
-            .Where(method => method is { MethodKind: MethodKind.Ordinary, IsAbstract: true })
+            .ContractTypes.SelectMany(ContractWalker.AbstractOperations)
             .ToHashSet(SymbolEqualityComparer.Default);
         if (contractMethods.Count > 0)
         {
-            foreach (var type in RoslynExtensions.GetAllTypes(compilation.Assembly.GlobalNamespace))
+            foreach (var method in discovered.Overrides)
             {
-                foreach (
-                    var method in type.GetMembers()
-                        .OfType<IMethodSymbol>()
-                        .Where(method => method is { IsOverride: true, IsAbstract: false })
+                for (
+                    var overridden = method.OverriddenMethod;
+                    overridden is not null;
+                    overridden = overridden.OverriddenMethod
                 )
                 {
-                    for (
-                        var overridden = method.OverriddenMethod;
-                        overridden is not null;
-                        overridden = overridden.OverriddenMethod
+                    if (
+                        contractMethods.Contains(overridden.OriginalDefinition)
+                        && Spec((IMethodSymbol)overridden.OriginalDefinition, "the contract method")
+                            is { } spec
                     )
                     {
-                        if (
-                            contractMethods.Contains(overridden.OriginalDefinition)
-                            && Spec(
-                                (IMethodSymbol)overridden.OriginalDefinition,
-                                "the contract method"
-                            )
-                                is { } spec
-                        )
-                        {
-                            yield return (method, spec);
-                            break;
-                        }
+                        yield return (method, spec);
+                        break;
                     }
                 }
             }
@@ -698,7 +705,15 @@ public static class CoverageChecker
             .Cast<IMethodSymbol>();
         foreach (var method in annotated)
         {
-            if (Spec(method, method.IsStatic ? "the method" : "the action") is { } spec)
+            if (
+                Spec(
+                    method,
+                    EndpointWalker.HostOf(method) == ParameterBindingHost.Mvc
+                        ? "the action"
+                        : "the method"
+                ) is
+                { } spec
+            )
             {
                 yield return (method, spec);
             }
@@ -987,8 +1002,7 @@ public static class CoverageChecker
 
     private static EndpointContext TryResolveController(WellKnownTypes wkt, IMethodSymbol method)
     {
-        // MVC never routes a static method; a static handler is a minimal API's.
-        if (method.IsStatic)
+        if (EndpointWalker.HostOf(method) != ParameterBindingHost.Mvc)
         {
             return EndpointContext.None;
         }
@@ -1393,30 +1407,11 @@ public static class CoverageChecker
                     // route stays unresolved rather than losing it.
                     return new MapGroupChain(
                         groups,
-                        Unresolved: DerivesFrom(root?.Type, wkt.RouteGroupBuilder),
+                        Unresolved: (root?.Type).DerivesFrom(wkt.RouteGroupBuilder),
                         root!
                     );
             }
         }
-    }
-
-    /// <summary><paramref name="type"/> is <paramref name="target"/> or derives from it.</summary>
-    internal static bool DerivesFrom(ITypeSymbol? type, INamedTypeSymbol? target)
-    {
-        if (target is null)
-        {
-            return false;
-        }
-
-        for (var current = type; current is not null; current = current.BaseType)
-        {
-            if (SymbolEqualityComparer.Default.Equals(current.OriginalDefinition, target))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>

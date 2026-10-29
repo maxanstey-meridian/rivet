@@ -55,8 +55,12 @@ quietly enforce nothing.
 A form body never says anything about fields it doesn't list. ASP.NET's form binders
 neither fill a `[JsonExtensionData]` bag nor turn away a field they don't bind, so an input
 record that's open (or closed) as JSON is neither as a form. Its body is spelled out
-inline, without `additionalProperties`, rather than pointing at the record's component,
-and the record name it pins for import is the importer's `{Name}Request` whenever the
-record's own name already belongs to that component.
+inline, without `additionalProperties`, rather than pointing at the record's component.
+The body still pins a record name for import, and it has to be one no component holds,
+because the importer gives every component its own name first and would quietly suffix
+anything that collides. So the record's own name loses to its component, the importer's
+`{Name}Request` stands in, and when that's taken too, as it is when `addComment`'s input
+is the house-style `AddCommentRequest`, the pin moves on to `AddCommentRequest_2`. That's
+the name the importer lands on, so the pin and the import agree.
 
 See the [CLI Reference](/reference/cli) for the current command set.

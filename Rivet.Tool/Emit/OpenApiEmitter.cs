@@ -585,7 +585,8 @@ public sealed class OpenApiEmitter
                         ep.HttpMethod.ToUpperInvariant(),
                         TransportIdentity.NormalizeRoute(pathKey),
                         existingEndpoint,
-                        ep
+                        ep,
+                        "give both endpoints the same 'security' in the contract JSON"
                     );
                 }
 
@@ -1418,13 +1419,20 @@ public sealed class OpenApiEmitter
     /// component's (an input record whose body is spelled out inline), whose name the
     /// importer gives the component, so the inline body's record would come back suffixed.
     /// Then, or with no input type, it's the importer's <c>{fieldName}Request</c>
-    /// convention, pinned explicitly so the name survives operationId/tag hand-edits.
+    /// convention, pinned explicitly so the name survives operationId/tag hand-edits, or,
+    /// when a component holds that too (the house <c>{Op}Request</c> input record), the
+    /// first <see cref="Naming.NameCandidates"/> entry no component holds: the one the
+    /// importer, which reserves every component name ignoring case, would pick.
     /// </summary>
     private string SynthesizedInputTypeName(TsEndpointDefinition ep) =>
-        ep.InputTypeName is { } name
-        && !_claimedNames.Contains(name, StringComparer.OrdinalIgnoreCase)
+        ep.InputTypeName is { } name && !IsClaimedName(name)
             ? name
-            : Naming.ToPascalCaseFromSegments(ep.Name) + "Request";
+            : Naming
+                .NameCandidates(Naming.ToPascalCaseFromSegments(ep.Name) + "Request")
+                .First(candidate => !IsClaimedName(candidate));
+
+    private bool IsClaimedName(string name) =>
+        _claimedNames.Contains(name, StringComparer.OrdinalIgnoreCase);
 
     private static JsonNode? Node(JsonElement value) => JsonSerializer.SerializeToNode(value);
 

@@ -283,6 +283,20 @@ public sealed class DiagnosticsTests
         """[assembly: RivetSecurityScheme("oauth", "oauth2")] [assembly: RivetOAuthFlow("oauth", "deviceCode", null, "https://t", null, new string[0], new string[0])]""",
         "unsupported flow 'deviceCode'"
     )]
+    // An attribute of ours the walker can't read used to be skipped, so its scheme, flow, or
+    // requirement left the spec without a word.
+    [InlineData(
+        """[assembly: RivetSecurityScheme(null!, "http", scheme: "bearer")]""",
+        "[RivetSecurityScheme] at "
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("oauth", "oauth2")] [assembly: RivetOAuthFlow("oauth", null!, null, "https://t", null, new string[0], new string[0])]""",
+        "[RivetOAuthFlow] at "
+    )]
+    [InlineData(
+        """[assembly: RivetSecurityScheme("bearer", "http", scheme: "bearer")] [assembly: RivetGlobalSecurity(0)] [assembly: RivetGlobalSecurityScheme(0, null!, new string[0])]""",
+        "[RivetGlobalSecurityScheme] at "
+    )]
     public void Invalid_Security_Scheme_Metadata_Fails_With_RIV1121(
         string attributes,
         string expected
@@ -300,32 +314,38 @@ public sealed class DiagnosticsTests
 
     // Rivet reads provenance attributes by name, so a project built against another
     // Rivet.Attributes version can carry one whose constructor takes different arguments:
-    // RIV1122 says re-import, where an index used to crash.
+    // RIV1122 names the version mismatch, where an index used to crash. Re-importing alone
+    // can't cure it, since the tool writes its own arity.
     [Theory]
     [InlineData(
         "RivetDocumentTag(int order, string name)",
         "RivetDocumentTag(0, \"a\")",
-        "Invalid Rivet document tag metadata."
+        "Rivet document tag metadata has 2 arguments where this rivet tool reads 5"
     )]
     [InlineData(
         "RivetDocumentExternalDocs(string url)",
         "RivetDocumentExternalDocs(\"https://x\")",
-        "Invalid Rivet document external-docs metadata."
+        "Rivet document external-docs metadata has 1 arguments where this rivet tool reads 2"
     )]
     [InlineData(
         "RivetDocumentServer(int order, string url)",
         "RivetDocumentServer(0, \"https://x\")",
-        "Invalid Rivet server metadata."
+        "Rivet server metadata has 2 arguments where this rivet tool reads 3"
     )]
     [InlineData(
         "RivetDocumentServerVariable(int serverOrder, string name)",
         "RivetDocumentServerVariable(0, \"v\")",
-        "Invalid Rivet server variable metadata."
+        "Rivet server variable metadata has 2 arguments where this rivet tool reads 6"
     )]
     [InlineData(
         "RivetDocumentSchema(string name, string json)",
         "RivetDocumentSchema(\"Thing\", \"{}\")",
-        "Invalid Rivet document component schema metadata."
+        "Rivet document component schema metadata has 2 arguments where this rivet tool reads 3"
+    )]
+    [InlineData(
+        "RivetDocumentExample(int order, string name)",
+        "RivetDocumentExample(0, \"Sample\")",
+        "Rivet document component-example metadata has 2 arguments where this rivet tool reads 6"
     )]
     public void Provenance_Attribute_From_Another_Version_Fails_With_RIV1122(
         string constructor,
@@ -377,6 +397,7 @@ public sealed class DiagnosticsTests
         );
 
         Assert.StartsWith($"error RIV1122: {expected}", exception.Message);
+        Assert.Contains("different versions", exception.Message);
     }
 
     // Import preserves a response's Content-Type header under the operation response's own

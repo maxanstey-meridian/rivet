@@ -124,11 +124,7 @@ internal static class OpenApiProvenanceWalker
             .OfAttribute(compilation, "Rivet.RivetDocumentExampleAttribute")
             .Select(attribute =>
             {
-                var args = attribute.ConstructorArguments;
-                if (args.Length != 6)
-                {
-                    throw Malformed("Invalid Rivet document component-example metadata.");
-                }
+                var args = Arguments(attribute, 6, "document component-example");
 
                 var name = RequiredString(args[1], "document component-example name");
                 var jsonValue = StringValue(args[4]);
@@ -578,8 +574,10 @@ internal static class OpenApiProvenanceWalker
 
     /// <summary>
     /// The attribute's constructor arguments when there are as many as the importer writes.
-    /// A different count is an attribute from another Rivet version (or none Roslyn could
-    /// bind), so it's malformed metadata (RIV1122) rather than an index out of range.
+    /// The constructor fixes the count, so a different one is a Rivet.Attributes of another
+    /// version than the tool. Re-importing can't cure that (the tool writes its own arity,
+    /// which the project's attributes then refuse), so RIV1122 names the version mismatch
+    /// rather than an index out of range or a stale import.
     /// </summary>
     private static ImmutableArray<TypedConstant> Arguments(
         AttributeData attribute,
@@ -588,7 +586,10 @@ internal static class OpenApiProvenanceWalker
     ) =>
         attribute.ConstructorArguments.Length == count
             ? attribute.ConstructorArguments
-            : throw Malformed($"Invalid Rivet {context} metadata.");
+            : throw Diagnostics.Error(
+                Diagnostics.MalformedGeneratedMetadata,
+                $"Rivet {context} metadata has {attribute.ConstructorArguments.Length} arguments where this rivet tool reads {count}: the project's Rivet.Attributes and the rivet tool are different versions. Use the same version of both, then re-import the OpenAPI document if the attributes were written by another version."
+            );
 
     private static string? StringValue(TypedConstant value) => value.Value as string;
 

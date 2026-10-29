@@ -999,20 +999,31 @@ public static partial class OpenApiImporter
     }
 
     /// <summary>
-    /// The response the import builds the contract from for <paramref name="response"/>, as
-    /// <see cref="NormalizeLocalPathReferences"/> inlines it: the response itself, a reference
-    /// to anything but a response component resolved, or null for a reference it keeps (a
-    /// response component's fields are its own, kept as raw provenance).
+    /// The object the import builds the contract from for <paramref name="value"/>, as
+    /// <see cref="NormalizeLocalPathReferences"/> inlines it: a fresh copy of the value itself,
+    /// a local reference to anything but a <paramref name="componentPrefix"/> component
+    /// resolved, or null for a reference it keeps (a component's fields are its own, kept as
+    /// raw provenance, and a remote reference isn't followed).
     /// </summary>
-    internal static JsonObject? InlinedResponse(JsonObject response, JsonObject root) =>
-        !response.ContainsKey("$ref") ? response
-        : ShouldNormalizeReference(response, ComponentResponsesPrefix)
-            ? ResolveReferenceObject(response, root, "response")
+    private static JsonObject? Inlined(
+        JsonObject value,
+        JsonObject root,
+        string componentPrefix,
+        string kind
+    ) =>
+        !value.ContainsKey("$ref") ? (JsonObject)value.DeepClone()
+        : GetLocalReference(value) is { } reference
+        && !reference.StartsWith(componentPrefix, StringComparison.Ordinal)
+            ? ResolveReferenceObject(value, root, kind)
         : null;
 
-    private static bool ShouldNormalizeReference(JsonObject value, string componentPrefix) =>
-        GetLocalReference(value) is { } reference
-        && !reference.StartsWith(componentPrefix, StringComparison.Ordinal);
+    /// <summary>The response the import builds the contract from, read by <see cref="Inlined"/>.</summary>
+    internal static JsonObject? InlinedResponse(JsonObject response, JsonObject root) =>
+        Inlined(response, root, ComponentResponsesPrefix, "response");
+
+    /// <summary>The request body the import builds the contract from, read by <see cref="Inlined"/>.</summary>
+    internal static JsonObject? InlinedRequestBody(JsonObject requestBody, JsonObject root) =>
+        Inlined(requestBody, root, ComponentRequestBodiesPrefix, "request body");
 
     private static JsonObject ResolvePathItem(
         JsonObject pathItem,
@@ -1084,43 +1095,30 @@ public static partial class OpenApiImporter
                 operation["parameters"] = NormalizeParameterArray(operationParameters, root);
             }
 
-            if (operation["requestBody"] is JsonObject requestBody)
+            if (
+                operation["requestBody"] is JsonObject requestBody
+                && InlinedRequestBody(requestBody, root) is { } inlinedBody
+            )
             {
-                var reference = GetLocalReference(requestBody);
-                var resolved = ShouldNormalizeReference(requestBody, ComponentRequestBodiesPrefix)
-                    ? ResolveReferenceObject(requestBody, root, "request body")
-                    : (JsonObject)requestBody.DeepClone();
-                if (
-                    reference is not null
-                    && ShouldNormalizeReference(requestBody, ComponentRequestBodiesPrefix)
-                )
+                if (GetLocalReference(requestBody) is { } reference)
                 {
-                    resolved[ImportedRequestBodyReferenceExtension] = reference;
+                    inlinedBody[ImportedRequestBodyReferenceExtension] = reference;
                 }
-                if (GetLocalReference(resolved) is null)
-                {
-                    NormalizeContentExamples(resolved, root);
-                }
-                operation["requestBody"] = resolved;
+                NormalizeContentExamples(inlinedBody, root);
+                operation["requestBody"] = inlinedBody;
             }
 
             if (operation["responses"] is JsonObject responses)
             {
                 foreach (var (status, response) in responses.ToList())
                 {
-                    if (response is JsonObject responseObject)
+                    if (
+                        response is JsonObject responseObject
+                        && InlinedResponse(responseObject, root) is { } inlinedResponse
+                    )
                     {
-                        var resolved = ShouldNormalizeReference(
-                            responseObject,
-                            ComponentResponsesPrefix
-                        )
-                            ? ResolveReferenceObject(responseObject, root, "response")
-                            : (JsonObject)responseObject.DeepClone();
-                        if (GetLocalReference(resolved) is null)
-                        {
-                            NormalizeResponse(resolved, root);
-                        }
-                        responses[status] = resolved;
+                        NormalizeResponse(inlinedResponse, root);
+                        responses[status] = inlinedResponse;
                     }
                 }
             }
@@ -1137,17 +1135,15 @@ public static partial class OpenApiImporter
 
         foreach (var (name, header) in headers.ToList())
         {
-            if (header is JsonObject headerObject)
+            if (
+                header is JsonObject headerObject
+                && Inlined(headerObject, root, ComponentHeadersPrefix, "response header")
+                    is { } inlined
+            )
             {
-                var resolved = ShouldNormalizeReference(headerObject, ComponentHeadersPrefix)
-                    ? ResolveReferenceObject(headerObject, root, "response header")
-                    : (JsonObject)headerObject.DeepClone();
-                if (GetLocalReference(resolved) is null)
-                {
-                    NormalizeExamples(resolved, root);
-                    NormalizeContentExamples(resolved, root);
-                }
-                headers[name] = resolved;
+                NormalizeExamples(inlined, root);
+                NormalizeContentExamples(inlined, root);
+                headers[name] = inlined;
             }
         }
     }
@@ -1174,11 +1170,12 @@ public static partial class OpenApiImporter
 
         foreach (var (name, example) in examples.ToList())
         {
-            if (example is JsonObject exampleObject)
+            if (
+                example is JsonObject exampleObject
+                && Inlined(exampleObject, root, ComponentExamplesPrefix, "example") is { } inlined
+            )
             {
-                examples[name] = ShouldNormalizeReference(exampleObject, ComponentExamplesPrefix)
-                    ? ResolveReferenceObject(exampleObject, root, "example")
-                    : exampleObject.DeepClone();
+                examples[name] = inlined;
             }
         }
     }

@@ -1107,12 +1107,41 @@ public sealed class TypeWalker
             IsDeprecated = annotations.IsDeprecated,
             DefaultValue = annotations.DefaultValue ?? param.DefaultValue,
             Constraints = annotations.Constraints,
-            SchemaExamples = ContractWalker.SchemaExamples(annotations.Example, site),
+            SchemaExamples = SchemaExamples(annotations.Example, site),
             Format = annotations is { IsFormatSpecified: true, Format: not "" }
                 ? annotations.Format
                 : null,
             IsFormatSpecified = annotations.IsFormatSpecified,
         };
+    }
+
+    /// <summary>
+    /// A member's [RivetExample] as the one-item schema <c>examples</c> array a body
+    /// property's schema carries, so the param says what the property would.
+    /// </summary>
+    private static JsonElement? SchemaExamples(string? example, string what)
+    {
+        if (example is null)
+        {
+            return null;
+        }
+
+        JsonElement value;
+        try
+        {
+            using var document = JsonDocument.Parse(example);
+            value = document.RootElement.Clone();
+        }
+        catch (JsonException exception)
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InvalidBuilderArgument,
+                $"{what} must be a JSON literal, got '{example}' ({exception.Message})"
+            );
+        }
+
+        using var array = JsonDocument.Parse($"[{value.GetRawText()}]");
+        return array.RootElement.Clone();
     }
 
     /// <summary>
@@ -1407,7 +1436,9 @@ public sealed class TypeWalker
                     ? value
                     : null;
             double? DoubleAt(int index) =>
-                attribute.ConstructorArguments[index].Value is double value && !double.IsNaN(value)
+                index < attribute.ConstructorArguments.Length
+                && attribute.ConstructorArguments[index].Value is double value
+                && !double.IsNaN(value)
                     ? value
                     : null;
             string? StringAt(int index) =>
@@ -1880,15 +1911,11 @@ public sealed class TypeWalker
         // Array T[]
         if (symbol is IArrayTypeSymbol arrayType)
         {
-            // byte[]: System.Text.Json serializes
-            // byte[] as a base64 STRING on the wire, never as an integer array — the
-            // spec must match the wire. Lowered as a string primitive with format
-            // "base64" (emitted as contentEncoding: base64, the OpenAPI 3.1 idiom);
-            // CSharpType pins the exact type for import round-trips. File-endpoint
-            // byte[] outputs never reach here — ContractWalker intercepts them.
+            // byte[] is a base64 string (BuiltInScalars.ByteArray). File-endpoint byte[]
+            // outputs never reach here: ContractWalker intercepts them.
             if (arrayType.ElementType.SpecialType == SpecialType.System_Byte)
             {
-                return new TsType.Primitive("string", "base64", "byte[]");
+                return BuiltInScalars.ByteArray.Primitive;
             }
 
             return new TsType.Array(MapTypeCore(arrayType.ElementType, context));
@@ -2347,41 +2374,14 @@ public sealed class TypeWalker
         };
     }
 
+    private static readonly Dictionary<SpecialType, TsType.Primitive> _keywordTypes =
+        BuiltInScalars.KeywordTypes.ToDictionary(row => row.Type, row => row.Primitive);
+
     private TsType.Primitive? MapPrimitive(INamedTypeSymbol symbol)
     {
-        // Special types via Roslyn's built-in classification (fast path)
-        // CSharpType is set only when the type can't be recovered from Name+Format alone
-        var result = symbol.SpecialType switch
+        if (_keywordTypes.TryGetValue(symbol.SpecialType, out var keyword))
         {
-            SpecialType.System_String => new TsType.Primitive("string"),
-            // char: System.Text.Json writes char as a single-character
-            // JSON string (and char dictionary keys as single-character property
-            // names) — the emitter pins both length bounds to 1; CSharpType recovers
-            // the exact type on import.
-            SpecialType.System_Char => new TsType.Primitive("string", null, "char"),
-            // object: "any JSON value" — the untyped (empty) schema is
-            // the honest spec for it, deliberately and silently. CSharpType "object"
-            // tells the emitter the untyped emission is intentional (no RIV2005);
-            // the wire schema stays a bare {} with no sidecar.
-            SpecialType.System_Object => new TsType.Primitive("unknown", null, "object"),
-            SpecialType.System_Boolean => new TsType.Primitive("boolean"),
-            SpecialType.System_Int32 => new TsType.Primitive("number", "int32"),
-            SpecialType.System_UInt32 => new TsType.Primitive("number", "uint32", "uint"),
-            SpecialType.System_Int64 => new TsType.Primitive("number", "int64"),
-            SpecialType.System_UInt64 => new TsType.Primitive("number", "uint64", "ulong"),
-            SpecialType.System_Single => new TsType.Primitive("number", "float"),
-            SpecialType.System_Double => new TsType.Primitive("number", "double"),
-            SpecialType.System_Decimal => new TsType.Primitive("number", "decimal"),
-            SpecialType.System_Int16 => new TsType.Primitive("number", "int16", "short"),
-            SpecialType.System_UInt16 => new TsType.Primitive("number", "uint16", "ushort"),
-            SpecialType.System_Byte => new TsType.Primitive("number", "uint8", "byte"),
-            SpecialType.System_SByte => new TsType.Primitive("number", "int8", "sbyte"),
-            _ => (TsType.Primitive?)null,
-        };
-
-        if (result is not null)
-        {
-            return result;
+            return keyword;
         }
 
         // Non-SpecialType primitives — resolved via dictionary lookup instead of per-field null checks
@@ -2393,17 +2393,8 @@ public sealed class TypeWalker
         return null;
     }
 
-    private static bool IsJsonConverterAttribute(WellKnownTypes types, INamedTypeSymbol? type)
-    {
-        for (; type is not null; type = type.BaseType)
-        {
-            if (SymbolEqualityComparer.Default.Equals(type, types.JsonConverter))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
+    private static bool IsJsonConverterAttribute(WellKnownTypes types, INamedTypeSymbol? type) =>
+        type.DerivesFrom(types.JsonConverter);
 
     // The JsonNumberHandling bits that put strings on a number's wire. AllowReadingFromString
     // is deliberately absent: it only widens what the host reads, numbers are still written

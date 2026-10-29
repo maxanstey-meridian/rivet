@@ -419,6 +419,66 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void A_Property_Example_Leads_The_Examples_Its_Type_Already_Carries()
+    {
+        // The inline union's own examples come first in its schema; the property's authored
+        // example goes ahead of them, since import reads examples[0] back as the property's.
+        const string json = """
+            {
+              "types": [{
+                "name": "Ticket",
+                "typeParameters": [],
+                "properties": [{
+                  "name": "status",
+                  "type": {
+                    "kind": "stringUnion",
+                    "values": ["open", "closed", "pending"],
+                    "scalarMetadata": { "examples": "[\"open\",\"pending\"]" }
+                  },
+                  "optional": false,
+                  "example": "\"closed\""
+                }]
+              }],
+              "enums": [],
+              "endpoints": [{
+                "name": "getTicket",
+                "httpMethod": "GET",
+                "routeTemplate": "/api/tickets",
+                "params": [],
+                "controllerName": "tickets",
+                "responses": [{ "statusCode": 200, "dataType": { "kind": "ref", "name": "Ticket" } }]
+              }]
+            }
+            """;
+
+        static string Examples(JsonDocument document) =>
+            JsonNode
+                .Parse(
+                    document
+                        .RootElement.GetProperty("components")
+                        .GetProperty("schemas")
+                        .GetProperty("Ticket")
+                        .GetProperty("properties")
+                        .GetProperty("status")
+                        .GetProperty("examples")
+                        .GetRawText()
+                )!
+                .ToJsonString();
+
+        using var emitted = EmitOpenApiFromJsonContract(json);
+        Assert.Equal("""["closed","open","pending"]""", Examples(emitted));
+
+        // Round trip: the property keeps its authored example, and the examples their order.
+        var imported = CompilationHelper.Import(emitted.RootElement.GetRawText());
+        Assert.Contains(
+            "[property: RivetExample(\"\\\"closed\\\"\")]",
+            CompilationHelper.FindFile(imported, "Ticket.cs")
+        );
+        using var reemitted = CompilationHelper.EmitImported(imported);
+        Assert.Equal(Examples(emitted), Examples(reemitted));
+    }
+
+    [Fact]
     public void Controller_Route_And_Body_Properties_With_The_Same_Name_Remain_Independent()
     {
         var source = """
@@ -3022,6 +3082,80 @@ public sealed class OpenApiEmitterTests
         );
     }
 
+    /// <summary>
+    /// RIV2012 for a pair that differs only in security says how to align it in what each
+    /// side declares security with: builder calls on a contract definition, attributes on an
+    /// annotated action.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        """
+            public static readonly RouteDefinition<TaskDto> Secured =
+                Define.Get<TaskDto>("/api/tasks").Secure("admin");
+            public static readonly RouteDefinition<TaskDto> Open =
+                Define.Get<TaskDto>("/api/tasks");
+            """,
+        "",
+        "give both definitions the same .Secure(), .AndSecure(), .OrAnonymous(), or .Anonymous() calls."
+    )]
+    [InlineData(
+        "",
+        """
+            [RivetEndpoint, RivetSecure("admin"), HttpGet("")]
+            public TaskDto Secured() => new("1");
+            [RivetEndpoint, HttpGet("")]
+            public TaskDto Open() => new("1");
+            """,
+        "give both actions the same [RivetSecure], [RivetAndSecure], [RivetOrAnonymous], or [RivetAnonymous] attributes."
+    )]
+    [InlineData(
+        """
+            public static readonly RouteDefinition<TaskDto> Secured =
+                Define.Get<TaskDto>("/api/tasks").Secure("admin");
+            """,
+        """
+            [RivetEndpoint, HttpGet("")]
+            public TaskDto Open() => new("1");
+            """,
+        "repeat the contract's .Secure(), .AndSecure(), .OrAnonymous(), or .Anonymous() calls on the action as "
+            + "[RivetSecure], [RivetAndSecure], [RivetOrAnonymous], or [RivetAnonymous]."
+    )]
+    public void A_Security_Only_Conflict_Names_The_Remedy_Its_Sources_Use(
+        string contractFields,
+        string actions,
+        string remedy
+    )
+    {
+        var source = $$"""
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            [RivetContract]
+            public static class TasksContract
+            {
+                {{contractFields}}
+            }
+
+            [Route("api/tasks")]
+            public sealed class TasksController : ControllerBase
+            {
+                {{actions}}
+            }
+            """;
+
+        var error = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.EmitOpenApi(source, SecurityParser.ParseMany(["admin=bearer"]))
+        );
+
+        Assert.StartsWith($"error {Diagnostics.ConflictingOperations}:", error.Message);
+        Assert.EndsWith($"Declare the same security on both: {remedy}", error.Message);
+    }
+
     [Fact]
     public void Security_PerEndpoint_Undefined_Scheme_Fails_Generation()
     {
@@ -4303,8 +4437,9 @@ public sealed class OpenApiEmitterTests
         Assert.True(caption.GetProperty("deprecated").GetBoolean());
         Assert.Equal("untitled", caption.GetProperty("default").GetString());
         Assert.Equal(80, caption.GetProperty("maxLength").GetInt32());
+        // The field's own example leads, as a record property's does: import reads examples[0].
         Assert.Equal(
-            ["Holiday", "Beach"],
+            ["Beach", "Holiday"],
             caption.GetProperty("examples").EnumerateArray().Select(value => value.GetString())
         );
         var revision = schema.GetProperty("revision");

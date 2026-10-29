@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Json.Schema;
-using Rivet.Tool.Analysis;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
@@ -598,18 +597,78 @@ public sealed class ContractSchemaTests
         );
     }
 
-    [Fact]
-    public void Reader_Accepts_The_StatusKeys_The_Schema_Allows()
+    /// <summary>
+    /// The verdicts on one response, from the schema (over the whole contract, by Json.Schema's
+    /// ECMA dialect) and from the reader. The rest of the contract is valid for both, so the
+    /// response decides each verdict.
+    /// </summary>
+    private static (bool Schema, bool Reader) Verdicts(JsonObject response)
     {
-        var responseType = JsonNode.Parse(File.ReadAllText(_schemaPath))!["$defs"]![
-            "responseType"
-        ]!;
+        var contract = new JsonObject
+        {
+            ["types"] = new JsonArray(),
+            ["enums"] = new JsonArray(),
+            ["endpoints"] = new JsonArray(
+                new JsonObject
+                {
+                    ["name"] = "get",
+                    ["httpMethod"] = "GET",
+                    ["routeTemplate"] = "/things",
+                    ["controllerName"] = "things",
+                    ["params"] = new JsonArray(),
+                    ["responses"] = new JsonArray(response),
+                }
+            ),
+        };
+        var json = contract.ToJsonString();
 
-        Assert.Equal(
-            ResponseStatusValidation.StatusKeyPattern,
-            responseType["properties"]!["statusKey"]!["pattern"]!.GetValue<string>()
-        );
+        bool reader;
+        try
+        {
+            JsonContractReader.Read(json);
+            reader = true;
+        }
+        catch (JsonException)
+        {
+            reader = false;
+        }
+
+        return (Validate(json).IsValid, reader);
     }
+
+    [Theory]
+    [InlineData("404", true)]
+    [InlineData("100", true)]
+    [InlineData("599", true)]
+    [InlineData("099", false)]
+    [InlineData("600", false)]
+    [InlineData("4XX", true)]
+    [InlineData("4xx", true)]
+    [InlineData("4Xx", true)]
+    [InlineData("6XX", false)]
+    [InlineData("default", true)]
+    [InlineData("DEFAULT", false)]
+    [InlineData("Default", false)]
+    // `$` would match before a final newline in .NET's and Json.Schema's dialect, so the
+    // schema's pattern ends in a lookahead that means end of string in every dialect.
+    [InlineData("404\n", false)]
+    [InlineData("default\n", false)]
+    [InlineData(" 404", false)]
+    [InlineData("abc", false)]
+    [InlineData("", false)]
+    public void Schema_And_Reader_Agree_On_A_StatusKey(string key, bool valid)
+    {
+        Assert.Equal((valid, valid), Verdicts(new JsonObject { ["statusKey"] = key }));
+    }
+
+    [Theory]
+    [InlineData(99, false)]
+    [InlineData(100, true)]
+    [InlineData(404, true)]
+    [InlineData(599, true)]
+    [InlineData(600, false)]
+    public void Schema_And_Reader_Agree_On_A_StatusCode(int code, bool valid) =>
+        Assert.Equal((valid, valid), Verdicts(new JsonObject { ["statusCode"] = code }));
 
     [Fact]
     public void Deeply_Nested_Types_Validate()
