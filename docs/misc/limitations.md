@@ -82,11 +82,21 @@ Verified limits of the current tool, so you don't discover them in production.
   name, or a rename each is given (`[DataMember(Name)]` for the minimal-API form mapper,
   `[FromForm(Name)]` for MVC). `[JsonPropertyName]` doesn't name a form part. A contract
   can be served by either host, so a rename only one binder reads is refused
-  (`RIV1100`), and so is a member only one of them skips (`[BindNever]` or
-  `[IgnoreDataMember]`) or a type only one of them can create. A `[RivetEndpoint]`
+  (`RIV1100`), and so is a member only one of them skips (MVC's `[BindNever]`,
+  `[BindingBehavior(BindingBehavior.Never)]`, or a class-level `[Bind]` include list
+  that leaves it out, or the form mapper's `[IgnoreDataMember]`) or a type only one of
+  them can create. A `[RivetEndpoint]`
   method has one host: an instance method is an MVC action and a static one a
   minimal-API handler, and its parts are named as that host reads them. Only top-level
   parts are named this way; a nested complex member keeps `Inner.Value`.
+- MVC's binding filters are read where MVC binds member by member: an action's form
+  parts and what `--check` compares on an MVC handler. A `[Bind("A", "B")]` include list
+  on the parameter and one on its class both apply (MVC runs both), a nested type's own
+  list applies wherever it's bound, and `[BindNever]` or
+  `[BindingBehavior(BindingBehavior.Never)]` skips a member, on the member or its class.
+  Any other property filter (an `IPropertyFilterProvider`) is code Rivet can't run, so
+  it stops generation and `--check` with `RIV1115` rather than guess; a minimal-API
+  handler never trips it, since the form mapper reads no MVC filter.
 - The spec reflects *declared* C# types and the default System.Text.Json
   conventions. `[JsonPolymorphic]`/`[JsonDerivedType]` hierarchies emit as
   `oneOf` + `discriminator`, and polymorphism that skips them doesn't get past the

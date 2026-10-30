@@ -43,7 +43,7 @@ internal static class MvcRouteValues
         var action = Level(wkt, Chain(method), $"action '{endpoint}'", route, endpoint);
         var controller = Level(
             wkt,
-            Bases(method.ContainingType),
+            method.ContainingType.SelfAndBases(),
             $"controller '{method.ContainingType.Name}'",
             route,
             endpoint
@@ -118,20 +118,10 @@ internal static class MvcRouteValues
     private static IEnumerable<ISymbol> Chain(IMethodSymbol method) =>
         method.OverriddenChain().Prepend(method);
 
-    private static IEnumerable<ISymbol> Bases(INamedTypeSymbol type)
-    {
-        for (var current = type; current is not null; current = current.BaseType)
-        {
-            yield return current;
-        }
-    }
-
     /// <summary>
     /// The route values one level (the action, or the controller) supplies. Its attributes
-    /// are what reflection's <c>GetCustomAttributes(inherit: true)</c> hands MVC: the
-    /// nearest symbol's first, a base's only when the attribute class is
-    /// <c>Inherited</c>, and, for a class that doesn't <c>AllowMultiple</c>, only the nearest
-    /// one. MVC adds each provider's value to one dictionary, so two with one key throw at
+    /// are what reflection's <c>GetCustomAttributes(inherit: true)</c> hands MVC
+    /// (<see cref="RoslynExtensions.InheritedAttributes"/>). MVC adds each provider's value to one dictionary, so two with one key throw at
     /// startup.
     /// </summary>
     private static (
@@ -147,43 +137,24 @@ internal static class MvcRouteValues
     {
         var values = new List<(string Key, string? Value, string From)>();
         var unreadable = new List<string>();
-        var seenClasses = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-        var nearest = true;
-        foreach (var symbol in chain)
+        foreach (var (attribute, _) in chain.InheritedAttributes(wkt.AttributeUsage))
         {
-            var classesHere = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
-            foreach (var attribute in symbol.GetAttributes())
+            if (
+                attribute.AttributeClass is not { } attributeClass
+                || !attributeClass.Implements(wkt.RouteValueProvider)
+            )
             {
-                if (
-                    attribute.AttributeClass is not { } attributeClass
-                    || !attributeClass.Implements(wkt.RouteValueProvider)
-                )
-                {
-                    continue;
-                }
-
-                var (allowMultiple, inherited) = Usage(wkt, attributeClass);
-                if (
-                    !nearest
-                    && (!inherited || (!allowMultiple && seenClasses.Contains(attributeClass)))
-                )
-                {
-                    continue;
-                }
-
-                classesHere.Add(attributeClass);
-                if (Supplied(wkt, attribute) is { } supplied)
-                {
-                    values.Add((supplied.Key, supplied.Value, attributeClass.Name));
-                }
-                else
-                {
-                    unreadable.Add(attributeClass.Name);
-                }
+                continue;
             }
 
-            seenClasses.UnionWith(classesHere);
-            nearest = false;
+            if (Supplied(wkt, attribute) is { } supplied)
+            {
+                values.Add((supplied.Key, supplied.Value, attributeClass.Name));
+            }
+            else
+            {
+                unreadable.Add(attributeClass.Name);
+            }
         }
 
         if (
@@ -210,27 +181,6 @@ internal static class MvcRouteValues
             $"route template '{route}' on endpoint '{endpoint}': MVC refuses it at startup "
                 + $"({reason.TrimEnd('.')}). Fix the template."
         );
-
-    // An attribute class's AttributeUsage, its nearest declaration's, else the defaults.
-    private static (bool AllowMultiple, bool Inherited) Usage(
-        WellKnownTypes wkt,
-        INamedTypeSymbol attributeClass
-    )
-    {
-        for (var type = attributeClass; type is not null; type = type.BaseType)
-        {
-            if (type.GetAttribute(wkt.AttributeUsage) is { } usage)
-            {
-                return (
-                    usage.NamedArgument(nameof(AttributeUsageAttribute.AllowMultiple)) as bool?
-                        ?? false,
-                    usage.NamedArgument(nameof(AttributeUsageAttribute.Inherited)) as bool? ?? true
-                );
-            }
-        }
-
-        return (false, true);
-    }
 
     /// <summary>
     /// The key and value a route value attribute supplies, followed from the arguments it's

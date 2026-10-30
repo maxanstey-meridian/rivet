@@ -861,9 +861,17 @@ public sealed class OpenApiEmitter
         }
         else if (fileParams.Count > 0 || formFieldParams.Count > 0)
         {
+            var content = MediaContent(
+                formContentType,
+                FormBodySchema(ep, fileParams, formFieldParams)
+            );
+            if (FormEncoding(formFieldParams) is { } encoding)
+            {
+                content[formContentType]!["encoding"] = encoding;
+            }
             operation["requestBody"] = RequestBody(
                 ep.RequestBodyRequired ?? true,
-                MediaContent(formContentType, FormBodySchema(ep, fileParams, formFieldParams)),
+                content,
                 ep.RequestExamples
             );
         }
@@ -995,18 +1003,7 @@ public sealed class OpenApiEmitter
                     {
                         headerObj["deprecated"] = true;
                     }
-                    if (header.Style is not null)
-                    {
-                        headerObj["style"] = header.Style;
-                    }
-                    if (header.Explode is { } explode)
-                    {
-                        headerObj["explode"] = explode;
-                    }
-                    if (header.AllowReserved)
-                    {
-                        headerObj["allowReserved"] = true;
-                    }
+                    AddSerialization(headerObj, header.Style, header.Explode, header.AllowReserved);
                     if (header.AllowEmptyValue)
                     {
                         headerObj["allowEmptyValue"] = true;
@@ -1312,14 +1309,7 @@ public sealed class OpenApiEmitter
         {
             result["examples"] = SchemaEnricher.ExampleMap(examples, $"examples of {context}");
         }
-        if (parameter.Style is not null)
-        {
-            result["style"] = parameter.Style;
-        }
-        if (parameter.Explode is { } explode)
-        {
-            result["explode"] = explode;
-        }
+        AddSerialization(result, parameter.Style, parameter.Explode, allowReserved: false);
         if (location == "query" && parameter.AllowEmptyValue)
         {
             result["allowEmptyValue"] = true;
@@ -1330,6 +1320,117 @@ public sealed class OpenApiEmitter
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// How a value is serialized, as a Parameter, Header, or Encoding Object spells it.
+    /// </summary>
+    private static void AddSerialization(
+        JsonObject target,
+        string? style,
+        bool? explode,
+        bool allowReserved
+    )
+    {
+        if (style is not null)
+        {
+            target["style"] = style;
+        }
+        if (explode is { } value)
+        {
+            target["explode"] = value;
+        }
+        if (allowReserved)
+        {
+            target["allowReserved"] = true;
+        }
+    }
+
+    /// <summary>
+    /// The form media type's <c>encoding</c>: a form field's <c>style</c>, <c>explode</c>, and
+    /// <c>allowReserved</c> say how its part is serialized, which in a request body is the
+    /// Encoding Object's job, keyed by the part's name. Only contract JSON states them; a C#
+    /// form field never does. Null when no field states any.
+    /// </summary>
+    private static JsonObject? FormEncoding(IReadOnlyList<TsEndpointParam> formFieldParams)
+    {
+        var encoding = new JsonObject();
+        foreach (var field in formFieldParams)
+        {
+            var entry = new JsonObject();
+            AddSerialization(entry, field.Style, field.Explode, field.AllowReserved);
+            if (entry.Count > 0)
+            {
+                encoding[field.Name] = entry;
+            }
+        }
+
+        return encoding.Count > 0 ? encoding : null;
+    }
+
+    /// <summary>
+    /// A form field's named <c>examples</c> join its part's schema <paramref name="schema"/>
+    /// (after the schema's own examples), each as its <c>value</c>: a form part is a property,
+    /// and a property schema holds example values, not Example Objects. What the part can't
+    /// carry is warned about with RIV2019 rather than dropped silently: an example's summary,
+    /// description, or <c>externalValue</c>; an example with no <c>value</c> (only an
+    /// <c>externalValue</c> or a <c>$ref</c>); and <c>allowEmptyValue</c>, which OpenAPI
+    /// defines for query parameters only. A null <paramref name="schema"/> is a part whose
+    /// schema comes from its input record, which the field's examples can't join.
+    /// </summary>
+    private static void JoinFormFieldExamples(
+        JsonObject? schema,
+        TsEndpointParam field,
+        string context
+    )
+    {
+        var dropped = new List<string>();
+        if (field.Examples is { } examples)
+        {
+            foreach (
+                var (name, entry) in SchemaEnricher.ExampleMap(examples, $"examples of {context}")
+            )
+            {
+                var example = entry!.AsObject();
+                if (schema is null)
+                {
+                    dropped.Add($"example '{name}' (the part's schema is its input record's)");
+                    continue;
+                }
+                if (!example.TryGetPropertyValue("value", out var value))
+                {
+                    dropped.Add($"example '{name}', which has no value");
+                    continue;
+                }
+
+                if (schema["examples"] is not JsonArray values)
+                {
+                    values = [];
+                    schema["examples"] = values;
+                }
+                values.Add(value?.DeepClone());
+                var rest = example
+                    .Select(member => member.Key)
+                    .Where(key => key != "value")
+                    .ToList();
+                if (rest.Count > 0)
+                {
+                    dropped.Add($"example '{name}''s {string.Join(" and ", rest)}");
+                }
+            }
+        }
+        if (field.AllowEmptyValue)
+        {
+            dropped.Add("allowEmptyValue, which OpenAPI defines for query parameters only");
+        }
+
+        if (dropped.Count > 0)
+        {
+            Diagnostics.Warn(
+                Diagnostics.FormFieldAnnotationDropped,
+                $"{context} drops what a form part can't carry: {string.Join("; ", dropped)}"
+            );
+        }
     }
 
     /// <summary>
@@ -1549,6 +1650,7 @@ public sealed class OpenApiEmitter
                 )
             )
             {
+                JoinRecordFormFieldExamples(ep, formFieldParams);
                 return MapTypeReference(
                     new TsType.TypeRef(ep.InputTypeName!),
                     $"form input on endpoint '{ep.ControllerName}.{ep.Name}'"
@@ -1569,6 +1671,7 @@ public sealed class OpenApiEmitter
         if (formShaped && fileParams.Count > 0)
         {
             // A --from contract's multipart input named by a definition it ships.
+            JoinRecordFormFieldExamples(ep, formFieldParams);
             return MapTypeReference(
                 new TsType.TypeRef(ep.InputTypeName!),
                 $"multipart input on endpoint '{ep.ControllerName}.{ep.Name}'"
@@ -1618,6 +1721,10 @@ public sealed class OpenApiEmitter
                 {
                     required.Add(part.Name);
                 }
+                if (part.Source == ParamSource.FormField)
+                {
+                    JoinFormFieldExamples(null, part, FormFieldContext(ep, part));
+                }
 
                 continue;
             }
@@ -1637,7 +1744,7 @@ public sealed class OpenApiEmitter
             }
 
             var field = part;
-            var context = $"form field '{field.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'";
+            var context = FormFieldContext(ep, field);
             // Its default and constraints are the param's schema already.
             var fieldSchema = BuildParamSchema(field, context);
             SchemaEnricher.Annotate(
@@ -1648,6 +1755,7 @@ public sealed class OpenApiEmitter
                 field.Example?.GetRawText(),
                 context
             );
+            JoinFormFieldExamples(fieldSchema, field, context);
             properties[field.Name] = fieldSchema;
             if (field.Type is not TsType.Nullable && !field.IsOptional)
             {
@@ -1662,6 +1770,24 @@ public sealed class OpenApiEmitter
         }
 
         return schema;
+    }
+
+    private static string FormFieldContext(TsEndpointDefinition ep, TsEndpointParam field) =>
+        $"form field '{field.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'";
+
+    /// <summary>
+    /// A body that references its input record's component spells out no part, so no form
+    /// field's examples can join one (<see cref="JoinFormFieldExamples"/>).
+    /// </summary>
+    private static void JoinRecordFormFieldExamples(
+        TsEndpointDefinition ep,
+        IReadOnlyList<TsEndpointParam> formFieldParams
+    )
+    {
+        foreach (var field in formFieldParams)
+        {
+            JoinFormFieldExamples(null, field, FormFieldContext(ep, field));
+        }
     }
 
     /// <summary>

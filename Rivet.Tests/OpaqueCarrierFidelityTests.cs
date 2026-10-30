@@ -1,14 +1,14 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Rivet.Tests;
 
 public sealed class OpaqueCarrierFidelityTests
 {
     [Fact]
-    public void Closed_object_preserves_every_valid_member_at_runtime()
+    public void Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself()
     {
-        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(
-            """
+        const string schemas = """
             "ClosedEnvelope": {
                 "type": "object",
                 "additionalProperties": false,
@@ -17,25 +17,156 @@ public sealed class OpaqueCarrierFidelityTests
                     "active": { "type": "boolean" }
                 },
                 "required": ["id", "active"]
+            },
+            "Pet": {
+                "type": "object",
+                "additionalProperties": false,
+                "discriminator": { "propertyName": "kind" },
+                "properties": { "kind": { "type": "string" }, "name": { "type": "string" } },
+                "required": ["kind"]
+            },
+            "Cat": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/Pet" },
+                    { "type": "object", "properties": { "lives": { "type": "integer" } } }
+                ]
+            },
+            "ClosedPart": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { "a": { "type": "string" } }
+            },
+            "Composite": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/ClosedPart" },
+                    { "type": "object", "properties": { "b": { "type": "string" } } }
+                ]
+            },
+            "Item": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "Page_Item": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/Item" } } },
+                "x-rivet-generic": { "name": "Page", "typeParams": ["T"], "args": { "T": "Item" } }
+            },
+            "Page_ClosedPart": {
+                "type": "object",
+                "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/ClosedPart" } } },
+                "x-rivet-generic": { "name": "Page", "typeParams": ["T"], "args": { "T": "ClosedPart" } }
+            },
+            "Shape": {
+                "oneOf": [
+                    { "$ref": "#/components/schemas/Circle" },
+                    { "$ref": "#/components/schemas/Square" }
+                ],
+                "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {
+                        "circle": "#/components/schemas/Circle",
+                        "square": "#/components/schemas/Square"
+                    }
+                }
+            },
+            "Circle": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "enum": ["circle"] },
+                    "radius": { "type": "number" }
+                },
+                "required": ["kind"]
+            },
+            "Square": {
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["square"] },
+                    "side": { "type": "number" }
+                },
+                "required": ["kind"]
             }
-            """,
-            "ClosedEnvelope"
-        );
-        const string payload = """{"id":"known","active":true,"invalid":"dropped"}""";
+            """;
+        var fixture = GeneratedCarrierFixture.ImportCompileLoadAndEmit(schemas, "ClosedEnvelope");
 
-        var serialized = RuntimeRoundTrip(fixture.RequestType, payload);
-        Assert.Equal("known", serialized.GetProperty("id").GetString());
-        Assert.True(serialized.GetProperty("active").GetBoolean());
-        Assert.False(serialized.TryGetProperty("invalid", out _));
+        // A closed record nothing contradicts refuses an unknown member, as its schema does.
+        AssertRuntimeRoundTrip(fixture.RequestType, """{"id":"known","active":true}""");
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize(
+                """{"id":"known","active":true,"invalid":"refused"}""",
+                fixture.RequestType,
+                JsonSerializerOptions.Web
+            )
+        );
+        var emitted = fixture.EmittedRoot.GetProperty("components").GetProperty("schemas");
         Assert.False(
-            fixture
-                .EmittedRoot.GetProperty("components")
-                .GetProperty("schemas")
-                .GetProperty("ClosedEnvelope")
-                .GetProperty("additionalProperties")
-                .GetBoolean()
+            emitted.GetProperty("ClosedEnvelope").GetProperty("additionalProperties").GetBoolean()
+        );
+
+        // A closed schema that contradicts itself stays open, and says why. Each spec still
+        // emits its closure.
+        Assert.Equal(
+            [
+                "RIV3033: Closed schema imported open: 'Circle' says additionalProperties: false, but it is a polymorphic variant of 'Shape', and System.Text.Json would refuse its 'kind' discriminator as an unknown member wherever the variant is read on its own. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'ClosedPart' says additionalProperties: false, but 'Composite' composes it in an allOf, adding members its closure refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'Page_Item' says additionalProperties: false, but it is an instance of the generic template 'Page', which serves 'Page_ClosedPart' too, and that doesn't say so. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'Pet' says additionalProperties: false, but 'Cat' extends it, adding members its closure refuses. Its record accepts and drops an unknown member instead of refusing it.",
+            ],
+            CompilationHelper
+                .Import(CompilationHelper.BuildSpec(schemas: schemas))
+                .Warnings.Order(StringComparer.Ordinal)
+        );
+        var generated = fixture.RequestType.Assembly;
+        Type Generated(string name) =>
+            Assert.IsAssignableFrom<Type>(generated.GetType($"Generated.{name}"));
+        Assert.Equal(
+            "x",
+            RuntimeRoundTrip(Generated("ClosedPart"), """{"a":"x","invalid":"dropped"}""")
+                .GetProperty("a")
+                .GetString()
+        );
+        Assert.False(
+            RuntimeRoundTrip(Generated("Pet"), """{"kind":"Cat","lives":9,"invalid":1}""")
+                .TryGetProperty("invalid", out _)
+        );
+        foreach (var closed in new[] { "Pet", "ClosedPart", "Page_Item", "Circle" })
+        {
+            Assert.False(
+                emitted.GetProperty(closed).GetProperty("additionalProperties").GetBoolean()
+            );
+        }
+
+        // A variant stays open: closed, System.Text.Json refuses an unknown member when it
+        // reads the variant through its base, but also refuses the variant's own tag, which
+        // the importer strips from the record, whenever the variant is read on its own.
+        Assert.False(
+            RuntimeRoundTrip(Generated("Shape"), """{"kind":"circle","radius":1,"invalid":1}""")
+                .TryGetProperty("invalid", out _)
+        );
+        Assert.Equal(
+            1,
+            RuntimeRoundTrip(Generated("Circle"), """{"kind":"circle","radius":1}""")
+                .GetProperty("radius")
+                .GetInt32()
+        );
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<DisallowShape>(
+                """{"kind":"circle","radius":1,"invalid":1}""",
+                JsonSerializerOptions.Web
+            )
+        );
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<DisallowCircle>(
+                """{"kind":"circle","radius":1}""",
+                JsonSerializerOptions.Web
+            )
         );
     }
+
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+    [JsonDerivedType(typeof(DisallowCircle), "circle")]
+    private abstract record DisallowShape;
+
+    [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+    private sealed record DisallowCircle(double Radius) : DisallowShape;
 
     [Fact]
     public void Open_record_preserves_typed_named_and_schema_valued_additional_properties()
@@ -127,6 +258,13 @@ public sealed class OpaqueCarrierFidelityTests
                 .GetBoolean()
         );
         Assert.Empty(RuntimeRoundTrip(closed.RequestType, "{}").EnumerateObject());
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize(
+                """{"extra":{"nested":true}}""",
+                closed.RequestType,
+                JsonSerializerOptions.Web
+            )
+        );
         Assert.False(
             closed
                 .EmittedRoot.GetProperty("components")

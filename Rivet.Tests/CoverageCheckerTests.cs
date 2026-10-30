@@ -2053,24 +2053,8 @@ public sealed class CoverageCheckerTests
         Assert.Contains("unresolved route", warning.Actual);
     }
 
-    // A route group the receiver chain can't trace to its MapGroup call has a prefix --check
-    // can't see, so the route is unresolved rather than compared as if it had none.
-    [Theory]
-    [InlineData(
-        "var api = app.MapApi(); api.MapGet(\"/items\", Handler);",
-        "private static RouteGroupBuilder MapApi(this IEndpointRouteBuilder app) => app.MapGroup(\"/v2\");"
-    )]
-    [InlineData(
-        "_group.MapGet(\"/items\", Handler);",
-        "private static RouteGroupBuilder _group = null!;"
-    )]
-    [InlineData(
-        "MapItems(app.MapGroup(\"/v2\"));",
-        "private static void MapItems(RouteGroupBuilder group) => group.MapGet(\"/items\", Handler);"
-    )]
-    public void Untraced_route_group_receiver_is_reported_unresolved(string body, string members)
-    {
-        var implementation = $$"""
+    private static string GroupedEndpoints(string body, string members) =>
+        $$"""
             using Microsoft.AspNetCore.Builder;
             using Microsoft.AspNetCore.Http;
             using Microsoft.AspNetCore.Routing;
@@ -2092,6 +2076,99 @@ public sealed class CoverageCheckerTests
             }
             """;
 
+    // Route-group helpers are followed both ways: into what a helper returns, with its
+    // parameters bound to that call's arguments, and out of a helper's parameter to each call
+    // that passes it. Each mapping keeps its own prefix. Map's own IEndpointRouteBuilder
+    // parameter, which nothing in the project passes, is the app.
+    [Theory]
+    // ASP.NET's documented route-group helper.
+    [InlineData(
+        "app.MapGroup(\"/v2\").MapTodos();",
+        "private static RouteGroupBuilder MapTodos(this RouteGroupBuilder group) { group.MapGet(\"/items\", Handler); return group; }"
+    )]
+    // A helper that returns a new group is that group, not the one it was handed.
+    [InlineData(
+        "var api = app.MapGroup(\"\"); api.V2().MapGet(\"/items\", Handler);",
+        "private static RouteGroupBuilder V2(this RouteGroupBuilder group) => group.MapGroup(\"/v2\");"
+    )]
+    [InlineData(
+        "var api = app.MapApi(); api.MapGet(\"/items\", Handler);",
+        "private static RouteGroupBuilder MapApi(this IEndpointRouteBuilder app) => app.MapGroup(\"/v2\");"
+    )]
+    [InlineData(
+        "MapItems(app.MapGroup(\"/v2\"));",
+        "private static void MapItems(RouteGroupBuilder group) => group.MapGet(\"/items\", Handler);"
+    )]
+    [InlineData(
+        "app.MapGroup(\"/v2\").MapItems();",
+        "private static IEndpointRouteBuilder MapItems(this IEndpointRouteBuilder endpoints) { endpoints.MapGet(\"/items\", Handler); return endpoints; }"
+    )]
+    public void Route_group_helper_keeps_its_prefix(string body, string members)
+    {
+        var warnings = RunCheck(GroupedTasksContract, GroupedEndpoints(body, members));
+
+        Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListItems");
+    }
+
+    [Fact]
+    public void Helper_called_from_two_groups_is_checked_at_both()
+    {
+        var warnings = RunCheck(
+            GroupedTasksContract,
+            GroupedEndpoints(
+                "MapItems(app.MapGroup(\"/v1\")); MapItems(app.MapGroup(\"/v2\"));",
+                "private static void MapItems(RouteGroupBuilder group) => group.MapGet(\"/items\", Handler);"
+            )
+        );
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Equal("/v1/items", warning.Actual);
+    }
+
+    [Fact]
+    public void Helper_making_its_own_group_is_checked_at_each_call()
+    {
+        var warnings = CompilationHelper.CheckCoverage(
+            CompilationHelper.CreateFrameworkCompilation(
+                Microsoft.CodeAnalysis.OutputKind.DynamicallyLinkedLibrary,
+                GroupedTasksContract,
+                GroupedEndpoints(
+                    "MapApi(); MapApi();",
+                    "private static WebApplication _app = null!;\n"
+                        + "private static void MapApi() => _app.MapGroup(\"/v1\").MapGet(\"/items\", Handler);"
+                )
+            )
+        );
+
+        // Each call maps it at /v1/items: one warning says so.
+        var warning = Assert.Single(warnings, item => item.FieldName == "ListItems");
+        Assert.Equal(CoverageWarningKind.RouteMismatch, warning.Kind);
+        Assert.Equal("/v1/items", warning.Actual);
+    }
+
+    // A builder the trace can't follow to its MapGroup call or the app has a prefix --check
+    // can't see, so the route is unresolved rather than compared as if it had none.
+    [Theory]
+    [InlineData(
+        "_group.MapGet(\"/items\", Handler);",
+        "private static RouteGroupBuilder _group = null!;"
+    )]
+    [InlineData(
+        "_routes.MapGet(\"/v2/items\", Handler);",
+        "private static IEndpointRouteBuilder _routes = null!;"
+    )]
+    // A group parameter nothing passes may be any group.
+    [InlineData(
+        "",
+        "public static void MapItems(RouteGroupBuilder group) => group.MapGet(\"/items\", Handler);"
+    )]
+    public void Untraced_route_group_receiver_is_reported_unresolved(string body, string members)
+    {
+        var implementation = GroupedEndpoints(body, members);
+
         var warnings = RunCheck(GroupedTasksContract, implementation);
 
         var warning = Assert.Single(
@@ -2099,6 +2176,26 @@ public sealed class CoverageCheckerTests
             item => item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
         );
         Assert.Contains("unresolved route", warning.Actual);
+    }
+
+    [Fact]
+    public void Unresolved_mapping_of_a_handler_mapped_twice_names_where_the_trace_stops()
+    {
+        var warnings = RunCheck(
+            GroupedTasksContract,
+            GroupedEndpoints(
+                "MapItems(app.MapGroup(\"/v2\")); MapItems(_group);",
+                "private static RouteGroupBuilder _group = null!;\n"
+                    + "private static void MapItems(RouteGroupBuilder group) => group.MapGet(\"/items\", Handler);"
+            )
+        );
+
+        var warning = Assert.Single(
+            warnings,
+            item => item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
+        );
+        Assert.Contains("unresolved route", warning.Actual);
+        Assert.Contains("as mapped on '_group'", warning.Actual);
     }
 
     // ---------------------------------------------------------------

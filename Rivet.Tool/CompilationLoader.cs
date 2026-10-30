@@ -8,8 +8,17 @@ namespace Rivet.Tool;
 
 internal static class CompilationLoader
 {
-    public static async Task<Compilation?> LoadProjectAsync(string csprojPath)
+    public static async Task<Compilation> LoadProjectAsync(string csprojPath)
     {
+        var fullPath = Path.GetFullPath(csprojPath);
+        if (!File.Exists(fullPath))
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InputPathNotFound,
+                $"--project: no project file at {fullPath}"
+            );
+        }
+
         EnsureMSBuildRegistered();
 
         using var workspace = MSBuildWorkspace.Create();
@@ -22,19 +31,21 @@ internal static class CompilationLoader
             }
         });
 
-        var fullPath = Path.GetFullPath(csprojPath);
         Console.Error.WriteLine($"Loading {fullPath}...");
 
         var project = await workspace.OpenProjectAsync(fullPath);
         var compilation =
             await project.GetCompilationAsync()
-            ?? throw new InvalidOperationException("Failed to get compilation.");
+            ?? throw Diagnostics.Error(
+                Diagnostics.CompilationFailed,
+                $"{fullPath} yields no compilation, so there's no C# to read"
+            );
 
         return WithoutErrors(compilation);
     }
 
-    /// <summary>The compilation, or null after printing its first errors to stderr.</summary>
-    private static Compilation? WithoutErrors(Compilation compilation)
+    /// <summary>The compilation, or <c>RIV1126</c> listing its first errors.</summary>
+    private static Compilation WithoutErrors(Compilation compilation)
     {
         var errors = Errors(compilation);
 
@@ -43,13 +54,11 @@ internal static class CompilationLoader
             return compilation;
         }
 
-        Console.Error.WriteLine($"C# compilation has {errors.Count} error(s):");
-        foreach (var error in errors.Take(10))
-        {
-            Console.Error.WriteLine($"  {error}");
-        }
-
-        return null;
+        throw Diagnostics.Error(
+            Diagnostics.CompilationFailed,
+            $"the C# has {errors.Count} compiler error(s), so Rivet can't read it:"
+                + string.Concat(errors.Take(10).Select(error => $"{Environment.NewLine}  {error}"))
+        );
     }
 
     private static List<Diagnostic> Errors(Compilation compilation) =>
@@ -85,7 +94,10 @@ internal static class CompilationLoader
             return;
         }
 
-        throw new InvalidOperationException("No instances of MSBuild could be detected.");
+        throw Diagnostics.Error(
+            Diagnostics.CompilationFailed,
+            "no MSBuild instance could be found to load the project; install the .NET SDK, or point DOTNET_ROOT at it"
+        );
     }
 
     private static IEnumerable<string> GetSdkCandidatePaths()
@@ -250,7 +262,7 @@ internal static class CompilationLoader
         return references;
     }
 
-    public static Compilation? CompileFromFiles(string[] paths)
+    public static Compilation CompileFromFiles(string[] paths)
     {
         var syntaxTrees = new List<SyntaxTree>();
 
@@ -258,7 +270,10 @@ internal static class CompilationLoader
         {
             if (!File.Exists(path))
             {
-                throw new FileNotFoundException($"File not found: {path}");
+                throw Diagnostics.Error(
+                    Diagnostics.InputPathNotFound,
+                    $"source file not found: {path}"
+                );
             }
 
             var source = File.ReadAllText(path);

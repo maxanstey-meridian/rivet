@@ -58,6 +58,33 @@ public sealed class MinimalApiBindingHostTests
         }
     }
 
+    [Fact]
+    public async Task Form_mapper_reads_none_of_MVCs_filters()
+    {
+        // [Bind] include lists, on the parameter or the type, [BindNever], and
+        // [BindingBehavior(Never)] are MVC's alone: the form mapper binds every member.
+        const string path = "/minimal/filters";
+        await using var host = await BindingHost.StartAsync(
+            mvc: false,
+            app => app.MapPost(path, MinimalFormHandlers.Filtered).DisableAntiforgery()
+        );
+        var inputs = BindingHost.CheckerInputs(
+            typeof(MinimalFormHandlers),
+            nameof(MinimalFormHandlers.Filtered),
+            ParameterBindingHost.MinimalApi,
+            infersBody: true,
+            route: path
+        );
+
+        await host.AssertBindsUnder(
+            HttpMethod.Post,
+            path,
+            inputs,
+            ["Title", "Body", "Never", "Behavior"],
+            sentFrom: InputSource.Form
+        );
+    }
+
     [Theory]
     // [FromForm(Name = "p")] on the parameter is no prefix.
     [InlineData("/minimal/form-named", "p.Plain", "Plain")]
@@ -284,8 +311,28 @@ public sealed class MinimalFormInner
     public string? Renamed { get; set; }
 }
 
+[Bind(nameof(Title))]
+public sealed class MinimalFiltered
+{
+    public string? Title { get; set; }
+
+    public string? Body { get; set; }
+
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
+    public string? Never { get; set; }
+
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindingBehavior(
+        Microsoft.AspNetCore.Mvc.ModelBinding.BindingBehavior.Never
+    )]
+    public string? Behavior { get; set; }
+}
+
 public static class MinimalFormHandlers
 {
+    public static string Filtered(
+        [FromForm, Bind(nameof(MinimalFiltered.Body))] MinimalFiltered f
+    ) => BindingHost.Echo(f);
+
     public static string Plain([FromForm] MinimalForm f) => BindingHost.Echo(f);
 
     public static string Named([FromForm(Name = "p")] MinimalForm f) => BindingHost.Echo(f);
@@ -363,9 +410,14 @@ internal sealed class BindingHost : IAsyncDisposable
 
     /// <summary>
     /// Starts a host serving the test assembly's controllers (<paramref name="mvc"/>) or the
-    /// minimal-API handlers above, plus whatever <paramref name="map"/> adds.
+    /// minimal-API handlers above, plus whatever <paramref name="map"/> adds, with whatever
+    /// <paramref name="services"/> registers before the app is built.
     /// </summary>
-    public static async Task<BindingHost> StartAsync(bool mvc, Action<WebApplication>? map = null)
+    public static async Task<BindingHost> StartAsync(
+        bool mvc,
+        Action<WebApplication>? map = null,
+        Action<IServiceCollection>? services = null
+    )
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -374,6 +426,7 @@ internal sealed class BindingHost : IAsyncDisposable
         {
             builder.Services.AddControllers().AddApplicationPart(typeof(BindingHost).Assembly);
         }
+        services?.Invoke(builder.Services);
 
         var app = builder.Build();
         if (mvc)

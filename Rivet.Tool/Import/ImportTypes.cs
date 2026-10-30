@@ -45,6 +45,11 @@ internal sealed record GeneratedRecord(
     // The source schema wrote additionalProperties ({} or a schema) rather than leaving it
     // out: the bag is then emitted as additionalProperties: {}, and otherwise not at all.
     bool DeclaresAdditionalProperties = false,
+    // The source schema says additionalProperties: false, so the record is
+    // [JsonUnmappedMemberHandling(Disallow)] and the host refuses an unknown member as the spec
+    // does. Set where the record is built; SchemaMapper.SettleClosedRecords clears it (RIV3033)
+    // where the schema contradicts itself in a way only the whole import can see.
+    bool IsClosed = false,
     // On a polymorphic variant: the tag property's schema as the source authored it, when
     // it is not the single-value enum the emitter would synthesize.
     string? DiscriminatorSchemaJson = null,

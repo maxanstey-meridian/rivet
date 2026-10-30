@@ -90,13 +90,21 @@ public sealed class WellKnownTypes(Compilation c)
         );
 
     // What names and excludes a form or complex member: MVC's model name ([From*] Name =,
-    // [BindProperty] Name =, [Bind] Prefix =) and [BindNever]; the minimal-API form mapper's
-    // [DataMember] Name = and [IgnoreDataMember].
+    // [BindProperty] Name =, [Bind] Prefix =), its property filters ([Bind]'s include list, or
+    // any other IPropertyFilterProvider) and binding behaviour ([BindNever], [BindRequired], or
+    // [BindingBehavior(...)] itself); the minimal-API form mapper's [DataMember] Name = and
+    // [IgnoreDataMember].
     public INamedTypeSymbol? IModelNameProvider { get; } =
         c.GetTypeByMetadataName(Mvc + "ModelBinding.IModelNameProvider");
     public INamedTypeSymbol? Bind { get; } = c.GetTypeByMetadataName(Mvc + "BindAttribute");
+    public INamedTypeSymbol? IPropertyFilterProvider { get; } =
+        c.GetTypeByMetadataName(Mvc + "ModelBinding.IPropertyFilterProvider");
+    public INamedTypeSymbol? BindingBehaviorAttribute { get; } =
+        c.GetTypeByMetadataName(Mvc + "ModelBinding.BindingBehaviorAttribute");
     public INamedTypeSymbol? BindNever { get; } =
         c.GetTypeByMetadataName(Mvc + "ModelBinding.BindNeverAttribute");
+    public INamedTypeSymbol? BindRequired { get; } =
+        c.GetTypeByMetadataName(Mvc + "ModelBinding.BindRequiredAttribute");
     public INamedTypeSymbol? DataMember { get; } =
         c.GetTypeByMetadataName("System.Runtime.Serialization.DataMemberAttribute");
     public INamedTypeSymbol? IgnoreDataMember { get; } =
@@ -299,6 +307,8 @@ public sealed class WellKnownTypes(Compilation c)
         );
     public INamedTypeSymbol? RouteGroupBuilder { get; } =
         c.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.RouteGroupBuilder");
+    public INamedTypeSymbol? EndpointRouteBuilder { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder");
     public INamedTypeSymbol? FunctionsAuthorizationLevel { get; } =
         c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.AuthorizationLevel");
 
@@ -324,6 +334,11 @@ public sealed class WellKnownTypes(Compilation c)
         c.GetTypeByMetadataName(Authorization + "AuthorizationPolicy");
     public INamedTypeSymbol? AuthorizationPolicyBuilder { get; } =
         c.GetTypeByMetadataName(Authorization + "AuthorizationPolicyBuilder");
+
+    // A service that serves named policies its own way, so a registered one hides what a
+    // policy name means.
+    public INamedTypeSymbol? IAuthorizationPolicyProvider { get; } =
+        c.GetTypeByMetadataName(Authorization + "IAuthorizationPolicyProvider");
 
     // Where ASP.NET's UseStartup lives: the Startup type it's handed has its Configure…
     // methods run by the host.

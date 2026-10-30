@@ -6843,6 +6843,115 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void Content_Declared_Path_Parameter_Drops_Its_Operation_And_Its_Preserved_Fields()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Pets", "version": "1.0.0" },
+              "components": {
+                "parameters": {
+                  "OwnerId": { "name": "ownerId", "in": "path", "required": true, "content": { "text/plain": { "schema": { "type": "string" } } } }
+                },
+                "pathItems": {
+                  "Owner": {
+                    "get": {
+                      "operationId": "getOwner",
+                      "parameters": [{ "$ref": "#/components/parameters/OwnerId" }],
+                      "responses": { "204": { "description": "No Content" } }
+                    },
+                    "put": {
+                      "operationId": "putOwner",
+                      "parameters": [{ "name": "ownerId", "in": "path", "required": true, "schema": { "type": "string" } }],
+                      "responses": { "204": { "description": "No Content" } }
+                    }
+                  }
+                }
+              },
+              "paths": {
+                "/pets": {
+                  "get": { "operationId": "listPets", "responses": { "204": { "description": "No Content" } } }
+                },
+                "/pets/{id}": {
+                  "parameters": [
+                    { "name": "id", "in": "path", "required": true, "content": { "application/json": { "schema": { "type": "object" } } } }
+                  ],
+                  "get": {
+                    "operationId": "getPet",
+                    "externalDocs": { "url": "https://example.com/pets" },
+                    "x-audit": "kept-only-with-its-operation",
+                    "responses": { "204": { "description": "No Content" } }
+                  },
+                  "delete": {
+                    "operationId": "deletePet",
+                    "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                },
+                "/tags/{tag}": {
+                  "summary": "A path item whose only operation goes",
+                  "get": {
+                    "operationId": "getTag",
+                    "parameters": [{ "name": "tag", "in": "path", "required": true, "content": { "text/plain": { "schema": { "type": "string" } } } }],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                },
+                "/owners/{ownerId}": { "$ref": "#/components/pathItems/Owner" }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Equal(
+            [
+                "RIV3025: Operation dropped: GET /pets/{id} — path parameter 'id' declares content (application/json) instead of a schema, and a path parameter's schema is what types its route token. Give it a schema (a JSON-serialised value is a string parameter).",
+                "RIV3025: Operation dropped: GET /tags/{tag} — path parameter 'tag' declares content (text/plain) instead of a schema, and a path parameter's schema is what types its route token. Give it a schema (a JSON-serialised value is a string parameter).",
+                "RIV3025: Operation dropped: GET /owners/{ownerId} — path parameter 'ownerId' declares content (text/plain) instead of a schema, and a path parameter's schema is what types its route token. Give it a schema (a JSON-serialised value is a string parameter).",
+            ],
+            result.Warnings.Where(warning =>
+                warning.StartsWith("RIV3025", StringComparison.Ordinal)
+            )
+        );
+        var contract = CompilationHelper.FindFile(result, "DefaultContract.cs");
+        Assert.DoesNotContain("GetPet", contract);
+        Assert.DoesNotContain("GetTag", contract);
+        Assert.DoesNotContain("GetOwner", contract);
+        Assert.Contains("ListPets", contract);
+        Assert.Contains("DeletePet", contract);
+        Assert.Contains("PutOwner", contract);
+
+        // The rest generates: no route is left with a token nothing types (RIV1019), and no
+        // preserved field is left without the operation it belonged to (RIV2016).
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        var paths = emitted["paths"]!.AsObject();
+        Assert.Equal(
+            ["/owners/{ownerId}", "/pets", "/pets/{id}"],
+            paths.Select(path => path.Key).Order(StringComparer.Ordinal)
+        );
+        Assert.Equal(
+            ["delete"],
+            paths["/pets/{id}"]!
+                .AsObject()
+                .Select(entry => entry.Key)
+                .Where(key => key != "parameters")
+        );
+        Assert.Equal(
+            ["put"],
+            paths["/owners/{ownerId}"]!
+                .AsObject()
+                .Select(entry => entry.Key)
+                .Where(key => key != "parameters")
+        );
+        Assert.DoesNotContain("externalDocs", emitted.ToJsonString());
+        Assert.DoesNotContain("x-audit", emitted.ToJsonString());
+        Assert.DoesNotContain("A path item whose only operation goes", emitted.ToJsonString());
+    }
+
+    [Fact]
     public void Empty_And_Case_Duplicate_Response_Headers_Are_Marked()
     {
         var spec = CompilationHelper.BuildSpec(

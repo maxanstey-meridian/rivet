@@ -299,6 +299,7 @@ internal static class CSharpWriter
         }
         if (
             record.HasExtensionData
+            || record.IsClosed
             || record.Polymorphism is not null
             || record.Properties.Any(p => p.WireName is not null)
         )
@@ -338,6 +339,12 @@ internal static class CSharpWriter
             // Wire value is the bare variant: the walker re-emits oneOf, the
             // attribute's converter unwraps/rewraps at runtime.
             sb.AppendLine("[RivetUnion]");
+        }
+        if (record.IsClosed)
+        {
+            // The source schema's additionalProperties: false, as System.Text.Json holds it:
+            // the host refuses an unknown member, and the walker emits the keyword back.
+            sb.AppendLine("[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]");
         }
         foreach (var metadata in record.SchemaMetadata ?? [])
         {

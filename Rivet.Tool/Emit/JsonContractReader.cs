@@ -228,6 +228,7 @@ public static class JsonContractReader
         foreach (var endpoint in endpoints)
         {
             RefuseRoutingSyntax(endpoint);
+            RefuseFormFieldStyles(endpoint);
             RejectRepeatedSecuritySchemes(
                 endpoint.Security,
                 $"endpoint '{endpoint.ControllerName}.{endpoint.Name}' ({endpoint.HttpMethod.ToUpperInvariant()} {endpoint.RouteTemplate})"
@@ -331,6 +332,37 @@ public static class JsonContractReader
                     + $"('{{{token.Name}}}'); type it with its path param in params instead."
             );
         }
+    }
+
+    /// <summary>
+    /// The styles an Encoding Object holds, which is where a form field's <c>style</c> goes;
+    /// <c>matrix</c>, <c>label</c>, and <c>simple</c> are path and header styles.
+    /// </summary>
+    private static readonly string[] _formFieldStyles =
+    [
+        "form",
+        "spaceDelimited",
+        "pipeDelimited",
+        "deepObject",
+    ];
+
+    private static void RefuseFormFieldStyles(TsEndpointDefinition endpoint)
+    {
+        var field = endpoint.Params.FirstOrDefault(param =>
+            param is { Source: ParamSource.FormField, Style: { } style }
+            && !_formFieldStyles.Contains(style, StringComparer.Ordinal)
+        );
+        if (field is null)
+        {
+            return;
+        }
+
+        throw new JsonException(
+            $"form field '{field.Name}' on endpoint '{endpoint.ControllerName}.{endpoint.Name}' "
+                + $"has the style '{field.Style}', which a form part can't take. Its style goes in the "
+                + "form body's encoding, which holds 'form', 'spaceDelimited', 'pipeDelimited', or "
+                + "'deepObject'."
+        );
     }
 
     private static TsEndpointDefinition NormalizeResponses(TsEndpointDefinition endpoint) =>

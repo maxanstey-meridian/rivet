@@ -16610,7 +16610,7 @@
         "corpusId": "bitbucket",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
         "ownerPointers": [
           "#/components/schemas/base_commit/allOf/1/properties/summary",
           "#/components/schemas/branching_model/allOf/1/properties/branch_types/items",
@@ -18359,7 +18359,7 @@
         "corpusId": "discord",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
         "ownerPointers": [
           "#/components/schemas/InnerErrors"
         ]
@@ -20565,7 +20565,7 @@
         "corpusId": "github",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
         "ownerPointers": [
           "#/components/schemas/campaign-summary/properties/alert_stats",
           "#/components/schemas/code-scanning-default-setup-update",
@@ -25450,7 +25450,7 @@
         "corpusId": "slack",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
         "ownerPointers": [
           "#/components/schemas/objs_bot_profile",
           "#/components/schemas/objs_bot_profile/properties/icons",
@@ -29103,7 +29103,7 @@
         "corpusId": "stripe",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
         "ownerPointers": [
           "#/paths/~1v1~1account_links/post/requestBody/content/application~1x-www-form-urlencoded/schema",
           "#/paths/~1v1~1account_sessions/post/requestBody/content/application~1x-www-form-urlencoded/schema",
@@ -34175,7 +34175,7 @@
         "corpusId": "vercel",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
         "ownerPointers": [
           "#/components/schemas/AdditionalContactInfoRequired",
           "#/components/schemas/BadRequest",
@@ -38297,7 +38297,7 @@
         "corpusId": "zoom",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
         "ownerPointers": [
           "#/components/schemas/CloudArchivedFiles",
           "#/components/schemas/CloudArchivedFiles/properties/archive_files/items/anyOf/0"

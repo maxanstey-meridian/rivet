@@ -294,6 +294,7 @@ public sealed class EmitPipelineTests : IDisposable
         );
 
         Assert.Equal(1, result);
+        Assert.Contains("error RIV2020: ", stderr);
         Assert.Contains("is stale", stderr);
         Assert.Equal(tampered, await File.ReadAllTextAsync(specPath));
     }
@@ -312,6 +313,7 @@ public sealed class EmitPipelineTests : IDisposable
         );
 
         Assert.Equal(1, result);
+        Assert.Contains("error RIV2020: ", stderr);
         Assert.Contains("does not exist", stderr);
         Assert.False(
             File.Exists(Path.Combine(_output.FullName, "openapi.json")),

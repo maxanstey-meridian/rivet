@@ -81,7 +81,7 @@ RECORD_IMPLICIT_OPEN_PROOF = (
     "GeneratedCarrierFidelityTests.Implicit_open_object_preserves_additional_members_at_runtime"
 )
 RECORD_CLOSED_PROOF = (
-    "OpaqueCarrierFidelityTests.Closed_object_preserves_every_valid_member_at_runtime"
+    "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself"
 )
 RECORD_SCHEMA_OPEN_PROOF = (
     "OpaqueCarrierFidelityTests.Open_record_preserves_typed_named_and_schema_valued_additional_properties"

@@ -62,8 +62,7 @@ public sealed class GeneratedCarrierFidelityTests
             """,
             "Envelope"
         );
-        const string payload =
-            """{"open":{"id":"one","extra":true},"closed":{"id":"two","extra":true}}""";
+        const string payload = """{"open":{"id":"one","extra":true},"closed":{"id":"two"}}""";
 
         var envelope = JsonSerializer.Deserialize(payload, envelopeType, JsonSerializerOptions.Web);
         Assert.NotNull(envelope);
@@ -72,7 +71,17 @@ public sealed class GeneratedCarrierFidelityTests
         );
 
         Assert.True(serialized.RootElement.GetProperty("open").GetProperty("extra").GetBoolean());
-        Assert.False(serialized.RootElement.GetProperty("closed").TryGetProperty("extra", out _));
+        Assert.Equal(
+            "two",
+            serialized.RootElement.GetProperty("closed").GetProperty("id").GetString()
+        );
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize(
+                """{"open":{"id":"one"},"closed":{"id":"two","extra":true}}""",
+                envelopeType,
+                JsonSerializerOptions.Web
+            )
+        );
     }
 
     [Fact]

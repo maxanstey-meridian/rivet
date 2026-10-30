@@ -21,6 +21,9 @@ public sealed class SecurityCoverageTests
 
     private const string Handler = "() => ItemsContract.Get.Success(new ItemDto(\"1\")).ToResult()";
 
+    private const string OtherHandler =
+        "() => ItemsContract.Other.Success(new ItemDto(\"1\")).ToResult()";
+
     // ---------------------------------------------------------------
     // Fixtures
     // ---------------------------------------------------------------
@@ -192,6 +195,12 @@ public sealed class SecurityCoverageTests
         }
     }
 
+    // Named policies registered the way decision 13 reads them: "Staff" denies an anonymous
+    // caller, "open" admits anyone.
+    private const string Policies =
+        "services.AddAuthorization(o => { o.AddPolicy(\"Staff\", p => p.RequireRole(\"Staff\")); "
+        + "o.AddPolicy(\"open\", p => p.RequireAssertion(_ => true)); });";
+
     private const string Case1 = "anyone can call the handler";
     private const string Case2 = "an anonymous caller gets a 401";
 
@@ -285,8 +294,14 @@ public sealed class SecurityCoverageTests
         AssertVerdict(warnings, expected);
     }
 
-    [Fact]
-    public void Mvc_reads_a_custom_authorize_attribute_by_its_metadata_interface()
+    [Theory]
+    [InlineData("[Staff]", "[Staff] on ItemsController")]
+    // Its constructor may set a policy or roles where --check doesn't look.
+    [InlineData("[Staff(\"Admin\")]", "RIV4009")]
+    public void Mvc_reads_a_custom_authorize_attribute_by_its_metadata_interface(
+        string applied,
+        string expected
+    )
     {
         var attribute = """
             using System;
@@ -296,6 +311,10 @@ public sealed class SecurityCoverageTests
 
             public sealed class StaffAttribute : Attribute, IAuthorizeData
             {
+                public StaffAttribute() { }
+
+                public StaffAttribute(string roles) => Roles = roles;
+
                 public string? Policy { get; set; }
                 public string? Roles { get; set; } = "Staff";
                 public string? AuthenticationSchemes { get; set; }
@@ -305,10 +324,10 @@ public sealed class SecurityCoverageTests
         var warnings = Check(
             Contract(".Anonymous()", SecuredDefault),
             attribute,
-            Controller("[Staff]")
+            Controller(applied)
         );
 
-        AssertVerdict(warnings, "[Staff] on ItemsController");
+        AssertVerdict(warnings, expected);
     }
 
     // ---------------------------------------------------------------
@@ -595,10 +614,16 @@ public sealed class SecurityCoverageTests
         null
     )]
     [InlineData("options.Filters.Add(new AuthorizeFilter(\"Staff\"))", null)]
+    [InlineData("options.Filters.Add(new AuthorizeFilter(\"open\"))", Case1)]
+    [InlineData("options.Filters.Add(new AuthorizeFilter(\"Nobody\"))", "RIV4009")]
     [InlineData("options.Filters.Insert(0, new AuthorizeFilter())", null)]
     [InlineData("options.Filters.Add(new AuthorizeFilter(policyFromOutside))", "RIV4009")]
     [InlineData(
         "options.Filters.Add(new AuthorizeFilter(new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build()))",
+        Case1
+    )]
+    [InlineData(
+        "options.Filters.Add(new AuthorizeFilter(new AuthorizationPolicyBuilder().RequireAssertion(_ => DateTime.Now.Hour > 8).Build()))",
         "RIV4009"
     )]
     [InlineData("options.Filters.Add<AuthorizeFilter>()", "RIV4009")]
@@ -611,7 +636,7 @@ public sealed class SecurityCoverageTests
     {
         var warnings = Check(
             Contract(assembly: SecuredDefault),
-            App($"services.AddControllers(options => {{ {registration}; }});"),
+            App($"{Policies} services.AddControllers(options => {{ {registration}; }});"),
             Controller()
         );
 
@@ -1054,7 +1079,47 @@ public sealed class SecurityCoverageTests
     )]
     [InlineData(
         $"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(policy => policy.RequireAssertion(_ => true));",
+        Case1
+    )]
+    [InlineData(
+        $"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(policy => policy.RequireAssertion(_ => true).RequireRole(\"Staff\"));",
+        null
+    )]
+    [InlineData(
+        $"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(policy => {{ policy.RequireAssertion(_ => true); policy.RequireRole(\"Staff\"); }});",
+        null
+    )]
+    // A user requirement decides a policy whatever else it holds (A3)...
+    [InlineData(
+        $"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(new AuthorizationPolicyBuilder().RequireRole(\"Staff\")"
+            + ".AddRequirements(new Microsoft.AspNetCore.Authorization.Infrastructure.AssertionRequirement(_ => DateTime.Now.Hour > 8)).Build());",
+        null
+    )]
+    // ...but only where it always runs.
+    [InlineData(
+        $"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(policy => {{ if (flag) policy.RequireRole(\"Staff\"); policy.RequireAssertion(_ => true); }});",
         "RIV4009"
+    )]
+    // A named policy is what its registration builds (decision 13).
+    [InlineData($"app.MapGet(\"/api/items\", [Authorize(Policy = \"open\")] {Handler});", Case1)]
+    [InlineData($"app.MapGet(\"/api/items\", [Authorize(\"open\")] {Handler});", Case1)]
+    [InlineData($"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(\"open\");", Case1)]
+    [InlineData(
+        $"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(new AuthorizeAttribute {{ Policy = \"open\" }});",
+        Case1
+    )]
+    [InlineData(
+        $"app.MapGet(\"/api/items\", [Authorize(Policy = \"open\", Roles = \"Staff\")] {Handler});",
+        null
+    )]
+    // Combined, a policy that requires a user decides it.
+    [InlineData(
+        $"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(\"open\", \"Staff\");",
+        null
+    )]
+    [InlineData(
+        $"app.MapGet(\"/api/items\", [Authorize(Policy = \"Staff\")] {Handler}).RequireAuthorization(\"open\");",
+        null
     )]
     [InlineData(
         $"var endpoint = app.MapGet(\"/api/items\", {Handler}); endpoint.RequireAuthorization();",
@@ -1076,7 +1141,7 @@ public sealed class SecurityCoverageTests
     )]
     public void Minimal_api_endpoint_authorization(string body, string? expected)
     {
-        var warnings = Check(Contract(assembly: SecuredDefault), App(body));
+        var warnings = Check(Contract(assembly: SecuredDefault), App($"{Policies} {body}"));
 
         AssertVerdict(warnings, expected);
     }
@@ -1263,6 +1328,365 @@ public sealed class SecurityCoverageTests
     }
 
     // ---------------------------------------------------------------
+    // Route-group helpers: one tracer for routes and authorization
+    // ---------------------------------------------------------------
+
+    [Fact]
+    public void A_helper_returning_a_new_group_is_that_group()
+    {
+        // V2 makes a group inside the one it's handed, so a requirement on its answer covers
+        // only what's mapped there.
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                $"var api = app.MapGroup(\"/api\"); var v2 = api.V2(); v2.RequireAuthorization();"
+                    + $" api.MapGet(\"/items\", {Handler}); v2.MapGet(\"/other\", {OtherHandler});",
+                "private static RouteGroupBuilder V2(this RouteGroupBuilder group) => group.MapGroup(\"/v2\");"
+            )
+        );
+
+        AssertVerdict(warnings, Case1);
+        Assert.Empty(Security(warnings, "Other"));
+    }
+
+    [Fact]
+    public void An_endpoint_route_builder_helper_sees_the_group_it_is_called_on()
+    {
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                "app.MapGroup(\"\").RequireAuthorization().MapItems();",
+                "private static IEndpointRouteBuilder MapItems(this IEndpointRouteBuilder endpoints) "
+                    + $"{{ endpoints.MapGet(\"/api/items\", {Handler}); return endpoints; }}"
+            )
+        );
+
+        AssertVerdict(warnings, null);
+    }
+
+    [Theory]
+    // Only the group whose requirement --check reads requires a user.
+    [InlineData(
+        "MapItems(app.MapGroup(\"/v1\").RequireAuthorization()); MapItems(app.MapGroup(\"/api\"));",
+        new[] { "/api/items" }
+    )]
+    // Each mapping that anyone can call is its own warning, naming its route.
+    [InlineData(
+        "MapItems(app.MapGroup(\"/v1\")); MapItems(app.MapGroup(\"/api\"));",
+        new[] { "/api/items", "/v1/items" }
+    )]
+    public void A_helper_called_from_two_groups_checks_each_mapping(string body, string[] open)
+    {
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                body,
+                $"private static void MapItems(RouteGroupBuilder group) => group.MapGet(\"/items\", {Handler});"
+            )
+        );
+
+        var found = Security(warnings);
+        Assert.Equal(open.Length, found.Count);
+        Assert.All(found, warning => Assert.Contains(Case1, warning.Message));
+        foreach (var route in open)
+        {
+            Assert.Single(found, warning => warning.Message!.Contains($"as mapped at {route}"));
+        }
+    }
+
+    [Fact]
+    public void A_helper_returning_the_group_it_was_called_on_is_bound_to_that_call()
+    {
+        // MapTodos hands back the group it's called on, so v1 is /api's group alone: its
+        // requirement doesn't reach /v2, and an endpoint mapped on v1 has one mapping.
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                "var v1 = app.MapGroup(\"/api\").MapTodos(); app.MapGroup(\"/v2\").MapTodos();"
+                    + $" v1.RequireAuthorization(); v1.MapGet(\"/other\", {OtherHandler});",
+                "private static RouteGroupBuilder MapTodos(this RouteGroupBuilder group) "
+                    + $"{{ group.MapGet(\"/items\", {Handler}); return group; }}"
+            )
+        );
+
+        var warning = Assert.Single(Security(warnings));
+        Assert.Contains(Case1, warning.Message);
+        Assert.Contains("as mapped at /v2/items", warning.Message);
+        Assert.Empty(Security(warnings, "Other"));
+        Assert.DoesNotContain(
+            warnings,
+            warning =>
+                warning.FieldName == "Other" && warning.Kind == CoverageWarningKind.RouteMismatch
+        );
+    }
+
+    [Theory]
+    // A requirement on one call's group doesn't reach another call's.
+    [InlineData("group.MapGroup(\"/v2\")", "a.RequireAuthorization();", null, Case1)]
+    // A requirement inside the helper reaches the group every call makes.
+    [InlineData("group.MapGroup(\"/v2\").RequireAuthorization()", "", null, null)]
+    public void A_group_made_in_a_helper_is_its_own_for_each_call(
+        string v2,
+        string convention,
+        string? getExpected,
+        string? otherExpected
+    )
+    {
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                $"var a = app.MapGroup(\"/api\").V2(); {convention} a.MapGet(\"/items\", {Handler});"
+                    + $" var b = app.MapGroup(\"/other\").V2(); b.MapGet(\"/x\", {OtherHandler});",
+                $"private static RouteGroupBuilder V2(this RouteGroupBuilder group) => {v2};"
+            )
+        );
+
+        AssertVerdict(warnings, getExpected);
+        if (otherExpected is null)
+        {
+            Assert.Empty(Security(warnings, "Other"));
+        }
+        else
+        {
+            Assert.Contains(Case1, Assert.Single(Security(warnings, "Other")).Message);
+        }
+    }
+
+    [Fact]
+    public void A_local_function_requiring_a_helpers_group_runs_where_it_is_called()
+    {
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                "var api = app.MapGroup(\"/api\"); void Secure() => api.V2().RequireAuthorization(); if (flag) Secure();",
+                "private static RouteGroupBuilder V2(this RouteGroupBuilder group) "
+                    + $"{{ var v2 = group.MapGroup(\"/v2\"); v2.MapGet(\"/items\", {Handler}); return v2; }}"
+            )
+        );
+
+        AssertVerdict(warnings, "RIV4009");
+    }
+
+    // The warning for a mapping at /api/items that anyone can call, when a handler has two.
+    private const string SecondMapping =
+        "as mapped at /api/items: the spec requires credentials (the document's default "
+        + $"security), but {Case1}";
+
+    [Theory]
+    // The helper makes its group from the app it captures and maps on it: the requirement on
+    // what the call returns reaches that endpoint.
+    [InlineData(
+        "RouteGroupBuilder MapApi() { var g = app.MapGroup(\"/api\");"
+            + $" g.MapGet(\"/items\", {Handler}); return g; }}"
+            + " MapApi().RequireAuthorization();",
+        null
+    )]
+    // So does one on the endpoint a helper maps on the app it captures.
+    [InlineData(
+        $"RouteHandlerBuilder MapIt() => app.MapGet(\"/api/items\", {Handler});"
+            + " MapIt().RequireAuthorization();",
+        null
+    )]
+    // Each call makes its own group: the second's endpoint has no requirement. Both calls map
+    // it at /api/items, so the warning names that mapping, once.
+    [InlineData(
+        "RouteGroupBuilder MapApi() { var g = app.MapGroup(\"/api\");"
+            + $" g.MapGet(\"/items\", {Handler}); return g; }}"
+            + " MapApi().RequireAuthorization(); MapApi();",
+        SecondMapping
+    )]
+    [InlineData(
+        "RouteGroupBuilder MapApi() { var g = app.MapGroup(\"/api\");"
+            + $" g.MapGet(\"/items\", {Handler}); return g; }}"
+            + " MapApi(); MapApi();",
+        SecondMapping
+    )]
+    // A helper that calls itself: the group its inner call makes has no requirement, and the
+    // walk out to its callers ends.
+    [InlineData(
+        "RouteGroupBuilder MapApi(int n) { var g = app.MapGroup(\"/api\");"
+            + $" g.MapGet(\"/items\", {Handler}); if (n > 0) MapApi(n - 1); return g; }}"
+            + " MapApi(1).RequireAuthorization();",
+        SecondMapping
+    )]
+    public void A_convention_on_a_helpers_result_reaches_what_it_maps_on_a_captured_app(
+        string body,
+        string? expected
+    )
+    {
+        var warnings = CheckWith(
+            OutputKind.ConsoleApplication,
+            Program("var app = builder.Build(); " + body + " app.Run();"),
+            Contract(assembly: SecuredDefault)
+        );
+
+        AssertVerdict(warnings, expected);
+    }
+
+    [Fact]
+    public void A_convention_on_a_helpers_result_reaches_what_it_maps_on_a_static_app()
+    {
+        var warnings = CheckWith(
+            OutputKind.ConsoleApplication,
+            Program(
+                "Api.App = builder.Build(); Api.MapApi().RequireAuthorization(); Api.App.Run();"
+            ),
+            Contract(assembly: SecuredDefault),
+            $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Api
+            {
+                public static WebApplication App = null!;
+
+                public static RouteGroupBuilder MapApi()
+                {
+                    var g = App.MapGroup("/api");
+                    g.MapGet("/items", {{Handler}});
+                    return g;
+                }
+            }
+            """
+        );
+
+        AssertVerdict(warnings, null);
+    }
+
+    [Fact]
+    public void An_attribute_declared_operation_is_compared_at_each_mapping()
+    {
+        var source = $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.AspNetCore.Routing;
+            using Rivet;
+
+            {{Scheme}}
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record TaskDto(string Id);
+
+            public static class Tasks
+            {
+                public static void Map(WebApplication app)
+                {
+                    MapTasks(app.MapGroup("/v1").RequireAuthorization());
+                    MapTasks(app.MapGroup("/v2"));
+                }
+
+                private static void MapTasks(RouteGroupBuilder group) => group.MapGet("/tasks", List);
+
+                [RivetEndpoint]
+                [RivetSecure("bearer")]
+                [HttpGet("/api/tasks")]
+                public static TaskDto List() => new("1");
+            }
+            """;
+
+        var warning = Assert.Single(Security(Check(source), "List"));
+        Assert.Equal(CoverageWarningKind.SecurityMismatch, warning.Kind);
+        Assert.Contains(Case1, warning.Message);
+        Assert.Contains("as mapped at /v2/tasks", warning.Message);
+    }
+
+    // ---------------------------------------------------------------
+    // Correlated conditions (decision 2): sites under one condition share one unknown
+    // ---------------------------------------------------------------
+
+    // Top-level statements run once, so a condition there keys every site it holds.
+    private static string Program(string body) =>
+        $$"""
+            using Microsoft.AspNetCore.Authorization;
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Microsoft.AspNetCore.Routing;
+            using Microsoft.Extensions.DependencyInjection;
+            using Rivet;
+            using Test;
+
+            var builder = WebApplication.CreateBuilder(args);
+            var on = args.Length > 0;
+            var also = args.Length > 1;
+            {{body}}
+            """;
+
+    private const string Requiring =
+        "new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build()";
+
+    [Theory]
+    // On, the endpoint opts out of the group's requirement; off, there's neither.
+    [InlineData(
+        $"var app = builder.Build(); var g = app.MapGroup(\"/api\"); if (on) g.RequireAuthorization();"
+            + $" var e = g.MapGet(\"/items\", {Handler}); if (on) e.AllowAnonymous();",
+        Case1
+    )]
+    // Both branches of one if require a user.
+    [InlineData(
+        $"var app = builder.Build(); var g = app.MapGroup(\"/api\"); g.MapGet(\"/items\", {Handler});"
+            + " if (on) g.RequireAuthorization(); else g.RequireAuthorization(p => p.RequireRole(\"Admin\"));",
+        null
+    )]
+    // A site under two conditions is its own unknown, so this stays unreadable.
+    [InlineData(
+        $"var app = builder.Build(); var g = app.MapGroup(\"/api\"); var e = g.MapGet(\"/items\", {Handler});"
+            + " if (also) { if (on) g.RequireAuthorization(); } if (!on) e.RequireAuthorization();",
+        "RIV4009"
+    )]
+    // The fallback under the same condition as the endpoint's requirement: one of them applies.
+    [InlineData(
+        $"builder.Services.AddAuthorization(o => {{ if (on) o.FallbackPolicy = {Requiring}; }});"
+            + $" var app = builder.Build(); var e = app.MapGet(\"/api/items\", {Handler}); if (!on) e.RequireAuthorization();",
+        null
+    )]
+    // A default policy that admits anyone, set under the condition that adds a requirement:
+    // either the requirement applies or the default does.
+    [InlineData(
+        $"builder.Services.AddAuthorization(o => {{ if (on) o.DefaultPolicy = new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build(); }});"
+            + $" var app = builder.Build(); var e = app.MapGet(\"/api/items\", {Handler}).RequireAuthorization();"
+            + " if (on) e.RequireAuthorization(p => p.RequireRole(\"Admin\"));",
+        null
+    )]
+    // Under another condition, the default may admit anyone with nothing else applied.
+    [InlineData(
+        $"builder.Services.AddAuthorization(o => {{ if (on) o.DefaultPolicy = new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build(); }});"
+            + $" var app = builder.Build(); var e = app.MapGet(\"/api/items\", {Handler}).RequireAuthorization();"
+            + " if (also) e.RequireAuthorization(p => p.RequireRole(\"Admin\"));",
+        "RIV4009"
+    )]
+    public void Sites_under_one_condition_share_one_unknown(string body, string? expected)
+    {
+        var warnings = CheckWith(
+            OutputKind.ConsoleApplication,
+            Program(body + " app.Run();"),
+            Contract(assembly: SecuredDefault)
+        );
+
+        AssertVerdict(warnings, expected);
+    }
+
+    [Fact]
+    public void Conditional_fallback_in_a_method_nothing_calls_sets_nothing()
+    {
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                $"app.MapGet(\"/api/items\", {Handler});",
+                "private static void Unused(IServiceCollection services, bool flag) => "
+                    + $"services.AddAuthorization(o => {{ if (flag) o.FallbackPolicy = {Requiring}; }});"
+            )
+        );
+
+        AssertVerdict(warnings, Case1);
+    }
+
+    // ---------------------------------------------------------------
     // Fallback policy
     // ---------------------------------------------------------------
 
@@ -1355,10 +1779,153 @@ public sealed class SecurityCoverageTests
     {
         var warnings = Check(
             Contract(assembly: SecuredDefault),
+            App($"{Policies} {setup} app.MapGet(\"/api/items\", {Handler}){convention};")
+        );
+
+        AssertVerdict(warnings, expected);
+    }
+
+    // ---------------------------------------------------------------
+    // Named policies (decision 13): a name is what its registration builds
+    // ---------------------------------------------------------------
+
+    private const string Staff = "o.AddPolicy(\"Staff\", p => p.RequireRole(\"Staff\"));";
+
+    [Theory]
+    [InlineData("", ".RequireAuthorization(\"Staff\")", "RIV4009")]
+    [InlineData(
+        $"services.AddAuthorization(o => {{ {Staff} }});",
+        ".RequireAuthorization(\"Staff\")",
+        null
+    )]
+    // ASP.NET looks a policy up ignoring case.
+    [InlineData(
+        $"services.AddAuthorization(o => {{ {Staff} }});",
+        ".RequireAuthorization(\"STAFF\")",
+        null
+    )]
+    [InlineData(
+        "services.AddAuthorization(o => o.AddPolicy(\"open\", new AuthorizationPolicyBuilder().RequireAssertion(_ => true).Build()));",
+        ".RequireAuthorization(\"open\")",
+        Case1
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().AddPolicy(\"open\", p => p.RequireAssertion(context => { return true; }));",
+        ".RequireAuthorization(\"open\")",
+        Case1
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().AddDefaultPolicy(\"signed-in\", p => p.RequireAuthenticatedUser());",
+        ".RequireAuthorization(\"signed-in\")",
+        null
+    )]
+    [InlineData(
+        "services.AddAuthorizationBuilder().AddFallbackPolicy(\"open\", p => p.RequireAssertion(_ => true));",
+        ".RequireAuthorization(\"open\")",
+        Case1
+    )]
+    // Two registrations that agree decide it; ones that disagree leave which runs last unread.
+    [InlineData(
+        $"services.AddAuthorization(o => {{ {Staff} }}); services.AddAuthorization(o => o.AddPolicy(\"Staff\", p => p.RequireAuthenticatedUser()));",
+        ".RequireAuthorization(\"Staff\")",
+        null
+    )]
+    [InlineData(
+        $"services.AddAuthorization(o => {{ {Staff} }}); services.AddAuthorization(o => o.AddPolicy(\"Staff\", p => p.RequireAssertion(_ => true)));",
+        ".RequireAuthorization(\"Staff\")",
+        "RIV4009"
+    )]
+    // A registration under a condition may not run, and then the name means nothing.
+    [InlineData(
+        $"services.AddAuthorization(o => {{ if (flag) {Staff} }});",
+        ".RequireAuthorization(\"Staff\")",
+        "RIV4009"
+    )]
+    // A registration whose name or body --check can't read.
+    [InlineData(
+        $"services.AddAuthorization(o => {{ {Staff} o.AddPolicy(app.Configuration[\"Name\"]!, p => p.RequireAssertion(_ => true)); }});",
+        ".RequireAuthorization(\"Staff\")",
+        "RIV4009"
+    )]
+    [InlineData(
+        "services.AddAuthorization(o => o.AddPolicy(\"Staff\", policyFromOutside));",
+        ".RequireAuthorization(\"Staff\")",
+        "RIV4009"
+    )]
+    // A policy provider serves names its own way.
+    [InlineData(
+        $"services.AddAuthorization(o => {{ {Staff} }}); services.AddSingleton<IAuthorizationPolicyProvider, DefaultAuthorizationPolicyProvider>();",
+        ".RequireAuthorization(\"Staff\")",
+        "RIV4009"
+    )]
+    [InlineData(
+        $"services.AddAuthorization(o => {{ {Staff} }}); services.Replace(ServiceDescriptor.Singleton<IAuthorizationPolicyProvider, DefaultAuthorizationPolicyProvider>());",
+        ".RequireAuthorization(\"Staff\")",
+        "RIV4009"
+    )]
+    // An empty name is no name: the default policy.
+    [InlineData("", ".RequireAuthorization(\"\")", null)]
+    public void Named_policy_is_read_from_its_registration(
+        string setup,
+        string convention,
+        string? expected
+    )
+    {
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
             App($"{setup} app.MapGet(\"/api/items\", {Handler}){convention};")
         );
 
         AssertVerdict(warnings, expected);
+    }
+
+    [Theory]
+    // A policy provider beside the registration, or the registration under a condition.
+    [InlineData("")]
+    [InlineData("if (flag) ")]
+    public void Named_policy_with_no_readable_registration_says_why(string condition)
+    {
+        var provider =
+            condition.Length == 0
+                ? " services.AddSingleton<IAuthorizationPolicyProvider, DefaultAuthorizationPolicyProvider>();"
+                : "";
+        var warning = Assert.Single(
+            Security(
+                Check(
+                    Contract(assembly: SecuredDefault),
+                    App(
+                        $"services.AddAuthorization(o => {{ {condition}{Staff} }});{provider}"
+                            + $" app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(\"Staff\");"
+                    )
+                )
+            )
+        );
+
+        Assert.Equal(CoverageWarningKind.AuthorizationUnreadable, warning.Kind);
+        Assert.Contains("policy 'Staff' ", warning.Message);
+        Assert.Contains(
+            condition.Length == 0
+                ? "IAuthorizationPolicyProvider registered at"
+                : "only under if (flag)",
+            warning.Message
+        );
+        Assert.Contains("a policy name registered inline with AddPolicy", warning.Message);
+    }
+
+    [Fact]
+    public void Unregistered_policy_name_says_so()
+    {
+        var warning = Assert.Single(
+            Security(
+                Check(
+                    Contract(assembly: SecuredDefault),
+                    App($"app.MapGet(\"/api/items\", {Handler}).RequireAuthorization(\"Nobody\");")
+                )
+            )
+        );
+
+        Assert.Equal(CoverageWarningKind.AuthorizationUnreadable, warning.Kind);
+        Assert.Contains("no registration --check can read for policy 'Nobody'", warning.Message);
     }
 
     [Fact]
@@ -1716,7 +2283,7 @@ public sealed class SecurityCoverageTests
         var result = CliRunner.RunCli(work.FullName, [sourcePath, "--output", outputDir]);
 
         Assert.True(result.ExitCode == 0, result.StdErr);
-        Assert.DoesNotContain("Aborting", result.StdErr);
+        Assert.DoesNotContain("RIV1126", result.StdErr);
         Assert.True(File.Exists(Path.Combine(outputDir, "openapi.json")), result.StdErr);
     }
 }

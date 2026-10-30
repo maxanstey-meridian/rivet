@@ -134,8 +134,9 @@ An object schema says nothing about members beyond its properties unless the typ
 - **`[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]`** closes it: the host
   refuses a request carrying a member the type doesn't declare, so the schema says
   `additionalProperties: false`. The attribute isn't inherited (System.Text.Json reads it off
-  the type itself), so neither is the `false`. On a polymorphic variant it's fine: the
-  discriminator is one of the variant's own properties. Disallow beside a bag is a pair
+  the type itself), so neither is the `false`. A polymorphic variant read through its base is
+  fine, since the base reads the discriminator; read on its own, though, System.Text.Json
+  turns the discriminator away as a member the variant doesn't declare. Disallow beside a bag is a pair
   System.Text.Json refuses outright, and so does Rivet (`RIV1118`): the bag exists to take
   exactly the members Disallow turns away. The host-wide `UnmappedMemberHandling` option is
   a different story: generation can't see it, so the runtime adapters refuse it (see
@@ -150,6 +151,26 @@ keyword an import preserves: a schema that leaves `additionalProperties` out (wh
 reads as "anything else goes") comes back without it, and one that writes
 `additionalProperties: {}` comes back with it. The importer records which on the type
 (`[RivetGeneratedType(..., DeclaresAdditionalProperties = true)]`).
+
+An imported record whose source says `additionalProperties: false` is
+`[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]`, so the host turns away an
+unknown member, as the spec does, instead of quietly dropping it. That goes for a component, a
+property-less component, and an inline object with properties alike. Some closed schemas
+contradict themselves, though, and those records stay open, with `RIV3033` naming each one
+and why:
+
+- one another record extends (an `allOf` hierarchy's base), whose `false` refuses the very
+  members the child adds;
+- an `allOf` composition with a closed part, or a component an `allOf` composes, since allOf
+  applies a closed part's `false` to the members every other part brings;
+- a polymorphic variant, whose discriminator the record leaves to its base, so System.Text.Json
+  would turn the variant's own tag away wherever it's read on its own;
+- a generic template instance, when the same template also serves instances that aren't closed,
+  since one C# type serves them all.
+
+The spec still says `additionalProperties: false` for every one of them. An inline
+`{"type": "object", "additionalProperties": false}` with no properties isn't a record at all:
+it imports as a dictionary, which has no members to be unknown.
 
 ## Constraint and metadata flow
 

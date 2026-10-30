@@ -759,7 +759,12 @@ public static class EndpointWalker
                             HostOf(method) == ParameterBindingHost.MinimalApi
                                 ? FormBinding.FormHosts.MinimalApi
                                 : FormBinding.FormHosts.Mvc,
-                            where
+                            where,
+                            // MVC's model binder reads the parameter's [Bind] include list;
+                            // the form mapper reads none.
+                            HostOf(method) == ParameterBindingHost.Mvc
+                                ? param.GetAttributes()
+                                : null
                         ),
                         formInputTypeName,
                         HostOf(method) == ParameterBindingHost.Mvc

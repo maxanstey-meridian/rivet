@@ -193,9 +193,71 @@ public sealed class CliExitCodeTests
         );
 
         Assert.Equal(1, verify.ExitCode);
+        Assert.Contains("error RIV2020: ", verify.StdErr);
         Assert.Contains("is stale", verify.StdErr);
         // The committed spec is left untouched by the failed verification.
         Assert.Equal(committed, await File.ReadAllTextAsync(specPath));
+    }
+
+    [Fact]
+    public async Task Verification_Without_A_Committed_Spec_Fails_Without_Writing_One()
+    {
+        using var work = new TempDir();
+        var sourcePath = await WriteSourceAsync(work, "Api.cs", CoveredSource);
+        var outputDir = Path.Combine(work.FullName, "output");
+
+        var verify = CliRunner.RunCli(
+            work.FullName,
+            [sourcePath, "--verify", "--output", outputDir]
+        );
+
+        Assert.Equal(1, verify.ExitCode);
+        Assert.Contains("error RIV2020: ", verify.StdErr);
+        Assert.Contains("does not exist", verify.StdErr);
+        Assert.False(File.Exists(Path.Combine(outputDir, "openapi.json")));
+    }
+
+    [Theory]
+    [InlineData("--from", "contract.json")]
+    [InlineData("--from-openapi", "openapi.json")]
+    [InlineData("", "Api.cs")]
+    [InlineData("--project", "Api.csproj")]
+    public void Missing_Input_Path_Exits_1_Naming_It(string flag, string fileName)
+    {
+        using var work = new TempDir();
+        var missingPath = Path.Combine(work.FullName, fileName);
+        var outputDir = Path.Combine(work.FullName, "output");
+
+        var result = CliRunner.RunCli(
+            work.FullName,
+            [.. flag == "" ? new[] { missingPath } : [flag, missingPath], "--output", outputDir]
+        );
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("error RIV2021: ", result.StdErr);
+        Assert.Contains(missingPath, result.StdErr);
+        Assert.DoesNotContain("   at ", result.StdErr);
+        Assert.False(Directory.Exists(outputDir), "nothing should be written");
+    }
+
+    [Fact]
+    public async Task Source_That_Does_Not_Compile_Exits_1_Listing_The_Compiler_Errors()
+    {
+        using var work = new TempDir();
+        var sourcePath = await WriteSourceAsync(
+            work,
+            "Api.cs",
+            CoveredSource + "\npublic sealed class Broken { private int _x = ; }\n"
+        );
+        var outputDir = Path.Combine(work.FullName, "output");
+
+        var result = CliRunner.RunCli(work.FullName, [sourcePath, "--output", outputDir]);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("error RIV1126: ", result.StdErr);
+        Assert.Contains("error CS1525", result.StdErr);
+        Assert.DoesNotContain("   at ", result.StdErr);
+        Assert.False(Directory.Exists(outputDir), "nothing should be written");
     }
 
     [Fact]

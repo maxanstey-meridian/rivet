@@ -22,10 +22,30 @@ A `Map*` route can be a string constant or the contract field's own `.Route`, as
 way: the contract owns the full path, so a group prefix it doesn't declare is a
 `RouteMismatch`. A convention on the group doesn't lose it, so
 `var api = app.MapGroup("/api").RequireAuthorization();` still prefixes
-`api.MapGet(…)`. Anything else (a variable, concatenation, interpolation, a `MapGroup`
-prefix that isn't a constant, or a route group `--check` can't trace back to its
-`MapGroup` call, such as a parameter, a field, or what a helper returns) is reported as
-an unresolved `RouteMismatch`, because `--check` won't guess a route.
+`api.MapGet(…)`.
+
+Route-group helpers are followed both ways: into what a helper returns, and out of a
+helper's parameter to every call that passes it. So ASP.NET's own pattern,
+`app.MapGroup("/todos").MapTodos()` over
+`static RouteGroupBuilder MapTodos(this RouteGroupBuilder group) { group.MapGet(…); return group; }`,
+maps at `/todos/…`, and so does a `this IEndpointRouteBuilder` helper called on that group.
+A helper that returns a new group, as in
+`static RouteGroupBuilder V2(this RouteGroupBuilder group) => group.MapGroup("/v2")`, is
+that new group, `/v2` and all, not the one it was handed. A helper you call from two groups
+maps its handlers twice, and each mapping is checked under its own prefix and its own
+group's authorization; when a handler has more than one mapping, each warning says which
+one it's about.
+
+A builder handed in from outside the project is read as the app: an `IEndpointRouteBuilder`
+parameter nothing in the project passes (a framework-invoked `AddRoutes(app)`, or
+`Startup.Configure`), or a lambda's. That's a limit, not a check: if such a builder is really
+a route group (a module called through an interface, say), its prefix and its conventions
+are out of sight. A `RouteGroupBuilder` parameter nothing passes is never read as the app,
+since its type says it's a group. Anything else (a variable, concatenation, interpolation, a
+`MapGroup` prefix that isn't a constant, or a builder `--check` can't follow to its
+`MapGroup` call or the app, such as a field, a group parameter nothing passes, or what a
+helper without source returns) is reported as an unresolved `RouteMismatch`, because
+`--check` won't guess a route.
 
 `--check` reports eight kinds of finding on stderr. The first four are warnings; `UnbindableEnumParameter` (`RIV4005`), `InputBindingMismatch` (`RIV4006`), `SecurityMismatch` (`RIV4008`), and `AuthorizationUnreadable` (`RIV4009`) are errors:
 
@@ -121,8 +141,19 @@ there. And because every MVC answer depends on whether `[ApiController]` infers 
 sources, a `SuppressInferBindingSourcesForParameters` set to anything but a constant stops
 the check with `RIV1115` instead of letting it guess. Members MVC reads under a prefix keep
 it when renamed (`?f.q=`), and header members never take one. `[Bind(Prefix = "f")]`, on
-the parameter or on its class, sets the same prefix, and a member's `[BindProperty(Name =
-...)]` renames it like a `[FromQuery(Name = ...)]` would.
+the parameter, its class, or a base class, sets the same prefix, and a member's
+`[BindProperty(Name = ...)]` renames it like a `[FromQuery(Name = ...)]` would.
+
+MVC binds only what its filters let through, and so does the check. A `[Bind("Title",
+"Body")]` include list on the parameter and one on its class both apply, a nested member's
+class's own list applies wherever it's bound, and `[BindNever]` or
+`[BindingBehavior(BindingBehavior.Never)]` skips a member, whether it sits on the member or
+on its class (a member's own behaviour wins over its class's). The minimal-API form mapper
+reads none of them. Any other property filter (an `IPropertyFilterProvider`) stops the check
+with `RIV1115`, since MVC runs its code to choose the members. `[ApiController]` inference
+reads none of these filters either: an unattributed complex parameter is a body unless a
+property MVC lists for it carries its own binding source, and a positional record's
+constructor parameters don't count.
 
 A minimal API's `[FromForm]` record plays by different rules, because it goes through the
 form mapper rather than model binding. The mapper reads every member from the form under
@@ -245,6 +276,9 @@ the generation flags would compare against a different spec from the one you shi
   `o.FallbackPolicy = o.DefaultPolicy` copies. ASP.NET's own requires an authenticated user;
   one you set (`o.DefaultPolicy = ...`, `SetDefaultPolicy(...)`, or
   `AddDefaultPolicy(name, ...)`) is read like any other policy;
+- a named policy's registration, which is what a policy name means
+  (`[Authorize(Policy = "Staff")]`, `RequireAuthorization("Staff")`, or
+  `new AuthorizeFilter("Staff")`);
 - for Azure Functions, the trigger's `AuthorizationLevel`. `Anonymous` lets anyone in; any
   other level needs a key, and leaving the level out means the attribute's default,
   `Function`.
@@ -260,20 +294,51 @@ builder.Services.AddControllers(options => options.Filters.Add(new AuthorizeFilt
 Every action requires an authenticated user, apart from the ones (or the controllers) marked
 `[AllowAnonymous]`.
 
-A policy counts as requiring authentication when it's a policy name (a constant), an
-`[Authorize]`-style `IAuthorizeData`, or built inline from `AuthorizationPolicyBuilder`'s
-user requirements (`RequireAuthenticatedUser`, `RequireRole`, `RequireClaim`,
-`RequireUserName`), held in a local or not, as in
+A policy counts as requiring authentication when it's built inline with one of
+`AuthorizationPolicyBuilder`'s user requirements (`RequireAuthenticatedUser`, `RequireRole`,
+`RequireClaim`, `RequireUserName`), held in a local or not, as in
 `new AuthorizeFilter(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())` or
-`.RequireAuthorization(policy => policy.RequireRole("Staff"))`. A requirement it can't read
-(`RequireAssertion`, a policy from a parameter, a field, or a method call) makes the verdict
-unknown rather than guessed.
+`.RequireAuthorization(policy => policy.RequireRole("Staff"))`, and when an
+`[Authorize]`-style `IAuthorizeData` names roles. A caller passes a policy only when every
+requirement in it passes, and each of those four turns an anonymous caller away, so one of
+them decides the policy whatever else it holds: an assertion, a custom requirement, or
+anything else `--check` can't read. In a configure lambda it counts only where it always
+runs, so `policy => { if (strict) policy.RequireRole("Staff"); }` is unknown. A policy whose only requirement is
+`RequireAssertion(_ => true)` lets anyone in: it's how an app says "open" under a fallback
+policy that requires a user. ASP.NET combines every policy on an endpoint into one that needs
+all their requirements, so a single policy that requires a user decides it.
 
-`--check` follows a builder the way it follows a route: through a local, through convention
-calls that hand the builder back (`.WithName(...)`, `.RequireAuthorization()`), through a
-helper that returns one, and into a helper you pass it to, at each call site. A convention on
-a builder it can't trace to its `Map*` call (a lambda's parameter, a field, or a method handed
-on as a delegate) may cover any endpoint on that host, so those endpoints become `RIV4009`.
+A policy name means the policy registered under it, with
+`AddAuthorization(o => o.AddPolicy("Staff", p => p.RequireRole("Staff")))` or
+`AddAuthorizationBuilder()`'s `AddPolicy`, `AddDefaultPolicy`, or `AddFallbackPolicy`, and
+looked up ignoring case, as ASP.NET does. So `[Authorize(Policy = "open")]` over a policy
+registered with `RequireAssertion(_ => true)` lets anyone in, and the fallback policy stays
+out of it, since the endpoint has authorization of its own. A name without a registration
+`--check` can read is `RIV4009`: a name nothing registers, one registered only under a
+condition, one whose policy it can't read (`AddPolicy("Staff", policyFromConfig)`), and every
+name once the app registers a policy under a name it can't read
+(`o.AddPolicy(config["Name"], ...)`) or registers its own `IAuthorizationPolicyProvider`,
+since either may serve any name. A policy provider registered where `--check` can't see it,
+such as inside a library's extension method, is invisible, so names are read from their
+`AddPolicy` registrations as though it weren't there. An `IAuthorizeData` attribute of your
+own that takes constructor arguments may set its policy or roles in that constructor, where
+`--check` doesn't look, so it's unknown too.
+
+Any other policy (one whose requirements, without a user requirement among them, include a
+`RequireAssertion` whose lambda isn't the constant `true` or a custom requirement, or a
+policy from a parameter, a field, or a method call) makes the verdict unknown rather than
+guessed.
+
+`--check` follows a builder for authorization exactly as it does for a route: through a
+local, through convention calls that hand the builder back (`.WithName(...)`,
+`.RequireAuthorization()`), into a helper that returns one, and out of a helper you pass it
+to, at each call site. A requirement on what a helper returns covers only that call's group:
+after `var v2 = api.V2(); v2.RequireAuthorization();`, what's mapped on `v2` requires a user
+and what's mapped on `api` doesn't, and a group made inside a helper is a new group at every
+call. A requirement in the helper's own body reaches each of them. A convention on a builder
+it can't trace to its `Map*` call (a lambda's parameter, a field, or a method handed on as a
+delegate) may cover any endpoint on that host, so those endpoints become `RIV4009`, and so
+does an endpoint mapped on a builder it can't follow to its `MapGroup` call or the app.
 
 App-wide setup in a helper (an `AuthorizeFilter`, or a fallback or default policy) applies
 where the helper is called: under that call's condition, unconditionally if any call is, and
@@ -356,6 +421,29 @@ action under that conditional `RequireAuthorization()` is anonymous either way, 
 a conditional requirement on an endpoint that the fallback policy would secure anyway, nor a
 bare `[Authorize]` under a default policy set only when `entraEnabled`, if that policy
 requires an authenticated user just as ASP.NET's own default does.
+
+Sites under one condition fall together. A group's `RequireAuthorization()` under
+`if (entraEnabled)` beside an endpoint's `AllowAnonymous()` under another
+`if (entraEnabled)` leaves the endpoint anonymous either way, and the two branches of one
+`if` that each require a user require one either way, so neither is `RIV4009`. Two
+conditions are one when they're the same `if` or `?:`, whose two branches are each other's
+opposite, or when each reads the same `const`, `static readonly` field, or local with one
+known value, with or without a `!`. A fallback policy set under such a condition joins in
+when it's the only place the fallback is set and it requires a user, so
+`if (entraEnabled) o.FallbackPolicy = …` beside `if (!entraEnabled) endpoint.RequireAuthorization()`
+requires a user either way.
+
+Anything else stays its own unknown: a site under two conditions, a `switch`, a loop, `&&`
+or `||`, a method call, or a parameter. So does a condition inside a method that may run
+more than once, or under its callers' conditions as well as its own: a condition counts
+when the requirement and the group or endpoint it's applied to are made in the same method,
+which runs them together, or when it's in top-level statements or the entry point, which run
+exactly once. A `const` or `static readonly` field holds one value everywhere, so a
+requirement under one counts in any method. App-wide setup has no group of its own, so a
+filter or policy set under a condition falls together with the rest only in top-level
+statements or the entry point, configure lambdas included, and never in a
+`ConfigureServices` or an extension method. If you want
+`--check` to see a switch once, read it where the app starts.
 
 The cure is to apply authorization unconditionally. If a development environment really
 does run without authentication, give it a development authentication handler that signs

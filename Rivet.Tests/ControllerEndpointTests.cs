@@ -681,6 +681,65 @@ public sealed class ControllerEndpointTests
     }
 
     [Fact]
+    public void An_actions_Bind_list_limits_its_form_records_parts()
+    {
+        // MVC binds what the parameter's [Bind] names (MvcBindingHostTests pins it); a static
+        // method is a minimal-API handler, whose form mapper reads no [Bind].
+        var source = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Mvc;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed class PostForm
+            {
+                public string? Title { get; set; }
+
+                public string? Body { get; set; }
+            }
+
+            [RivetType]
+            public sealed record PostDto(string Title);
+
+            public sealed class PostsController : ControllerBase
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/posts")]
+                [ProducesResponseType(typeof(PostDto), 200)]
+                public Task<IActionResult> Create([FromForm, Bind("Title")] PostForm form)
+                    => throw new NotImplementedException();
+            }
+
+            public static class Endpoints
+            {
+                [RivetEndpoint]
+                [HttpPost("/api/drafts")]
+                [ProducesResponseType(typeof(PostDto), 200)]
+                public static Task<IActionResult> Draft([FromForm, Bind("Title")] PostForm form)
+                    => throw new NotImplementedException();
+            }
+            """;
+
+        var endpoints = WalkEndpoints(source);
+
+        Assert.Equal(
+            [("title", ParamSource.FormField)],
+            endpoints
+                .Single(endpoint => endpoint.RouteTemplate == "/api/posts")
+                .Params.Select(param => (param.Name, param.Source))
+        );
+        Assert.Equal(
+            [("title", ParamSource.FormField), ("body", ParamSource.FormField)],
+            endpoints
+                .Single(endpoint => endpoint.RouteTemplate == "/api/drafts")
+                .Params.Select(param => (param.Name, param.Source))
+        );
+    }
+
+    [Fact]
     public void RivetClient_AutoDiscovered_Method_Preserves_Request_And_Response_Examples()
     {
         var source = """

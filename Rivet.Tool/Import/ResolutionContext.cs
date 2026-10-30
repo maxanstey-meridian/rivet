@@ -118,7 +118,8 @@ internal sealed class ResolutionContext(List<string> warnings)
             && (a.TypeParameters ?? []).SequenceEqual(b.TypeParameters ?? [])
             && a.Description == b.Description
             && a.HasExtensionData == b.HasExtensionData
-            && a.DeclaresAdditionalProperties == b.DeclaresAdditionalProperties;
+            && a.DeclaresAdditionalProperties == b.DeclaresAdditionalProperties
+            && a.IsClosed == b.IsClosed;
     }
 
     public List<GeneratedEnum> ExtraEnums { get; } = [];
@@ -143,6 +144,32 @@ internal sealed class ResolutionContext(List<string> warnings)
     {
         MappedComponentRecords[name] = replacement;
         ComponentRecordOverrides[name] = replacement;
+    }
+
+    /// <summary>
+    /// Each component record an allOf composes as a <c>$ref</c>'d branch, with the first
+    /// composition that does. A closed branch can't be closed on its own (RIV3033).
+    /// </summary>
+    public Dictionary<string, string> AllOfBranches { get; } = new(StringComparer.Ordinal);
+
+    private readonly HashSet<string> _closedSchemasLeftOpen = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Warns, once per schema, that <paramref name="name"/> says additionalProperties: false
+    /// but its record stays open, because of <paramref name="why"/> (RIV3033).
+    /// </summary>
+    public void WarnClosedSchemaLeftOpen(string name, string why)
+    {
+        if (_closedSchemasLeftOpen.Add(name))
+        {
+            Warnings.Add(
+                Diagnostics.Prefix(
+                    Diagnostics.ImportClosedSchemaLeftOpen,
+                    $"Closed schema imported open: '{name}' says additionalProperties: false, but {why}. "
+                        + "Its record accepts and drops an unknown member instead of refusing it."
+                )
+            );
+        }
     }
 
     public List<string> Warnings { get; } = warnings;

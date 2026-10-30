@@ -37,6 +37,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                 var refName = ctx.TypeName(
                     SchemaMapper.DecodeComponentId(elementRef.Reference.Id)!
                 );
+                ctx.AllOfBranches.TryAdd(refName, name);
 
                 if (visited.Contains(refName))
                 {
@@ -281,6 +282,12 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         return union;
     }
 
+    /// <summary>
+    /// <paramref name="record"/>, an allOf composition's merged branches, with
+    /// <paramref name="schema"/>'s own sibling properties added. A composition is never closed:
+    /// allOf applies a closed part's <c>additionalProperties: false</c> to the members every
+    /// other part adds, so the schema contradicts itself (RIV3033).
+    /// </summary>
     public GeneratedRecord MergeWithSiblingProperties(
         GeneratedRecord record,
         IOpenApiSchema schema,
@@ -288,6 +295,19 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         ISet<string>? inheritedRequired = null
     )
     {
+        if (
+            !schema.AdditionalPropertiesAllowed
+            || schema.AllOf?.Any(branch =>
+                branch is not OpenApiSchemaReference && !branch.AdditionalPropertiesAllowed
+            ) == true
+        )
+        {
+            ctx.WarnClosedSchemaLeftOpen(
+                name,
+                "it is an allOf composition, where a closed part refuses the members the other parts add"
+            );
+        }
+
         if (schema.Properties is not { Count: > 0 })
         {
             return record with
@@ -347,7 +367,8 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             Description: description,
             SchemaMetadata: SchemaMapper.CollectGeneratedSchemaMetadata(schema),
             HasExtensionData: schema.AdditionalPropertiesAllowed,
-            DeclaresAdditionalProperties: SchemaClassifier.DeclaresAdditionalProperties(schema)
+            DeclaresAdditionalProperties: SchemaClassifier.DeclaresAdditionalProperties(schema),
+            IsClosed: !schema.AdditionalPropertiesAllowed
         );
     }
 
@@ -357,23 +378,38 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         IDictionary<string, IOpenApiSchema> schemas
     )
     {
-        // Find the first monomorphised instance to derive the template properties
-        IOpenApiSchema? firstInstance = null;
-        foreach (var (key, schema) in schemas)
-        {
-            if (
-                SchemaClassifier.TryGetGenericExtension(schema, out var schemaInfo)
+        // The first monomorphised instance derives the template properties; the template is
+        // closed only when every instance is, since one C# type serves them all.
+        var instances = schemas
+            .Where(entry =>
+                SchemaClassifier.TryGetGenericExtension(entry.Value, out var schemaInfo)
                 && schemaInfo!.Name == templateName
             )
-            {
-                firstInstance = schema;
-                break;
-            }
-        }
-
-        if (firstInstance is null)
+            .ToList();
+        if (instances.Count == 0)
         {
             return null;
+        }
+
+        var firstInstance = instances[0].Value;
+        var openInstances = instances
+            .Where(entry => entry.Value.AdditionalPropertiesAllowed)
+            .Select(entry => $"'{entry.Key}'")
+            .ToList();
+        if (openInstances.Count > 0)
+        {
+            foreach (
+                var (key, _) in instances.Where(entry => !entry.Value.AdditionalPropertiesAllowed)
+            )
+            {
+                ctx.WarnClosedSchemaLeftOpen(
+                    key,
+                    $"it is an instance of the generic template '{templateName}', which serves "
+                        + $"{string.Join(", ", openInstances)} too, and "
+                        + (openInstances.Count == 1 ? "that doesn't" : "those don't")
+                        + " say so"
+                );
+            }
         }
 
         // Extract properties from the monomorphised instance
@@ -406,7 +442,8 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             HasExtensionData: firstInstance.AdditionalPropertiesAllowed,
             DeclaresAdditionalProperties: SchemaClassifier.DeclaresAdditionalProperties(
                 firstInstance
-            )
+            ),
+            IsClosed: openInstances.Count == 0
         );
     }
 

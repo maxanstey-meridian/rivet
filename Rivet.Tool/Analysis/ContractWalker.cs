@@ -1063,38 +1063,46 @@ public static class ContractWalker
         if (lowersBody)
         {
             var requestBodyType = GetRequestBodyType(
+                compilation,
+                wkt,
                 field,
                 declaredRequestBody,
                 tInput,
+                isFormFileInput || hasFormFileProperty,
                 routeParamNames,
                 typeWalker
             );
 
             // A form record (one with files, or a .FormEncoded() one, or one whose declared
             // request content is a form, as import writes a multipart body with no file in it,
-            // and the runtime binds it; with no declared body type) lowers to parts; a JSON
-            // one to a body param.
-            var formBody =
-                tInput is not null
-                && (
-                    hasFormFileProperty
-                    || (
-                        isFormEncoded
-                        || requestContents.Any(content =>
-                            !content.IsBinary && RequestInputLowering.IsForm(content.MediaType)
-                        )
-                    )
-                        && requestBodyType is null
-                        && typeWalker.IsParamLowerable(tInput)
+            // and the runtime binds it) lowers to parts; a JSON one to a body param. The parts
+            // are TInput's when it carries files, since TInput alone makes the body multipart
+            // (RequestInputLowering, as the runtime decides it), and otherwise a
+            // [RivetRequestBody] type's, named as the form binders read them like any other's.
+            var formDeclared =
+                isFormEncoded
+                || requestContents.Any(content =>
+                    !content.IsBinary && RequestInputLowering.IsForm(content.MediaType)
                 );
+            var formType =
+                tInput is null ? null
+                : hasFormFileProperty ? tInput
+                : !formDeclared ? null
+                : requestBodyType is not null ? declaredRequestBody!.BodyType!
+                : tInput;
+            var formBody =
+                formType is not null
+                && (hasFormFileProperty || typeWalker.IsParamLowerable(formType));
+            var formIsInput = formBody && SymbolEqualityComparer.Default.Equals(formType, tInput);
 
             // Route params from template — try to match types from TInput properties: a form
             // body's from the one member list its parts come from (a package base's included),
-            // a JSON body's from the flattened member surface (incl. inherited).
+            // a JSON body's, or one a [RivetRequestBody] type declares, from the flattened
+            // member surface (incl. inherited).
             var routeMatchedProps = new HashSet<string>(StringComparer.Ordinal);
             var routeCandidates =
                 tInput is null ? []
-                : formBody ? formBound.Cast<ISymbol>().ToList()
+                : formIsInput ? formBound.Cast<ISymbol>().ToList()
                 : typeWalker.GetEffectiveProperties(tInput).ToList();
             foreach (var paramName in routeParamNames)
             {
@@ -1122,14 +1130,15 @@ public static class ContractWalker
             }
 
             // The parts of a form record, or null for a JSON one. Both hosts can serve a
-            // contract.
+            // contract. No route value binds a [RivetRequestBody] type's member, so all of
+            // them are parts.
             IReadOnlyList<FormBinding.FormPart>? FormParts() =>
                 formBody
                     ? FormBinding.Parts(
                         wkt,
                         typeWalker,
-                        tInput!,
-                        routeMatchedProps,
+                        formType!,
+                        formIsInput ? routeMatchedProps : new HashSet<string>(),
                         FormBinding.FormHosts.Any,
                         where
                     )
@@ -1157,14 +1166,14 @@ public static class ContractWalker
                 // its (empty) body below, as a JSON one does.
                 else if (
                     FormParts() is { } parts
-                    && (parts.Count > 0 || routeMatchedProps.Count > 0)
+                    && (parts.Count > 0 || formIsInput && routeMatchedProps.Count > 0)
                 )
                 {
-                    // The body is described from the input's definition: the emitter $refs
-                    // its component when that lists exactly the parts under the same names,
-                    // and otherwise spells the parts out inline, each carrying its property's
-                    // schema. BodyPropertyName says which property a part is.
-                    inputTypeName = typeWalker.MapType(tInput, $"form input '{tInput.Name}'")
+                    // The body is described from the form type's definition: the emitter
+                    // $refs its component when that lists exactly the parts under the same
+                    // names, and otherwise spells the parts out inline, each carrying its
+                    // property's schema. BodyPropertyName says which property a part is.
+                    inputTypeName = typeWalker.MapType(formType!, $"form input '{formType!.Name}'")
                         is TsType.TypeRef typeRef
                         ? typeRef.Name
                         : null;
@@ -1610,10 +1619,20 @@ public static class ContractWalker
             )
             : null;
 
+    /// <summary>
+    /// The body a <c>[RivetRequestBody(typeof(X))]</c> declares, or null with none. <c>X</c> must
+    /// be what the input carries: the type of one of its non-route members, or a type whose
+    /// every member the input declares under the same JSON name, type, and optionality. It
+    /// can't carry files the input doesn't, since the input alone makes a body multipart
+    /// (<see cref="RequestInputLowering"/>, as the runtime decides it). Either is <c>RIV1022</c>.
+    /// </summary>
     private static TsType? GetRequestBodyType(
+        Compilation compilation,
+        WellKnownTypes wkt,
         IFieldSymbol field,
         DeclaredRequestBody? declaredRequestBody,
         ITypeSymbol? inputType,
+        bool inputCarriesFiles,
         IReadOnlySet<string> routeParamNames,
         TypeWalker typeWalker
     )
@@ -1623,6 +1642,8 @@ public static class ContractWalker
             return null;
         }
 
+        var declares =
+            $"endpoint '{field.ContainingType.Name}.{field.Name}' declares request body type '{bodyType.Name}'";
         if (
             inputType is null
             || !IsCompatibleRequestBodyType(bodyType, inputType, routeParamNames, typeWalker)
@@ -1630,8 +1651,28 @@ public static class ContractWalker
         {
             throw Diagnostics.Error(
                 Diagnostics.InvalidRequestBodyProvenance,
-                $"endpoint '{field.ContainingType.Name}.{field.Name}' "
-                    + $"declares request body type '{bodyType.Name}', which is not represented independently by its input type '{inputType?.Name}'"
+                $"{declares}, which is not represented independently by its input type '{inputType?.Name}'. "
+                    + "Declare the type of one of the input's non-route members, or a type whose every "
+                    + "member the input declares under the same JSON name, type, and optionality, or "
+                    + "remove the attribute."
+            );
+        }
+
+        if (
+            !inputCarriesFiles
+            && (
+                FormBinding.CarriesFiles(wkt, typeWalker, bodyType)
+                || FormBinding
+                    .FormBoundProperties(compilation, bodyType)
+                    .Any(property => FormBinding.CarriesFiles(wkt, typeWalker, property.Type))
+            )
+        )
+        {
+            throw Diagnostics.Error(
+                Diagnostics.InvalidRequestBodyProvenance,
+                $"{declares}, which carries files, but its input type '{inputType.Name}' carries none. "
+                    + "The input type alone makes a body multipart, as the runtime decides it, so a "
+                    + "declared body type can't add a file to it. Put the file on the input type."
             );
         }
 

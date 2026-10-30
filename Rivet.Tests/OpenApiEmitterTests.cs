@@ -4516,6 +4516,189 @@ public sealed class OpenApiEmitterTests
     }
 
     [Fact]
+    public void Form_field_serialization_goes_in_the_encoding_and_its_named_examples_join_its_schema()
+    {
+        // Decision 7: contract JSON's form-field style, explode, allowReserved, and named
+        // examples used to be dropped without a word.
+        static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement;
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "search",
+                "POST",
+                "/api/search",
+                [
+                    new TsEndpointParam(
+                        "tags",
+                        new TsType.Array(new TsType.Primitive("string")),
+                        ParamSource.FormField,
+                        Style: "form",
+                        Explode: false,
+                        AllowReserved: true
+                    ),
+                    new TsEndpointParam(
+                        "count",
+                        new TsType.Primitive("number"),
+                        ParamSource.FormField,
+                        SchemaExamples: Json("[0]"),
+                        Examples: Json(
+                            """
+                            {
+                              "a": { "value": 1 },
+                              "b": { "summary": "x", "value": 2 },
+                              "c": { "externalValue": "https://example.com/c.json" }
+                            }
+                            """
+                        )
+                    ),
+                    new TsEndpointParam(
+                        "note",
+                        new TsType.Primitive("string"),
+                        ParamSource.FormField,
+                        AllowEmptyValue: true
+                    ),
+                    new TsEndpointParam(
+                        "plain",
+                        new TsType.Primitive("string"),
+                        ParamSource.FormField
+                    ),
+                ],
+                null,
+                "search",
+                [new TsResponseType(204, null)]
+            ),
+        };
+
+        JsonDocument? doc = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            doc = EmitOpenApiFromModel(
+                endpoints,
+                new Dictionary<string, TsTypeDefinition>(),
+                new Dictionary<string, TsType.Brand>(),
+                new Dictionary<string, TsType>()
+            )
+        );
+        using var docGuard = doc;
+
+        var media = doc!
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/search")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded");
+        var encoding = media.GetProperty("encoding");
+        var tags = Assert.Single(encoding.EnumerateObject());
+        Assert.Equal("tags", tags.Name);
+        Assert.Equal(
+            """{"style":"form","explode":false,"allowReserved":true}""",
+            JsonSerializer.Serialize(tags.Value)
+        );
+
+        var properties = media.GetProperty("schema").GetProperty("properties");
+        Assert.Equal(
+            [0, 1, 2],
+            properties
+                .GetProperty("count")
+                .GetProperty("examples")
+                .EnumerateArray()
+                .Select(value => value.GetInt32())
+        );
+        Assert.False(properties.GetProperty("note").TryGetProperty("allowEmptyValue", out _));
+
+        var warnings = stderr
+            .Split('\n')
+            .Where(line => line.StartsWith("warning RIV2019:", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, warnings.Count);
+        Assert.Contains(
+            "warning RIV2019: form field 'count' on endpoint 'search.search' drops what a form part can't carry: "
+                + "example 'b''s summary; example 'c', which has no value",
+            warnings
+        );
+        Assert.Contains(
+            "warning RIV2019: form field 'note' on endpoint 'search.search' drops what a form part can't carry: "
+                + "allowEmptyValue, which OpenAPI defines for query parameters only",
+            warnings
+        );
+    }
+
+    [Fact]
+    public void A_form_body_that_references_its_record_keeps_the_encoding_and_warns_for_the_examples()
+    {
+        // The body $refs the input's component, so no part is spelled out for an example
+        // to join; the serialization still goes in the encoding, keyed by the part's name.
+        var endpoints = new List<TsEndpointDefinition>
+        {
+            new(
+                "search",
+                "POST",
+                "/api/search",
+                [
+                    new TsEndpointParam(
+                        "tags",
+                        new TsType.Array(new TsType.Primitive("string")),
+                        ParamSource.FormField,
+                        BodyPropertyName: "tags",
+                        Examples: JsonDocument.Parse("""{ "a": { "value": ["x"] } }""").RootElement,
+                        Style: "pipeDelimited"
+                    ),
+                ],
+                null,
+                "search",
+                [new TsResponseType(204, null)],
+                InputTypeName: "SearchForm"
+            ),
+        };
+        var definitions = new Dictionary<string, TsTypeDefinition>
+        {
+            ["SearchForm"] = new(
+                "SearchForm",
+                [],
+                [
+                    new TsPropertyDefinition(
+                        "tags",
+                        new TsType.Array(new TsType.Primitive("string")),
+                        false
+                    ),
+                ]
+            ),
+        };
+
+        JsonDocument? doc = null;
+        var stderr = CompilationHelper.CaptureStdErr(() =>
+            doc = EmitOpenApiFromModel(
+                endpoints,
+                definitions,
+                new Dictionary<string, TsType.Brand>(),
+                new Dictionary<string, TsType>()
+            )
+        );
+        using var docGuard = doc;
+
+        var media = doc!
+            .RootElement.GetProperty("paths")
+            .GetProperty("/api/search")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/x-www-form-urlencoded");
+        Assert.Equal(
+            "#/components/schemas/SearchForm",
+            media.GetProperty("schema").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            """{"tags":{"style":"pipeDelimited"}}""",
+            JsonSerializer.Serialize(media.GetProperty("encoding"))
+        );
+        Assert.Contains(
+            "warning RIV2019: form field 'tags' on endpoint 'search.search' drops what a form part can't carry: "
+                + "example 'a' (the part's schema is its input record's)",
+            stderr
+        );
+    }
+
+    [Fact]
     public void Brand_Emits_Component_Schema_With_Extension()
     {
         var source = """

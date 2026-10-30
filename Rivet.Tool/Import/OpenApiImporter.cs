@@ -43,6 +43,7 @@ public static partial class OpenApiImporter
     {
         var warnings = new List<string>();
         var root = ParseJson(json);
+        DropUnimportableOperations(root, warnings);
         MergeEquivalentPathTemplates(root, warnings);
         DropExternalDiscriminatorMappings(root, warnings);
         DropUnsatisfiableSecurity(root, options.SecurityScheme, warnings);
@@ -152,10 +153,12 @@ public static partial class OpenApiImporter
 
         // Contract building may have augmented a component record with [RivetHeader]
         // properties (header-aware input reuse) — write the replacement.
-        var records = schemaResult
-            .Records.Select(record => mapper.GetComponentRecordOverride(record.Name) ?? record)
-            .Concat(mapper.ExtraRecords)
-            .ToList();
+        var records = mapper.SettleClosedRecords(
+            schemaResult
+                .Records.Select(record => mapper.GetComponentRecordOverride(record.Name) ?? record)
+                .Concat(mapper.ExtraRecords)
+                .ToList()
+        );
         var formInputs = FormInputRecordNames(records, contracts);
         foreach (var record in records)
         {
@@ -630,8 +633,8 @@ public static partial class OpenApiImporter
     /// <c>assets_jwt</c>). An operation left with no alternative can't be reached, and
     /// importing it as <c>security: []</c> would read as "no credentials needed", so it is
     /// dropped. So are the operations inheriting a document security with nothing left, unless
-    /// <c>--security</c> names a scheme for operations that declare none. This runs before
-    /// anything else reads the document, so nothing is recorded for an operation that's gone.
+    /// <c>--security</c> names a scheme for operations that declare none. This runs before any
+    /// pass records the document, so nothing is recorded for an operation that's gone.
     /// </summary>
     private static void DropUnsatisfiableSecurity(
         JsonObject root,
@@ -649,6 +652,144 @@ public static partial class OpenApiImporter
         var inheritedUnsatisfiable =
             !PruneSecurity(root, "the document", defined, warnings)
             && securitySchemeOverride is null;
+        EditPathItems(
+            root,
+            warnings,
+            (route, pathItem) =>
+            {
+                foreach (var method in OperationMethods)
+                {
+                    if (pathItem[method] is not JsonObject operation)
+                    {
+                        continue;
+                    }
+                    var operationName = $"{method.ToUpperInvariant()} {route}";
+                    var declaresSecurity = operation.ContainsKey("security");
+                    var reachable = declaresSecurity
+                        ? PruneSecurity(operation, operationName, defined, warnings)
+                        : !inheritedUnsatisfiable;
+                    if (reachable)
+                    {
+                        continue;
+                    }
+                    pathItem.Remove(method);
+                    warnings.Add(
+                        Diagnostics.Prefix(
+                            Diagnostics.ImportUnsatisfiableSecurity,
+                            $"Operation dropped: {operationName} — every security alternative it "
+                                + (declaresSecurity ? "declares" : "inherits from the document")
+                                + " names a scheme the document never defines, so no caller can satisfy it."
+                        )
+                    );
+                }
+            }
+        );
+    }
+
+    /// <summary>
+    /// Drops each operation the import can't write a contract for, with a warning saying why.
+    /// It runs first, before any pass records the document (as
+    /// <see cref="DropUnsatisfiableSecurity"/> does), so nothing is recorded for an operation
+    /// that's gone. Each reason is one rule
+    /// in <see cref="UnimportableOperation"/>.
+    /// </summary>
+    private static void DropUnimportableOperations(JsonObject root, List<string> warnings) =>
+        EditPathItems(
+            root,
+            warnings,
+            (route, pathItem) =>
+            {
+                foreach (var method in OperationMethods)
+                {
+                    if (
+                        pathItem[method] is JsonObject operation
+                        && UnimportableOperation(root, route, method, pathItem, operation)
+                            is { } warning
+                    )
+                    {
+                        pathItem.Remove(method);
+                        warnings.Add(warning);
+                    }
+                }
+            }
+        );
+
+    /// <summary>
+    /// The warning that drops <paramref name="operation"/>, or null when the import can write
+    /// a contract for it. A path parameter declared with <c>content</c> instead of a schema
+    /// leaves its route token untyped, which generation refuses (RIV1019), and dropping just
+    /// the parameter would leave the token behind; so the operation goes (RIV3025).
+    /// </summary>
+    private static string? UnimportableOperation(
+        JsonObject root,
+        string route,
+        string method,
+        JsonObject pathItem,
+        JsonObject operation
+    )
+    {
+        var contentDeclared = MergeParameterArrays(
+                ResolvedParameters(pathItem["parameters"], root),
+                ResolvedParameters(operation["parameters"], root)
+            )
+            .OfType<JsonObject>()
+            .Where(parameter =>
+                StringValue(parameter["in"]) == "path"
+                && !parameter.ContainsKey("schema")
+                && parameter["content"] is JsonObject { Count: > 0 }
+            )
+            .ToList();
+        if (contentDeclared.Count == 0)
+        {
+            return null;
+        }
+
+        var declarations = string.Join(
+            ", ",
+            contentDeclared.Select(parameter =>
+                $"'{StringValue(parameter["name"])}' declares content ("
+                + string.Join(", ", ((JsonObject)parameter["content"]!).Select(entry => entry.Key))
+                + ")"
+            )
+        );
+        return Diagnostics.Prefix(
+            Diagnostics.ImportSchemalessParameterDropped,
+            $"Operation dropped: {method.ToUpperInvariant()} {route} — path "
+                + (contentDeclared.Count == 1 ? "parameter " : "parameters ")
+                + declarations
+                + " instead of a schema, and a path parameter's schema is what types its route token. "
+                + "Give it a schema (a JSON-serialised value is a string parameter)."
+        );
+    }
+
+    /// <summary>
+    /// <paramref name="parameters"/> with each local reference resolved, so a path item's and
+    /// an operation's lists merge by name and location as the import merges them.
+    /// </summary>
+    private static JsonArray ResolvedParameters(JsonNode? parameters, JsonObject root) =>
+        new(
+            (parameters as JsonArray ?? [])
+                .Select(parameter =>
+                    parameter is JsonObject parameterObject
+                        ? ResolveReferenceObject(parameterObject, root, "parameter")
+                        : parameter?.DeepClone()
+                )
+                .ToArray()
+        );
+
+    /// <summary>
+    /// Runs <paramref name="edit"/> on each path item under <c>paths</c> as the import reads it:
+    /// an inline item itself, and a <c>$ref</c>'d one as a copy with the item it references laid
+    /// under it, which replaces the reference only when the edit changed it. Every edit warns,
+    /// so a new warning is the sign of a change. A path item left with no operation is removed,
+    /// so none of its fields outlives the operations they belonged to.
+    /// </summary>
+    private static void EditPathItems(
+        JsonObject root,
+        List<string> warnings,
+        Action<string, JsonObject> edit
+    )
+    {
         if (root["paths"] is not JsonObject paths)
         {
             return;
@@ -659,36 +800,22 @@ public static partial class OpenApiImporter
             {
                 continue;
             }
-            var dropped = false;
-            foreach (var method in OperationMethods)
+            var item = GetLocalReference(pathItem) is null
+                ? pathItem
+                : ResolvePathItem(pathItem, root, [], normalize: false);
+            var warned = warnings.Count;
+            edit(route, item);
+            if (warnings.Count == warned)
             {
-                if (pathItem[method] is not JsonObject operation)
-                {
-                    continue;
-                }
-                var operationName = $"{method.ToUpperInvariant()} {route}";
-                var declaresSecurity = operation.ContainsKey("security");
-                var reachable = declaresSecurity
-                    ? PruneSecurity(operation, operationName, defined, warnings)
-                    : !inheritedUnsatisfiable;
-                if (reachable)
-                {
-                    continue;
-                }
-                pathItem.Remove(method);
-                dropped = true;
-                warnings.Add(
-                    Diagnostics.Prefix(
-                        Diagnostics.ImportUnsatisfiableSecurity,
-                        $"Operation dropped: {operationName} — every security alternative it "
-                            + (declaresSecurity ? "declares" : "inherits from the document")
-                            + " names a scheme the document never defines, so no caller can satisfy it."
-                    )
-                );
+                continue;
             }
-            if (dropped && !OperationMethods.Any(pathItem.ContainsKey))
+            if (!OperationMethods.Any(item.ContainsKey))
             {
                 paths.Remove(route);
+            }
+            else if (!ReferenceEquals(item, pathItem))
+            {
+                paths[route] = item;
             }
         }
     }
@@ -1025,10 +1152,16 @@ public static partial class OpenApiImporter
     internal static JsonObject? InlinedRequestBody(JsonObject requestBody, JsonObject root) =>
         Inlined(requestBody, root, ComponentRequestBodiesPrefix, "request body");
 
+    /// <summary>
+    /// <paramref name="pathItem"/> with the path item it references (itself resolved) laid
+    /// under it. With <paramref name="normalize"/>, its contents' references are inlined too
+    /// (<see cref="NormalizePathItemContents"/>); without, the copy keeps them as written.
+    /// </summary>
     private static JsonObject ResolvePathItem(
         JsonObject pathItem,
         JsonObject root,
-        HashSet<string> referenceChain
+        HashSet<string> referenceChain,
+        bool normalize = true
     )
     {
         JsonObject? referenced = null;
@@ -1044,13 +1177,16 @@ public static partial class OpenApiImporter
                 ?? throw InvalidSpec(
                     $"Local path-item reference '{reference}' does not target an object."
                 );
-            referenced = ResolvePathItem(referenced, root, referenceChain);
+            referenced = ResolvePathItem(referenced, root, referenceChain, normalize);
             referenceChain.Remove(reference);
         }
 
         var local = (JsonObject)pathItem.DeepClone();
         local.Remove("$ref");
-        NormalizePathItemContents(local, root);
+        if (normalize)
+        {
+            NormalizePathItemContents(local, root);
+        }
         if (referenced is null)
         {
             return local;
@@ -1065,7 +1201,7 @@ public static partial class OpenApiImporter
                 && value is JsonArray localParameters
             )
             {
-                merged[name] = MergeParameterArrays(baseParameters, localParameters);
+                merged[name] = MergeParameterArrays(baseParameters, localParameters, root);
             }
             else
             {
@@ -1242,9 +1378,15 @@ public static partial class OpenApiImporter
         return resolved;
     }
 
+    /// <summary>
+    /// <paramref name="baseParameters"/> with each of <paramref name="localParameters"/>
+    /// replacing the one of its name and location, or added. Given <paramref name="root"/>, a
+    /// parameter's name and location are read through its local reference.
+    /// </summary>
     private static JsonArray MergeParameterArrays(
         JsonArray baseParameters,
-        JsonArray localParameters
+        JsonArray localParameters,
+        JsonObject? root = null
     )
     {
         var merged = new JsonArray(
@@ -1253,7 +1395,7 @@ public static partial class OpenApiImporter
         var indexes = new Dictionary<(string Name, string In), int>();
         for (var index = 0; index < merged.Count; index++)
         {
-            if (GetParameterKey(merged[index]) is { } key)
+            if (Key(merged[index]) is { } key)
             {
                 indexes[key] = index;
             }
@@ -1262,13 +1404,13 @@ public static partial class OpenApiImporter
         foreach (var parameter in localParameters)
         {
             var clone = parameter?.DeepClone();
-            if (GetParameterKey(parameter) is { } key && indexes.TryGetValue(key, out var index))
+            if (Key(parameter) is { } key && indexes.TryGetValue(key, out var index))
             {
                 merged[index] = clone;
             }
             else
             {
-                if (GetParameterKey(parameter) is { } newKey)
+                if (Key(parameter) is { } newKey)
                 {
                     indexes[newKey] = merged.Count;
                 }
@@ -1278,6 +1420,15 @@ public static partial class OpenApiImporter
         }
 
         return merged;
+
+        (string Name, string In)? Key(JsonNode? parameter) =>
+            GetParameterKey(
+                root is not null
+                && parameter is JsonObject parameterObject
+                && GetLocalReference(parameterObject) is not null
+                    ? ResolveReferenceObject(parameterObject, root, "parameter")
+                    : parameter
+            );
     }
 
     private static (string Name, string In)? GetParameterKey(JsonNode? parameter)

@@ -270,7 +270,8 @@ public static class CompilationHelper
         lock (_stdErrLock)
         {
             var original = Console.Error;
-            using var writer = new StringWriter();
+            // Not disposed: another thread may still hold the swapped writer, and a write after Dispose throws.
+            var writer = new StringWriter();
             try
             {
                 Console.SetError(writer);
@@ -299,7 +300,8 @@ public static class CompilationHelper
         lock (_stdOutLock)
         {
             var original = Console.Out;
-            using var writer = new StringWriter();
+            // Not disposed: another thread may still hold the swapped writer, and a write after Dispose throws.
+            var writer = new StringWriter();
             try
             {
                 Console.SetOut(writer);

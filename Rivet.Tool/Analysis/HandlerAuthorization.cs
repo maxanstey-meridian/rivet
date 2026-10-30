@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -12,13 +13,17 @@ namespace Rivet.Tool.Analysis;
 /// (an action, its controller and base controllers, or a minimal-API handler); an
 /// <c>AuthorizeFilter</c> added to <c>MvcOptions.Filters</c>; <c>RequireAuthorization</c> and
 /// <c>AllowAnonymous</c> on the endpoint, the route groups it's mapped in, or
-/// <c>MapControllers()</c>; the fallback policy, and the default policy a requirement naming
-/// no policy of its own means; and an Azure Functions trigger's <c>AuthorizationLevel</c>.
-/// App-wide setup in a helper applies where the helper is called. Custom authorization
-/// filters and middleware are invisible.
+/// <c>MapControllers()</c>; the fallback policy, the default policy a requirement naming
+/// no policy of its own means, and the <c>AddPolicy</c> registration a policy name means; and
+/// an Azure Functions trigger's <c>AuthorizationLevel</c>. App-wide setup in a helper applies
+/// where the helper is called. Custom authorization filters and middleware are invisible.
 /// <para>
 /// Each piece of setup is a fact: present or not, and requiring an authenticated user or not.
-/// A fact applied under a condition, or built from a policy that can't be read, is unknown.
+/// A policy requires one when it holds a user requirement, and admits anyone when its only
+/// requirement is an assertion that returns <c>true</c>. A fact applied under a condition,
+/// built from a policy that can't be read, or naming a policy with no registration --check
+/// can read (none, a conditional one, or beside a policy provider) is unknown;
+/// facts under one condition (<see cref="BuilderOrigins.ConditionWhy"/>'s key) share one.
 /// The verdict is worked out for every way the unknowns could fall, ASP.NET's way: an
 /// <c>IAllowAnonymous</c> anywhere wins; otherwise the endpoint's own authorization data
 /// decides, and the fallback policy applies only when it has none; an MVC-wide
@@ -42,14 +47,14 @@ internal sealed class HandlerAuthorization
 
     private readonly Compilation _compilation;
     private readonly WellKnownTypes _wkt;
-    private readonly Dictionary<
-        IMethodSymbol,
-        (List<IInvocationOperation>, List<ExpressionSyntax>)
-    > _calls = new(SymbolEqualityComparer.Default);
+    private readonly BuilderOrigins _origins;
 
-    // RequireAuthorization/AllowAnonymous conventions by the Map*/MapGroup/MapControllers call
-    // they're applied to.
-    private readonly Dictionary<(SyntaxTree Tree, TextSpan Span), List<Fact>> _conventions = [];
+    // RequireAuthorization/AllowAnonymous conventions by the Map*/MapGroup call they're applied
+    // to, each with the helper calls the trace went into to reach it (ChainLink.Reaches).
+    private readonly Dictionary<
+        (SyntaxTree Tree, TextSpan Span),
+        List<(ImmutableArray<IInvocationOperation> Descended, Fact Fact)>
+    > _conventions = [];
 
     // Conventions on MapControllers(): every attribute-routed MVC action's.
     private readonly List<Fact> _mvcConventions = [];
@@ -65,6 +70,15 @@ internal sealed class HandlerAuthorization
     // policy or role of their own. ASP.NET's own default requires an authenticated user; an
     // app may set another.
     private readonly Tri _defaultPolicy = Tri.True;
+
+    // Named policy registrations, by the name a lookup gives (ASP.NET's AuthorizationOptions
+    // ignores case), and the sites that may register or serve any name: a registration whose
+    // name --check can't read, and a registered IAuthorizationPolicyProvider.
+    private readonly Dictionary<
+        string,
+        List<(Tri Requires, Tri Present, string Source)>
+    > _namedPolicies = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(Tri Requires, Tri Present, string Source)> _anyPolicy = [];
 
     // The calls that hand UseStartup a Startup type, by that type, and the ones whose type
     // can't be read.
@@ -82,10 +96,15 @@ internal sealed class HandlerAuthorization
     // FindConfigurationServices reads them.
     private readonly List<INamedTypeSymbol> _optionsInterfaces;
 
-    private HandlerAuthorization(Compilation compilation, WellKnownTypes wkt)
+    private HandlerAuthorization(
+        Compilation compilation,
+        WellKnownTypes wkt,
+        BuilderOrigins origins
+    )
     {
         _compilation = compilation;
         _wkt = wkt;
+        _origins = origins;
         _optionsInterfaces =
         [
             .. new[]
@@ -102,8 +121,11 @@ internal sealed class HandlerAuthorization
             unset: Tri.True
         );
 
+        // Named policies next: a convention or filter below may name one.
+        IndexNamedPolicies();
+
         foreach (
-            var (tree, semanticModel) in TreesMentioning(
+            var (tree, semanticModel) in _origins.TreesMentioning(
                 "RequireAuthorization",
                 "AllowAnonymous",
                 "AuthorizeFilter"
@@ -126,8 +148,11 @@ internal sealed class HandlerAuthorization
     }
 
     /// <summary>The app's authorization setup, scanned once.</summary>
-    public static HandlerAuthorization Scan(Compilation compilation, WellKnownTypes wkt) =>
-        new(compilation, wkt);
+    public static HandlerAuthorization Scan(
+        Compilation compilation,
+        WellKnownTypes wkt,
+        BuilderOrigins origins
+    ) => new(compilation, wkt, origins);
 
     /// <summary>An attribute-routed MVC action.</summary>
     public Verdict ForMvc(IMethodSymbol action)
@@ -150,35 +175,36 @@ internal sealed class HandlerAuthorization
     }
 
     /// <summary>
-    /// A minimal-API handler mapped by <paramref name="mapCall"/>, inside
-    /// <paramref name="groups"/> (the MapGroup calls its receiver chain resolves to), with the
-    /// chain's <paramref name="root"/>.
+    /// A minimal-API handler, in one of its mappings (<paramref name="chain"/>: its Map* call
+    /// and the route groups that mapping is made in).
     /// </summary>
-    public Verdict ForMinimalApi(
-        IMethodSymbol handler,
-        IInvocationOperation mapCall,
-        IReadOnlyList<IInvocationOperation> groups,
-        IOperation? root
-    )
+    public Verdict ForMinimalApi(IMethodSymbol handler, BuilderChain chain)
     {
         var facts = AttributeFacts(handler, "the handler").ToList();
-        facts.AddRange(ConventionsOn(mapCall));
-        foreach (var group in groups)
+        foreach (var link in chain.Links)
         {
-            facts.AddRange(ConventionsOn(group));
+            facts.AddRange(ConventionsOn(link));
         }
 
-        // A route group the chain doesn't reach a MapGroup call for (a parameter, or a helper's
-        // answer) has conventions --check can't see.
-        if (root?.Type is { } rootType && rootType.DerivesFrom(_wkt.RouteGroupBuilder))
+        // A builder the chain doesn't follow to its MapGroup call or the app (a field, a
+        // helper's answer without source, a group parameter nothing passes) may be a group
+        // whose conventions --check can't see.
+        if (chain.Unresolved)
         {
+            var receiver = chain.Links[^1].Call.Arguments[0].Value;
+            var builder = Unwrap(receiver).Type.DerivesFrom(_wkt.RouteGroupBuilder)
+                ? "the route group"
+                : "the builder";
+            var stops = BuilderOrigins.SameCall(receiver, chain.End)
+                ? ""
+                : $" (it stops at '{chain.End.Syntax}' at {chain.End.Syntax.SourcePosition()})";
             facts.Add(
                 new Fact(
                     FactKind.Authorize,
                     Tri.Unknown(
-                        $"it's mapped on the route group '{root.Syntax}' at {root.Syntax.SourcePosition()}, "
-                            + "which --check can't trace to its MapGroup call, so it can't see that "
-                            + "group's RequireAuthorization or AllowAnonymous"
+                        $"it's mapped on {builder} '{receiver.Syntax}' at {receiver.Syntax.SourcePosition()}, "
+                            + $"which --check can't trace to the MapGroup call or the app that made it{stops}, "
+                            + "so it can't see that group's RequireAuthorization or AllowAnonymous"
                     ),
                     Tri.Unknown(null),
                     "its route group"
@@ -249,6 +275,7 @@ internal sealed class HandlerAuthorization
 
         var reasons = new List<string>();
         var variables = 0;
+        var keyed = new List<(ConditionKey Key, int Variable)>();
         var compiled = facts
             .Select(fact =>
                 (fact.Kind, Present: Compile(fact.Present), Requires: Compile(fact.Requires))
@@ -298,11 +325,13 @@ internal sealed class HandlerAuthorization
 
         // A known value, or the next variable. An unknown without a reason of its own (the
         // requirement of a fact whose presence is the unknown) adds a case, never a reason.
-        (bool Value, int Variable) Compile(Tri tri)
+        // Unknowns keyed by one condition (decision 2) share its variable, the other way round
+        // for its other branch.
+        (bool Value, int Variable, bool Negated) Compile(Tri tri)
         {
             if (tri.Value is { } known)
             {
-                return (known, -1);
+                return (known, -1, false);
             }
 
             if (tri.Why is { } why && !reasons.Contains(why))
@@ -310,13 +339,29 @@ internal sealed class HandlerAuthorization
                 reasons.Add(why);
             }
 
-            return (false, variables++);
+            if (tri.Key is not { } key)
+            {
+                return (false, variables++, false);
+            }
+
+            foreach (var (earlier, variable) in keyed)
+            {
+                if (earlier.SameUnknown(key))
+                {
+                    return (false, variable, earlier.Positive != key.Positive);
+                }
+            }
+
+            keyed.Add((key, variables));
+            return (false, variables++, false);
         }
 
         bool Requires(long bits)
         {
-            bool Value((bool Value, int Variable) fact) =>
-                fact.Variable < 0 ? fact.Value : ((bits >> fact.Variable) & 1) == 1;
+            bool Value((bool Value, int Variable, bool Negated) fact) =>
+                fact.Variable < 0
+                    ? fact.Value
+                    : (((bits >> fact.Variable) & 1) == 1) != fact.Negated;
 
             if (compiled.Any(fact => fact.Kind == FactKind.AllowAnonymous && Value(fact.Present)))
             {
@@ -356,20 +401,55 @@ internal sealed class HandlerAuthorization
             }
             else if (IsAuthorizeData(type))
             {
-                var ownPolicy =
-                    attribute.ConstructorArguments.Any(argument => IsNamed(argument.Value))
-                    || attribute.NamedArguments.Any(named =>
-                        named.Key is "Policy" or "Roles" && IsNamed(named.Value.Value)
-                    );
                 yield return new Fact(
                     FactKind.Authorize,
                     Tri.True,
-                    ownPolicy ? Tri.True : _defaultPolicy,
+                    AttributePolicy(attribute, source),
                     source
                 );
             }
         }
     }
+
+    // An IAuthorizeData attribute's Roles and Policy, set as named arguments or, for
+    // AuthorizeAttribute's own constructor, the policy it takes. Another type's constructor
+    // sets them where --check doesn't look.
+    private Tri AttributePolicy(AttributeData attribute, string source)
+    {
+        string? policy = null;
+        if (attribute.ConstructorArguments.Length > 0)
+        {
+            if (
+                !IsType(attribute.AttributeConstructor?.ContainingType, _wkt.Authorize)
+                || attribute.ConstructorArguments[0].Value is not string named
+            )
+            {
+                return Tri.Unknown(
+                    $"{source} is made by its own constructor, which may set a policy or roles --check can't read"
+                );
+            }
+
+            policy = named;
+        }
+
+        return AuthorizeData(Named("Roles"), Named("Policy") ?? policy);
+
+        string? Named(string key) =>
+            attribute
+                .NamedArguments.Where(named => named.Key == key)
+                .Select(named => named.Value.Value as string)
+                .LastOrDefault();
+    }
+
+    /// <summary>
+    /// What an <c>IAuthorizeData</c> asks for, as ASP.NET's <c>AuthorizationPolicy.CombineAsync</c>
+    /// reads it: roles require a user in one of them; a policy name means that policy;
+    /// neither means the default policy.
+    /// </summary>
+    private Tri AuthorizeData(string? roles, string? policy) =>
+        IsNamed(roles) ? Tri.True
+        : IsNamed(policy) ? NamedPolicy(policy!)
+        : _defaultPolicy;
 
     private bool IsAuthorizeData(ITypeSymbol? type) =>
         type.Implements(_wkt.IAuthorizeData) || type.DerivesFrom(_wkt.Authorize);
@@ -382,8 +462,10 @@ internal sealed class HandlerAuthorization
     // Conventions: RequireAuthorization and AllowAnonymous
     // ---------------------------------------------------------------
 
-    private IEnumerable<Fact> ConventionsOn(IInvocationOperation call) =>
-        _conventions.GetValueOrDefault((call.Syntax.SyntaxTree, call.Syntax.Span)) ?? [];
+    private IEnumerable<Fact> ConventionsOn(ChainLink link) =>
+        (_conventions.GetValueOrDefault((link.Call.Syntax.SyntaxTree, link.Call.Syntax.Span)) ?? [])
+            .Where(convention => link.Reaches(convention.Descended))
+            .Select(convention => convention.Fact);
 
     private void ReadConvention(IInvocationOperation call)
     {
@@ -402,16 +484,20 @@ internal sealed class HandlerAuthorization
         var policies = call.Arguments.Skip(1).ToList();
         var allow = call.TargetMethod.Name == "AllowAnonymous";
         var name = $"{call.TargetMethod.Name}()";
-        var traces = Origins(receiver.Value, new HashSet<ISymbol>(SymbolEqualityComparer.Default))
-            .Distinct()
-            .ToList();
-        foreach (var (origin, callCondition) in traces)
+        foreach (var trace in _origins.Trace(receiver.Value))
         {
+            // A helper nothing calls applies its convention to nothing.
+            if (trace.End == TraceEnd.Uncalled)
+            {
+                continue;
+            }
+
+            var origin = trace.Origin;
             var on = origin switch
             {
                 null => "a builder",
-                _ when IsMapControllers(origin) => "MapControllers()",
-                _ when IsMapGroup(origin) => "its route group",
+                _ when _origins.IsMapControllers(origin) => "MapControllers()",
+                _ when _origins.IsMapGroup(origin) => "its route group",
                 _ => "the endpoint",
             };
             var source = $"{name} on {on} at {call.Syntax.SourcePosition()}";
@@ -454,17 +540,21 @@ internal sealed class HandlerAuthorization
             }
 
             // One fact for each way the convention comes to run; none when it never does.
-            var facts = Conditions(call.Syntax, receiver.Value, origin, callCondition)
+            var facts = _origins
+                .Ways(trace)
+                .SelectMany(traced =>
+                    _origins.Conditions(call.Syntax, receiver.Value, origin, traced)
+                )
                 .Distinct()
                 .Select(condition => new Fact(
                     kind,
                     condition is null
                         ? Tri.True
-                        : Tri.Unknown($"{source} is applied only {condition}"),
+                        : Tri.Unknown($"{source} is applied only {condition.Why}", condition.Key),
                     requires,
                     source
                 ));
-            if (IsMapControllers(origin))
+            if (_origins.IsMapControllers(origin))
             {
                 _mvcConventions.AddRange(facts);
             }
@@ -477,373 +567,10 @@ internal sealed class HandlerAuthorization
                     _conventions[key] = onOrigin;
                 }
 
-                onOrigin.AddRange(facts);
+                onOrigin.AddRange(facts.Select(fact => (trace.Descended, fact)));
             }
         }
     }
-
-    /// <summary>
-    /// What a convention at <paramref name="site"/>, on a builder <paramref name="origin"/>
-    /// made, runs only under: one entry for each way it comes to run, null when that way always
-    /// does, and none when nothing runs it. Inside the function that holds the site, that's
-    /// <see cref="ConditionWhy"/>. A local function that captures the builder runs where it's
-    /// called, so each call's own condition, relative to the origin, is one way.
-    /// <paramref name="traced"/> is what the trace to the origin ran under (a helper's
-    /// parameter, whose call sites <see cref="Origins"/> has already composed).
-    /// </summary>
-    private List<string?> Conditions(
-        SyntaxNode site,
-        IOperation receiver,
-        IInvocationOperation origin,
-        string? traced
-    )
-    {
-        if (ConditionWhy(site, origin.Syntax) is { } within)
-        {
-            return [within];
-        }
-
-        if (
-            EnclosingFunction(site) is not LocalFunctionStatementSyntax function
-            || Contains(function, origin.Syntax)
-            || _compilation.GetSemanticModel(function.SyntaxTree).GetDeclaredSymbol(function)
-                is not IMethodSymbol local
-            || !Captures(receiver, local)
-        )
-        {
-            return [traced];
-        }
-
-        return
-        [
-            .. CapturedCalls(
-                    local,
-                    origin.Syntax,
-                    new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)
-                )
-                .Select(condition => condition ?? traced),
-        ];
-    }
-
-    /// <summary>
-    /// What each call to the local function <paramref name="function"/> runs only under,
-    /// relative to <paramref name="origin"/>, through the local functions that call it in
-    /// turn. A call from inside its own call graph adds nothing; a delegate made from it
-    /// can't be followed.
-    /// </summary>
-    private List<string?> CapturedCalls(
-        IMethodSymbol function,
-        SyntaxNode origin,
-        HashSet<IMethodSymbol> visiting
-    )
-    {
-        var conditions = new List<string?>();
-        if (!visiting.Add(function))
-        {
-            return conditions;
-        }
-
-        var (calls, escapes) = CallsTo(function);
-        foreach (var call in calls)
-        {
-            if (ConditionWhy(call.Syntax, origin) is { } condition)
-            {
-                conditions.Add(condition);
-            }
-            else if (
-                EnclosingFunction(call.Syntax) is LocalFunctionStatementSyntax outer
-                && !Contains(outer, origin)
-                && _compilation.GetSemanticModel(outer.SyntaxTree).GetDeclaredSymbol(outer)
-                    is IMethodSymbol caller
-            )
-            {
-                conditions.AddRange(CapturedCalls(caller, origin, visiting));
-            }
-            else
-            {
-                conditions.Add(null);
-            }
-        }
-
-        conditions.AddRange(
-            escapes.Select(reference =>
-                $"where {function.Name}() runs, which --check can't follow: it's handed on as "
-                + $"a delegate at {reference.SourcePosition()}"
-            )
-        );
-        return conditions;
-    }
-
-    /// <summary>
-    /// <paramref name="receiver"/> reaches <paramref name="function"/> from outside it: through
-    /// its own locals, and convention calls that hand the builder back, to a local or a
-    /// parameter some enclosing function declares.
-    /// </summary>
-    private static bool Captures(IOperation receiver, IMethodSymbol function)
-    {
-        var seen = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
-        var current = Unwrap(receiver);
-        while (true)
-        {
-            switch (current)
-            {
-                case ILocalReferenceOperation local when seen.Add(local.Local):
-                    if (!Within(local.Local))
-                    {
-                        return true;
-                    }
-
-                    if (CoverageChecker.ProvenanceValue(local) is not { } provenance)
-                    {
-                        return false;
-                    }
-
-                    current = Unwrap(provenance);
-                    break;
-                case IParameterReferenceOperation parameter:
-                    return !Within(parameter.Parameter);
-                case IInvocationOperation call
-                    when CoverageChecker.PassedBuilder(call) is { } passed:
-                    current = Unwrap(passed);
-                    break;
-                default:
-                    return false;
-            }
-        }
-
-        bool Within(ISymbol symbol)
-        {
-            for (var container = symbol.ContainingSymbol; container is not null; )
-            {
-                if (SymbolEqualityComparer.Default.Equals(container, function))
-                {
-                    return true;
-                }
-
-                container = container.ContainingSymbol;
-            }
-
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// The calls that made the builder <paramref name="value"/> is: a Map*, MapGroup or
-    /// MapControllers call, through locals with one known value, convention calls that hand
-    /// back the builder they're given (<c>.WithName(...)</c>), helpers with source, through
-    /// the values they return, and a helper's parameter, through each call that passes it
-    /// (with what that call runs only under, read <see cref="Conditions"/>' way). A call to a
-    /// method without source that makes a new builder is its own origin. A null origin is a builder that can't be traced: a
-    /// field, a lambda's parameter, or a helper's parameter nothing passes.
-    /// <paramref name="path"/> holds the locals, helpers and parameters this trace is inside,
-    /// so a cycle ends; another path reaching one of them traces it again.
-    /// </summary>
-    private List<(IInvocationOperation? Origin, string? Condition)> Origins(
-        IOperation value,
-        HashSet<ISymbol> path
-    )
-    {
-        switch (Unwrap(value))
-        {
-            case ILocalReferenceOperation local:
-                return Along(
-                    local.Local,
-                    () =>
-                        CoverageChecker.ProvenanceValue(local) is { } provenance
-                            ? Origins(provenance, path)
-                            : [(null, null)]
-                );
-            case IInvocationOperation call when IsMapCall(call):
-                return [(call, null)];
-            case IInvocationOperation call when CoverageChecker.PassedBuilder(call) is { } passed:
-                return Origins(passed, path);
-            case IInvocationOperation call when call.TargetMethod.SourceBody() is { } body:
-                return Along(
-                    call.TargetMethod.OriginalDefinition,
-                    () =>
-                        CoverageChecker
-                            .ReturnedValues(body)
-                            .SelectMany(returned => Origins(returned, path))
-                            .DefaultIfEmpty((null, null))
-                            .ToList()
-                );
-            case IInvocationOperation call:
-                return [(call, null)];
-            case IParameterReferenceOperation
-            {
-                Parameter: { ContainingSymbol: IMethodSymbol method } parameter,
-            } when method.MethodKind is MethodKind.Ordinary or MethodKind.LocalFunction:
-                return Along(
-                    parameter.OriginalDefinition,
-                    () =>
-                    {
-                        var (calls, escapes) = CallsTo(method);
-                        var traces = calls
-                            .SelectMany(callSite =>
-                                callSite
-                                    .Arguments.Where(argument =>
-                                        SymbolEqualityComparer.Default.Equals(
-                                            argument.Parameter?.OriginalDefinition,
-                                            parameter.OriginalDefinition
-                                        )
-                                    )
-                                    .SelectMany(argument =>
-                                        Origins(argument.Value, path)
-                                            .SelectMany(trace =>
-                                                trace.Origin is null
-                                                    ? [trace]
-                                                    : Conditions(
-                                                            callSite.Syntax,
-                                                            argument.Value,
-                                                            trace.Origin,
-                                                            null
-                                                        )
-                                                        .Select(condition =>
-                                                            (
-                                                                Origin: (IInvocationOperation?)
-                                                                    trace.Origin,
-                                                                Condition: trace.Condition
-                                                                    ?? condition
-                                                            )
-                                                        )
-                                            )
-                                    )
-                            )
-                            .ToList();
-                        // A helper nothing calls applies its convention to nothing, unless it's
-                        // also handed on as a delegate, whose calls can't be followed.
-                        return escapes.Count > 0 ? [.. traces, (null, null)] : traces;
-                    }
-                );
-            default:
-                return [(null, null)];
-        }
-
-        // A cycle back into the trace adds nothing: what it leads to is already in the union.
-        List<(IInvocationOperation?, string?)> Along(
-            ISymbol step,
-            Func<List<(IInvocationOperation?, string?)>> trace
-        )
-        {
-            if (!path.Add(step))
-            {
-                return [];
-            }
-
-            try
-            {
-                return trace();
-            }
-            finally
-            {
-                path.Remove(step);
-            }
-        }
-    }
-
-    /// <summary>
-    /// The calls to <paramref name="method"/> with source in the compilation, and every other
-    /// place it's named (a method group handed on as a delegate).
-    /// </summary>
-    private (List<IInvocationOperation> Calls, List<ExpressionSyntax> Escapes) CallsTo(
-        IMethodSymbol method
-    )
-    {
-        var definition = (method.ReducedFrom ?? method).OriginalDefinition;
-        if (_calls.TryGetValue(definition, out var cached))
-        {
-            return cached;
-        }
-
-        var calls = new List<IInvocationOperation>();
-        var escapes = new List<ExpressionSyntax>();
-        foreach (var (name, semanticModel) in Mentions(definition))
-        {
-            var named = name.Parent switch
-            {
-                MemberAccessExpressionSyntax access when access.Name == name => access,
-                MemberBindingExpressionSyntax binding when binding.Name == name => binding,
-                _ => (ExpressionSyntax)name,
-            };
-            if (
-                named.Parent is InvocationExpressionSyntax invocation
-                && invocation.Expression == named
-            )
-            {
-                if (semanticModel.GetOperation(invocation) is IInvocationOperation call)
-                {
-                    calls.Add(call);
-                }
-            }
-            else if (name.Parent is not MethodDeclarationSyntax)
-            {
-                escapes.Add(named);
-            }
-        }
-
-        _calls[definition] = (calls, escapes);
-        return (calls, escapes);
-    }
-
-    /// <summary>The syntax trees whose text holds any of <paramref name="texts"/>, with their semantic models.</summary>
-    private IEnumerable<(SyntaxTree Tree, SemanticModel SemanticModel)> TreesMentioning(
-        params string[] texts
-    )
-    {
-        foreach (var tree in _compilation.SyntaxTrees)
-        {
-            var text = tree.GetText().ToString();
-            if (texts.Any(wanted => text.Contains(wanted, StringComparison.Ordinal)))
-            {
-                yield return (tree, _compilation.GetSemanticModel(tree));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Every name in the compilation bound to <paramref name="definition"/> (a method's
-    /// reduced extension form and any construction of a generic counting as it).
-    /// </summary>
-    private IEnumerable<(SimpleNameSyntax Name, SemanticModel SemanticModel)> Mentions(
-        ISymbol definition
-    )
-    {
-        foreach (var (tree, semanticModel) in TreesMentioning(definition.Name))
-        {
-            foreach (
-                var name in tree.GetRoot()
-                    .DescendantNodes()
-                    .OfType<SimpleNameSyntax>()
-                    .Where(name => name.Identifier.ValueText == definition.Name)
-            )
-            {
-                var bound = semanticModel.GetSymbolInfo(name).Symbol;
-                if (
-                    SymbolEqualityComparer.Default.Equals(
-                        bound is IMethodSymbol method
-                            ? (method.ReducedFrom ?? method).OriginalDefinition
-                            : bound?.OriginalDefinition,
-                        definition
-                    )
-                )
-                {
-                    yield return (name, semanticModel);
-                }
-            }
-        }
-    }
-
-    private bool IsMapCall(IInvocationOperation call) =>
-        IsType(call.TargetMethod.ContainingType, _wkt.EndpointRouteBuilderExtensions)
-        || IsMapControllers(call);
-
-    private bool IsMapGroup(IInvocationOperation call) =>
-        call.TargetMethod.Name == "MapGroup"
-        && IsType(call.TargetMethod.ContainingType, _wkt.EndpointRouteBuilderExtensions);
-
-    private bool IsMapControllers(IInvocationOperation call) =>
-        call.TargetMethod.Name == "MapControllers"
-        && IsType(call.TargetMethod.ContainingType, _wkt.ControllerEndpointRouteBuilderExtensions);
 
     // ---------------------------------------------------------------
     // MVC filters
@@ -934,7 +661,7 @@ internal sealed class HandlerAuthorization
             new Fact(
                 FactKind.MvcFilter,
                 present.Value is null
-                    ? Tri.Unknown($"{source} is added only {present.Why}")
+                    ? Tri.Unknown($"{source} is added only {present.Why}", present.Key)
                     : present,
                 requires,
                 source
@@ -958,13 +685,13 @@ internal sealed class HandlerAuthorization
     /// policy under a name too, so its policy or configure lambda is the second argument). A
     /// site in a method nothing runs sets nothing.
     /// </summary>
-    private List<(Tri Requires, string? Condition, string Source)> PolicySites(
+    private List<(Tri Requires, Tri Present, string Source)> PolicySites(
         string property,
         string name
     )
     {
-        var sites = new List<(Tri, string?, string)>();
-        foreach (var (tree, semanticModel) in TreesMentioning(property))
+        var sites = new List<(Tri, Tri, string)>();
+        foreach (var (tree, semanticModel) in _origins.TreesMentioning(property))
         {
             foreach (
                 var node in tree.GetRoot()
@@ -989,44 +716,186 @@ internal sealed class HandlerAuthorization
                         assignedValue,
                     _ => null,
                 };
-                if (value is null)
+                if (
+                    value is not null
+                    && PolicySite(node, value, $"{name} set at {node.SourcePosition()}") is { } site
+                )
                 {
-                    continue;
+                    sites.Add(site);
                 }
-
-                var present = Presence(node);
-                if (present.Value == false)
-                {
-                    continue;
-                }
-
-                var source = $"{name} set at {node.SourcePosition()}";
-                var requires = Provenance(value).ConstantValue is { HasValue: true, Value: null }
-                    ? Tri.False
-                    : ReadPolicy(
-                        value,
-                        $"{source} is a policy --check can't read ('{value.Syntax}')"
-                    );
-                sites.Add((requires, present.Why, source));
             }
         }
 
         return sites;
-
-        static IOperation? PolicyArgument(IInvocationOperation call, int ordinal) =>
-            call
-                .Arguments.FirstOrDefault(argument => argument.Parameter?.Ordinal == ordinal)
-                ?.Value;
     }
+
+    /// <summary>
+    /// Indexes every named policy registration: <c>AuthorizationOptions.AddPolicy</c>, and
+    /// <c>AuthorizationBuilder</c>'s <c>AddPolicy</c>, <c>AddDefaultPolicy</c>, and
+    /// <c>AddFallbackPolicy</c>, each taking the name first and the policy or its configure
+    /// lambda second. A registration whose name --check can't read, and a registered
+    /// <c>IAuthorizationPolicyProvider</c>, may serve any name, so each joins every name's
+    /// registrations as a policy --check can't read.
+    /// </summary>
+    private void IndexNamedPolicies()
+    {
+        foreach (
+            var (tree, semanticModel) in _origins.TreesMentioning(
+                "AddPolicy",
+                "AddDefaultPolicy",
+                "AddFallbackPolicy"
+            )
+        )
+        {
+            foreach (
+                var node in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+            )
+            {
+                if (
+                    semanticModel.GetOperation(node) is not IInvocationOperation call
+                    || !(
+                        call.TargetMethod.Name == "AddPolicy"
+                            && IsType(call.TargetMethod.ContainingType, _wkt.AuthorizationOptions)
+                        || call.TargetMethod.Name
+                            is "AddPolicy"
+                                or "AddDefaultPolicy"
+                                or "AddFallbackPolicy"
+                            && IsType(call.TargetMethod.ContainingType, _wkt.AuthorizationBuilder)
+                    )
+                    || PolicyArgument(call, 0) is not { } name
+                    || PolicyArgument(call, 1) is not { } value
+                    || PolicySite(node, value, $"registered at {node.SourcePosition()}")
+                        is not { } site
+                )
+                {
+                    continue;
+                }
+
+                if (Provenance(name).ConstantValue is { HasValue: true, Value: string constant })
+                {
+                    if (!_namedPolicies.TryGetValue(constant, out var named))
+                    {
+                        named = [];
+                        _namedPolicies[constant] = named;
+                    }
+
+                    named.Add(site);
+                }
+                else
+                {
+                    _anyPolicy.Add(
+                        site with
+                        {
+                            Requires = Tri.Unknown(
+                                $"may be registered at {node.SourcePosition()}, under a name "
+                                    + $"--check can't read ('{name.Syntax}')"
+                            ),
+                        }
+                    );
+                }
+            }
+        }
+
+        foreach (
+            var (tree, semanticModel) in _origins.TreesMentioning("IAuthorizationPolicyProvider")
+        )
+        {
+            foreach (
+                var node in tree.GetRoot()
+                    .DescendantNodes()
+                    .Where(node =>
+                        node is InvocationExpressionSyntax or BaseObjectCreationExpressionSyntax
+                    )
+            )
+            {
+                if (
+                    semanticModel.GetOperation(node) is not { } operation
+                    || Registration(operation) is not { } registration
+                    || !registration.Services.Any(service =>
+                        IsType(service as INamedTypeSymbol, _wkt.IAuthorizationPolicyProvider)
+                    )
+                    || (registration.Descriptor ? DescriptorAdded(node, semanticModel) : node)
+                        is not { } site
+                )
+                {
+                    continue;
+                }
+
+                var present = Presence(site);
+                if (present.Value != false)
+                {
+                    var source =
+                        $"the IAuthorizationPolicyProvider registered at {site.SourcePosition()}";
+                    _anyPolicy.Add(
+                        (
+                            Tri.Unknown($"may be served by {source}, which --check can't read"),
+                            present,
+                            source
+                        )
+                    );
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The policy registered under <paramref name="name"/>, over every registration of it
+    /// <see cref="IndexNamedPolicies"/> found. A name with no registration --check can read
+    /// (none, only under a condition, or one that may be overridden by a site it can't read)
+    /// is unknown, as ASP.NET would fail the request or serve another policy.
+    /// </summary>
+    private Tri NamedPolicy(string name)
+    {
+        List<(Tri Requires, Tri Present, string Source)> sites =
+        [
+            .. _namedPolicies.GetValueOrDefault(name) ?? [],
+            .. _anyPolicy,
+        ];
+        var policy = Settled(
+            sites,
+            unset: Tri.Unknown($"no registration --check can read for policy '{name}'")
+        );
+        return policy.Value is null && sites.Count > 0
+            ? Tri.Unknown($"policy '{name}' {policy.Why}")
+            : policy;
+    }
+
+    /// <summary>
+    /// One site that sets or registers a policy: whether it runs, and what its
+    /// <paramref name="value"/> requires (null, which turns a fallback off, requires nothing).
+    /// Null when it never runs.
+    /// </summary>
+    private (Tri Requires, Tri Present, string Source)? PolicySite(
+        SyntaxNode node,
+        IOperation value,
+        string source
+    )
+    {
+        var present = Presence(node);
+        if (present.Value == false)
+        {
+            return null;
+        }
+
+        var requires = Provenance(value).ConstantValue is { HasValue: true, Value: null }
+            ? Tri.False
+            : ReadPolicy(value, $"{source} is a policy --check can't read ('{value.Syntax}')");
+        return (requires, present, source);
+    }
+
+    private static IOperation? PolicyArgument(IInvocationOperation call, int ordinal) =>
+        call.Arguments.FirstOrDefault(argument => argument.Parameter?.Ordinal == ordinal)?.Value;
 
     /// <summary>
     /// A policy's verdict over every site that sets it, <paramref name="unset"/> when none
     /// does. When every site is conditional, none may run, so <paramref name="unset"/> is one
     /// more value it may take. Values that all agree decide it; anything else is unknown, since
-    /// which set runs last can't be read.
+    /// which set runs last can't be read. One site under a keyed condition (decision 2), whose
+    /// policy and <paramref name="unset"/> are both known and differ, is that condition: the
+    /// policy where it holds, <paramref name="unset"/> where it doesn't.
     /// </summary>
     private static Tri Settled(
-        IReadOnlyList<(Tri Requires, string? Condition, string Source)> sites,
+        IReadOnlyList<(Tri Requires, Tri Present, string Source)> sites,
         Tri unset
     )
     {
@@ -1035,7 +904,19 @@ internal sealed class HandlerAuthorization
             return unset;
         }
 
-        var always = sites.Where(site => site.Condition is null).ToList();
+        if (
+            sites is [{ Present.Key: { } key, Requires.Value: { } requires } only]
+            && unset.Value is { } unsetValue
+            && requires != unsetValue
+        )
+        {
+            return Tri.Unknown(
+                $"{only.Source} only {only.Present.Why}",
+                requires ? key : key.Negated()
+            );
+        }
+
+        var always = sites.Where(site => site.Present.Value == true).ToList();
         var values = sites
             .Select(site => site.Requires.Value)
             .Concat(always.Count == 0 ? [unset.Value] : [])
@@ -1055,7 +936,7 @@ internal sealed class HandlerAuthorization
                 "; ",
                 sites.Select(site =>
                     site.Requires.Value is null ? site.Requires.Why!
-                    : site.Condition is not null ? $"{site.Source} only {site.Condition}"
+                    : site.Present.Value is null ? $"{site.Source} only {site.Present.Why}"
                     : site.Source
                 )
             )
@@ -1086,12 +967,24 @@ internal sealed class HandlerAuthorization
 
     private Tri Presence(SyntaxNode site, HashSet<IMethodSymbol> visiting)
     {
-        if (ConditionWhy(site, null) is { } condition)
-        {
-            return Tri.Unknown(condition);
-        }
+        // The site's own condition, under whatever runs its function. It's keyed only in code
+        // that runs once (A1): a method may run more than once, or under its callers'
+        // conditions too.
+        var own = _origins.ConditionWhy(site, null);
+        var runs = Runs(site, visiting);
+        return own is null || runs.Value == false ? runs
+            : runs.Value == true
+                ? Tri.Unknown(
+                    own.Why,
+                    _origins.RunsOnce(BuilderOrigins.EnclosingFunction(site), site) ? own.Key : null
+                )
+            : Tri.Unknown($"{own.Why}, and {runs.Why}");
+    }
 
-        var function = EnclosingFunction(site);
+    /// <summary>Whether the function holding <paramref name="site"/> runs, past any condition inside it.</summary>
+    private Tri Runs(SyntaxNode site, HashSet<IMethodSymbol> visiting)
+    {
+        var function = BuilderOrigins.EnclosingFunction(site);
         if (function is null)
         {
             // Top-level statements run; an initializer runs when its type is made.
@@ -1141,11 +1034,23 @@ internal sealed class HandlerAuthorization
 
         try
         {
+            // A way in is a call or a registration, which may run more than once or under its
+            // own callers' conditions, so it's never keyed.
             var ways = WaysIn(definition, visiting);
-            return ways.Any(way => way.Value == true) ? Tri.True
-                : ways.FirstOrDefault(way => way.Value is null) is { Why: not null } unknown
-                    ? unknown
-                : Tri.False;
+            if (ways.Any(way => way.Value == true))
+            {
+                return Tri.True;
+            }
+
+            // Any way in that may run makes it unknown; the first that says why names it.
+            var unknowns = ways.Where(way => way.Value is null).ToList();
+            return unknowns.Count == 0 ? Tri.False
+                : unknowns.FirstOrDefault(way => way.Why is not null) is { Why: not null } unknown
+                    ? unknown with
+                    {
+                        Key = null,
+                    }
+                : Tri.Unknown($"where {definition.Name}() is called in a way --check can't follow");
         }
         finally
         {
@@ -1166,7 +1071,7 @@ internal sealed class HandlerAuthorization
                 continue;
             }
 
-            var (calls, escapes) = CallsTo(target);
+            var (calls, escapes) = _origins.CallsTo(target);
             ways.AddRange(
                 calls.Select(call =>
                     Dispatched(
@@ -1462,7 +1367,7 @@ internal sealed class HandlerAuthorization
             .Where(candidate => candidate.DerivesFrom(type));
         foreach (var candidate in types)
         {
-            foreach (var (name, semanticModel) in Mentions(candidate.OriginalDefinition))
+            foreach (var (name, semanticModel) in _origins.Mentions(candidate.OriginalDefinition))
             {
                 foreach (var node in name.Ancestors())
                 {
@@ -1847,7 +1752,7 @@ internal sealed class HandlerAuthorization
             SymbolEqualityComparer.Default
         );
         var unreadable = new List<SyntaxNode>();
-        foreach (var (tree, semanticModel) in TreesMentioning("UseStartup"))
+        foreach (var (tree, semanticModel) in _origins.TreesMentioning("UseStartup"))
         {
             foreach (
                 var node in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
@@ -1928,22 +1833,23 @@ internal sealed class HandlerAuthorization
     // ---------------------------------------------------------------
 
     /// <summary>
-    /// Whether a policy argument requires an authenticated user: a policy name (a constant),
-    /// an <c>IAuthorizeData</c> (<c>new AuthorizeAttribute(...)</c>), a policy built inline with
-    /// <c>new AuthorizationPolicyBuilder()</c> and the builder's user requirements, or a
-    /// configure lambda calling them, any of them through a local with one known value. An
-    /// <c>IAuthorizeData</c> with no policy or role of its own, no policy names at all, and
-    /// <c>options.DefaultPolicy</c> are the default policy. Anything else, a requirement it
-    /// can't read included (<c>RequireAssertion</c>), is unknown.
+    /// What a policy argument requires: a policy name (a constant), looked up among the app's
+    /// registrations; an <c>IAuthorizeData</c> (<c>new AuthorizeAttribute(...)</c>), read as
+    /// <see cref="AuthorizeData"/> does; a policy built inline with
+    /// <c>new AuthorizationPolicyBuilder()</c> or a configure lambda, which requires a user
+    /// when it holds a user requirement that always runs, whatever else it holds, and admits
+    /// anyone when its only requirement is <c>RequireAssertion(_ =&gt; true)</c>
+    /// (<see cref="BuilderChain"/>, <see cref="ConfigureLambda"/>); any of them through a
+    /// local with one known value. No policy
+    /// names at all, and <c>options.DefaultPolicy</c>, are the default policy. Anything else
+    /// is unknown.
     /// </summary>
     private Tri ReadPolicy(IOperation value, string unreadable)
     {
         var policy = Provenance(value);
         return policy switch
         {
-            { ConstantValue: { HasValue: true, Value: string name } } => IsNamed(name)
-                ? Tri.True
-                : _defaultPolicy,
+            { ConstantValue: { HasValue: true, Value: string name } } => AuthorizeData(null, name),
             IArrayCreationOperation { Initializer: { } initializer } => Policies(
                 initializer.ElementValues.Select(element => ReadPolicy(element, unreadable))
             ),
@@ -1952,44 +1858,101 @@ internal sealed class HandlerAuthorization
                 collection.Elements.Select(element => ReadPolicy(element, unreadable))
             ),
             IObjectCreationOperation { Type: var type } creation when IsAuthorizeData(type) =>
-                creation.Arguments.Any(argument => IsNamed(argument.Value.ConstantValue.Value))
-                || creation.Initializer?.Initializers.Any(initializer =>
-                    initializer
-                        is ISimpleAssignmentOperation
-                        {
-                            Target: IPropertyReferenceOperation
-                            {
-                                Property.Name: "Policy" or "Roles",
-                            },
-                            Value.ConstantValue.Value: var named,
-                        }
-                    && IsNamed(named)
-                ) == true
-                    ? Tri.True
-                    : _defaultPolicy,
+                CreatedPolicy(creation, unreadable),
             IPropertyReferenceOperation { Property: var property }
                 when property.Name == "DefaultPolicy"
                     && IsType(property.ContainingType, _wkt.AuthorizationOptions) => _defaultPolicy,
             IInvocationOperation { TargetMethod.Name: "Build", Instance: { } builder }
-                when IsType(policy.Type as INamedTypeSymbol, _wkt.AuthorizationPolicy) =>
-                BuilderChain(builder, null) ? Tri.True : Tri.Unknown(unreadable),
-            IDelegateCreationOperation { Target: IAnonymousFunctionOperation lambda } =>
-                ConfigureLambda(lambda) ? Tri.True : Tri.Unknown(unreadable),
-            IAnonymousFunctionOperation lambda => ConfigureLambda(lambda)
-                ? Tri.True
-                : Tri.Unknown(unreadable),
+                when IsType(policy.Type as INamedTypeSymbol, _wkt.AuthorizationPolicy) => Read(
+                BuilderChain(builder, null)
+            ),
+            IDelegateCreationOperation { Target: IAnonymousFunctionOperation lambda } => Read(
+                ConfigureLambda(lambda)
+            ),
+            IAnonymousFunctionOperation lambda => Read(ConfigureLambda(lambda)),
             _ => Tri.Unknown(unreadable),
         };
+
+        Tri Read(bool? requires) =>
+            requires is { } known ? (known ? Tri.True : Tri.False) : Tri.Unknown(unreadable);
+    }
+
+    // A new IAuthorizeData's Roles and Policy, from AuthorizeAttribute's own constructor and
+    // the object initializer, each a constant. Another type's constructor sets them where
+    // --check doesn't look.
+    private Tri CreatedPolicy(IObjectCreationOperation creation, string unreadable)
+    {
+        string? policy = null;
+        string? roles = null;
+        if (creation.Arguments is [var argument, ..])
+        {
+            if (
+                !IsType(creation.Constructor?.ContainingType, _wkt.Authorize)
+                || !Constant(argument.Value, out policy)
+            )
+            {
+                return Tri.Unknown(unreadable);
+            }
+        }
+
+        foreach (var initializer in creation.Initializer?.Initializers ?? [])
+        {
+            if (
+                initializer
+                is not ISimpleAssignmentOperation
+                {
+                    Target: IPropertyReferenceOperation
+                    {
+                        Property.Name: "Policy" or "Roles"
+                    } target,
+                    Value: var assigned,
+                }
+            )
+            {
+                continue;
+            }
+
+            if (!Constant(assigned, out var named))
+            {
+                return Tri.Unknown(unreadable);
+            }
+
+            if (target.Property.Name == "Policy")
+            {
+                policy = named;
+            }
+            else
+            {
+                roles = named;
+            }
+        }
+
+        return AuthorizeData(roles, policy);
+
+        static bool Constant(IOperation value, out string? constant)
+        {
+            var read = Provenance(value).ConstantValue;
+            constant = read.Value as string;
+            return read.HasValue && (read.Value is null or string);
+        }
     }
 
     /// <summary>
-    /// True when <paramref name="operation"/> is a fluent chain of the policy builder's user
-    /// requirements, with at least one that refuses an anonymous caller, down to a
-    /// <c>new AuthorizationPolicyBuilder(...)</c> or the configure lambda's parameter.
+    /// What a fluent chain of the policy builder's calls, down to a
+    /// <c>new AuthorizationPolicyBuilder(...)</c> or the configure lambda's
+    /// <paramref name="parameter"/>, requires. ASP.NET passes a caller only when every
+    /// requirement does, so a chain holding a user requirement that refuses an anonymous
+    /// caller (<c>RequireAuthenticatedUser</c>, <c>RequireRole</c>, <c>RequireClaim</c>, or
+    /// <c>RequireUserName</c>) is true, whatever its other calls. Without one, it's false when
+    /// every call is <c>RequireAssertion</c> with a lambda returning the constant <c>true</c>
+    /// or <c>AddAuthenticationSchemes</c>, the assertion there at least once, a policy anyone
+    /// passes; and null for anything else. A chain that doesn't reach its root is null.
     /// </summary>
-    private bool BuilderChain(IOperation operation, IParameterSymbol? parameter)
+    private bool? BuilderChain(IOperation operation, IParameterSymbol? parameter)
     {
         var denies = false;
+        var admits = false;
+        var unread = false;
         var current = Unwrap(operation);
         while (
             current is IInvocationOperation { Instance: { } instance } call
@@ -2000,9 +1963,13 @@ internal sealed class HandlerAuthorization
             {
                 denies = true;
             }
+            else if (call.TargetMethod.Name == "RequireAssertion" && AlwaysTrue(call))
+            {
+                admits = true;
+            }
             else if (call.TargetMethod.Name != "AddAuthenticationSchemes")
             {
-                return false;
+                unread = true;
             }
 
             current = Unwrap(instance);
@@ -2025,177 +1992,124 @@ internal sealed class HandlerAuthorization
             ),
             _ => false,
         };
-        return rooted && denies;
+        return !rooted ? null
+            : denies ? true
+            : admits && !unread ? false
+            : null;
+
+        // RequireAssertion(_ => true): a handler that passes every caller.
+        static bool AlwaysTrue(IInvocationOperation call) =>
+            call.Arguments is [var handler]
+            && Unwrap(handler.Value)
+                is IDelegateCreationOperation
+                {
+                    Target: IAnonymousFunctionOperation
+                    {
+                        Body.Operations: [
+                            IReturnOperation
+                            {
+                                ReturnedValue.ConstantValue: { HasValue: true, Value: true },
+                            },
+                        ],
+                    },
+                };
     }
 
     /// <summary>
-    /// A <c>RequireAuthorization(policy =&gt; ...)</c> lambda whose every statement is a chain
-    /// of the builder's user requirements on its parameter, at least one refusing anonymous
-    /// callers.
+    /// What a configure lambda (<c>policy =&gt; ...</c>) builds. A user requirement counts only
+    /// where it always runs: the lambda is true when a statement that runs unconditionally,
+    /// before any <c>return</c> or <c>throw</c>, is a <see cref="BuilderChain"/> on its
+    /// parameter that's true. Otherwise it's false when every statement is a chain that admits
+    /// anyone, and null for anything else.
     /// </summary>
-    private bool ConfigureLambda(IAnonymousFunctionOperation lambda)
+    private bool? ConfigureLambda(IAnonymousFunctionOperation lambda)
     {
         if (lambda.Symbol.Parameters is not [var parameter])
-        {
-            return false;
-        }
-
-        var statements = lambda
-            .Body.Operations.Where(operation =>
-                operation is not IReturnOperation { ReturnedValue: null }
-            )
-            .ToList();
-        var denies = false;
-        foreach (var statement in statements)
-        {
-            var expression = statement switch
-            {
-                IExpressionStatementOperation expressionStatement => expressionStatement.Operation,
-                IReturnOperation { ReturnedValue: { } returned } => returned,
-                _ => null,
-            };
-            if (expression is null || !BuilderChain(expression, parameter))
-            {
-                return false;
-            }
-
-            denies = true;
-        }
-
-        return denies;
-    }
-
-    // ---------------------------------------------------------------
-    // Conditions
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// What <paramref name="site"/> runs only under, relative to <paramref name="origin"/> (the
-    /// call that made the builder it's applied to, so a requirement in the same branch as its
-    /// endpoint isn't conditional): an <c>if</c> or <c>else</c>, a <c>?:</c> branch, a switch
-    /// section or arm, a <c>catch</c>, a loop body, the right of <c>&amp;&amp;</c>,
-    /// <c>||</c>, <c>??</c> or <c>??=</c>, a <c>?.</c>, or a <c>return</c> earlier in an
-    /// enclosing block. The walk stops at the method or local function holding the site, unless
-    /// that holds the origin too: a function runs where it's called, so its callers' conditions
-    /// are added there (<see cref="Presence(SyntaxNode)"/> for app-wide setup, and
-    /// <see cref="Origins"/> and <see cref="Conditions"/> for a convention), and a
-    /// <c>return</c> above a local function's declaration never stops it. Null when it always
-    /// runs.
-    /// </summary>
-    private static string? ConditionWhy(SyntaxNode site, SyntaxNode? origin)
-    {
-        if (Contains(site, origin))
         {
             return null;
         }
 
-        var child = site;
-        var function = EnclosingFunction(site);
-        foreach (var ancestor in site.Ancestors())
+        foreach (var statement in lambda.Body.Operations)
         {
-            // Past the origin's own statement, the site runs whenever its endpoint is mapped,
-            // unless a return between the two can leave first.
-            if (Contains(ancestor, origin))
+            var (chain, last) = statement switch
             {
-                return ancestor is BlockSyntax shared ? EarlyReturn(shared, child, origin) : null;
-            }
-
-            if (ancestor == function)
-            {
-                return null;
-            }
-
-            var why = ancestor switch
-            {
-                BlockSyntax block => EarlyReturn(block, child, origin),
-                IfStatementSyntax statement when child != statement.Condition =>
-                    $"under if ({statement.Condition})",
-                ConditionalExpressionSyntax conditional when child != conditional.Condition =>
-                    $"under a branch of ({conditional.Condition}) ? ... : ...",
-                SwitchSectionSyntax or SwitchExpressionArmSyntax => "under a switch",
-                CatchClauseSyntax => "in a catch block",
-                ForStatementSyntax loop when child == loop.Statement => "in a for loop",
-                CommonForEachStatementSyntax loop when child == loop.Statement =>
-                    "in a foreach loop",
-                WhileStatementSyntax loop when child == loop.Statement => "in a while loop",
-                ConditionalAccessExpressionSyntax access when child == access.WhenNotNull =>
-                    $"behind {access.Expression}?.",
-                BinaryExpressionSyntax binary
-                    when child == binary.Right
-                        && binary.Kind()
-                            is SyntaxKind.LogicalAndExpression
-                                or SyntaxKind.LogicalOrExpression
-                                or SyntaxKind.CoalesceExpression =>
-                    $"on the right of {binary.OperatorToken}",
-                AssignmentExpressionSyntax assignment
-                    when child == assignment.Right
-                        && assignment.IsKind(SyntaxKind.CoalesceAssignmentExpression) =>
-                    "on the right of ??=",
-                _ => null,
+                IExpressionStatementOperation expression when !Throws(expression) => (
+                    expression.Operation,
+                    false
+                ),
+                IReturnOperation { ReturnedValue: { } returned } when !Throws(statement) => (
+                    returned,
+                    true
+                ),
+                _ => ((IOperation?)null, Throws(statement) || Returns(statement)),
             };
-            if (why is not null)
+            if (chain is not null && BuilderChain(chain, parameter) == true)
             {
-                return why;
+                return true;
             }
 
-            child = ancestor;
+            if (last)
+            {
+                break;
+            }
         }
 
-        return null;
+        var chains = lambda
+            .Body.Operations.Where(operation =>
+                operation is not IReturnOperation { ReturnedValue: null }
+            )
+            .Select(statement =>
+                statement switch
+                {
+                    IExpressionStatementOperation expressionStatement => BuilderChain(
+                        expressionStatement.Operation,
+                        parameter
+                    ),
+                    IReturnOperation { ReturnedValue: { } returned } => BuilderChain(
+                        returned,
+                        parameter
+                    ),
+                    _ => null,
+                }
+            )
+            .Distinct()
+            .ToList();
+        return chains is [false] ? false : null;
+
+        static bool Throws(IOperation statement) =>
+            statement.DescendantsAndSelf().Any(operation => operation is IThrowOperation);
+
+        static bool Returns(IOperation statement) =>
+            statement.DescendantsAndSelf().Any(operation => operation is IReturnOperation);
     }
-
-    // node holds origin.
-    private static bool Contains(SyntaxNode node, SyntaxNode? origin) =>
-        origin is not null
-        && node.SyntaxTree == origin.SyntaxTree
-        && node.Span.Contains(origin.Span);
-
-    // The method, local function, or accessor holding site, past any lambda: null at the top
-    // level and in an initializer.
-    private static SyntaxNode? EnclosingFunction(SyntaxNode site) =>
-        site.Ancestors()
-            .FirstOrDefault(node =>
-                node
-                    is BaseMethodDeclarationSyntax
-                        or LocalFunctionStatementSyntax
-                        or AccessorDeclarationSyntax
-            );
-
-    /// <summary>
-    /// A <c>return</c> in a statement before <paramref name="child"/> in
-    /// <paramref name="block"/> (after <paramref name="origin"/>, when that's in the block too),
-    /// outside nested functions: it may leave before the site runs.
-    /// </summary>
-    private static string? EarlyReturn(BlockSyntax block, SyntaxNode child, SyntaxNode? origin) =>
-        block
-            .Statements.TakeWhile(statement => statement != child)
-            .Where(statement =>
-                origin is null
-                || origin.SyntaxTree != block.SyntaxTree
-                || !block.Span.Contains(origin.Span)
-                || statement.SpanStart > origin.Span.End
-            )
-            .SelectMany(statement =>
-                statement.DescendantNodesAndSelf(node =>
-                    node is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)
-                )
-            )
-            .OfType<ReturnStatementSyntax>()
-            .Select(returned =>
-                $"after the return at {returned.SourcePosition()}, which may leave first"
-            )
-            .FirstOrDefault();
 
     // ---------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------
 
+    /// <summary>
+    /// Policies combined, as ASP.NET combines them into one that needs every requirement:
+    /// one that requires a user decides it, otherwise an unknown leaves it unknown, and
+    /// otherwise anyone passes. Two or more combined are never one condition's unknown, so
+    /// they carry no key.
+    /// </summary>
     private static Tri All(IEnumerable<Tri> values)
     {
         var list = values.ToList();
-        return list.FirstOrDefault(value => value.Value is null) is { Why: not null } unknown
-            ? unknown
-            : Tri.True;
+        if (list.Any(value => value.Value == true))
+        {
+            return Tri.True;
+        }
+
+        var unknowns = list.Where(value => value.Value is null).ToList();
+        if (unknowns.Count == 0)
+        {
+            return Tri.False;
+        }
+
+        // The first unknown that says why, so the verdict can; any unknown stays unknown.
+        var unknown = unknowns.FirstOrDefault(value => value.Why is not null, unknowns[0]);
+        return list.Count > 1 ? unknown with { Key = null } : unknown;
     }
 
     // A requirement's policies; none at all is the default policy, as ASP.NET reads it.
@@ -2251,13 +2165,22 @@ internal sealed class HandlerAuthorization
         ITypeSymbol Implementation
     );
 
-    /// <summary>True, false, or unknown with the reason it can't be read.</summary>
-    private readonly record struct Tri(bool? Value, string? Why, string? Source = null)
+    /// <summary>
+    /// True, false, or unknown with the reason it can't be read, and, when it's one keyed
+    /// condition's unknown (decision 2), its key.
+    /// </summary>
+    private readonly record struct Tri(
+        bool? Value,
+        string? Why,
+        string? Source = null,
+        ConditionKey? Key = null
+    )
     {
         public static readonly Tri True = new(true, null);
         public static readonly Tri False = new(false, null);
 
-        public static Tri Unknown(string? why) => new(null, why);
+        public static Tri Unknown(string? why, ConditionKey? key = null) =>
+            new(null, why, Key: key);
     }
 }
 

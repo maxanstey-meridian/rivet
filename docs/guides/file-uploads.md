@@ -134,6 +134,41 @@ public static readonly RouteDefinition<UploadRequest, UploadResponse> Upload =
         .AcceptsFile();
 ```
 
+### Form fields from contract JSON
+
+A `--from` contract can say more about a form field than C# can. A `formField` param takes
+the same `style`, `explode`, `allowReserved`, and named `examples` a query param does, but a
+form part isn't a parameter, so they land in different places:
+
+- `style`, `explode`, and `allowReserved` say how the part is serialized, which in a request
+  body is the job of the media type's `encoding`, keyed by the part's name. A form field's
+  style is one an Encoding Object holds (`form`, `spaceDelimited`, `pipeDelimited`, or
+  `deepObject`); `matrix`, `label`, and `simple` are path and header styles, and the reader
+  refuses them with `RIV2017`.
+- Each named example's `value` joins the field schema's `examples`, after any it already has.
+  A schema holds values, not Example Objects, so an example's `summary`, `description`, or
+  `externalValue` has nowhere to go, and nor does an example with no `value` at all. Rivet
+  drops those with a `RIV2019` warning naming the field and what went.
+- `allowEmptyValue` is a query-parameter thing in OpenAPI, so on a form field it's dropped
+  with `RIV2019` too.
+
+```json
+{
+  "name": "tags",
+  "type": { "kind": "array", "element": { "kind": "primitive", "type": "string" } },
+  "source": "formField",
+  "style": "form",
+  "explode": false,
+  "examples": { "two": { "summary": "Two tags", "value": ["red", "blue"] } }
+}
+```
+
+That field comes out as `encoding: { "tags": { "style": "form", "explode": false } }` on the
+form media type, `examples: [["red", "blue"]]` on the `tags` property, and one `RIV2019`
+for the summary. When the field's part takes its schema from the input record (the body
+`$ref`s the record's component, or the part is its record property), its examples have
+nothing to join, so they're all dropped with the warning; the encoding still applies.
+
 ## Raw binary request bodies
 
 `.AcceptsBinary(contentType = "application/octet-stream")` declares that the request

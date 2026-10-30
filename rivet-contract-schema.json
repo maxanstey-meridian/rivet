@@ -338,18 +338,20 @@
         "constraints": { "$ref": "#/$defs/tsPropertyConstraints" },
         "schemaExamples": { "type": "array" },
         "example": {},
-        "examples": { "type": "object", "additionalProperties": { "type": "object" } },
-        "style": { "type": "string", "enum": ["matrix", "label", "form", "simple", "spaceDelimited", "pipeDelimited", "deepObject"] },
-        "explode": { "type": "boolean" },
+        "examples": { "type": "object", "additionalProperties": { "type": "object" }, "description": "Named OpenAPI Example Objects. On a route, query, header, or cookie param they're the Parameter Object's examples. On a formField param, each example's value joins the field schema's examples, after its own. A form part is a property and holds values only, so a summary, description, or externalValue, an example with no value, and every example of a part whose schema is its input record's are dropped with RIV2019." },
+        "style": { "type": "string", "enum": ["matrix", "label", "form", "simple", "spaceDelimited", "pipeDelimited", "deepObject"], "description": "How the value is serialized. On a route, query, header, or cookie param it's the Parameter Object's style. On a formField param it goes in the form body's encoding entry for the part, which holds form, spaceDelimited, pipeDelimited, or deepObject only; any other style there is RIV2017." },
+        "explode": { "type": "boolean", "description": "Whether an array or object value is written as separate values (with style form, one name=value pair each), as OpenAPI's explode says. On a formField param it goes in the form body's encoding entry for the part, beside style." },
         "schemaType": { "type": "string", "enum": ["string", "integer", "number", "boolean"] },
         "format": { "type": "string" },
         "isFormatSpecified": { "type": "boolean" },
-        "allowEmptyValue": { "type": "boolean" },
-        "allowReserved": { "type": "boolean" },
+        "allowEmptyValue": { "type": "boolean", "description": "Written on a query param only, the one location OpenAPI defines it for. On a formField param it's dropped with RIV2019." },
+        "allowReserved": { "type": "boolean", "description": "Whether RFC 3986 reserved characters go unencoded. Written on a query param; on a formField param it goes in the form body's encoding entry for the part." },
         "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
       },
       "required": ["name", "type", "source"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": { "properties": { "source": { "const": "formField" } }, "required": ["source"] },
+      "then": { "properties": { "style": { "enum": ["form", "spaceDelimited", "pipeDelimited", "deepObject"] } } }
     },
     "endpointExample": {
       "type": "object",

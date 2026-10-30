@@ -51,12 +51,6 @@ static async Task<int> Run(string[] args)
         ? await CompilationLoader.LoadProjectAsync(projectPath)
         : CompilationLoader.CompileFromFiles([.. options.Files]);
 
-    if (compilation is null)
-    {
-        Console.Error.WriteLine("Aborting — cannot proceed with compilation errors.");
-        return 1;
-    }
-
     // Single-pass discovery: scan source assembly types once instead of 4× full namespace walks
     var discovered = SymbolDiscovery.Discover(compilation);
 
@@ -174,7 +168,9 @@ static async Task<int> RunFromContract(RivetOptions options)
     var contractPath = options.FromContractPath!;
     if (!File.Exists(contractPath))
     {
-        Console.Error.WriteLine($"error: file not found: {contractPath}");
+        Console.Error.WriteLine(
+            Diagnostics.Format(Diagnostics.InputPathNotFound, $"file not found: {contractPath}")
+        );
         return 1;
     }
 
@@ -207,7 +203,12 @@ static int RunImport(RivetOptions options)
 {
     if (!File.Exists(options.FromOpenApiPath!))
     {
-        Console.Error.WriteLine($"error: file not found: {options.FromOpenApiPath}");
+        Console.Error.WriteLine(
+            Diagnostics.Format(
+                Diagnostics.InputPathNotFound,
+                $"file not found: {options.FromOpenApiPath}"
+            )
+        );
         return 1;
     }
 

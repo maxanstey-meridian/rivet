@@ -216,6 +216,7 @@ internal static class ParameterBindingSources
                     path,
                     prefix: null,
                     complex,
+                    bindingAttributes: [],
                     InputSource.Form,
                     ParameterBindingHost.MinimalApi,
                     nested: false,
@@ -239,7 +240,7 @@ internal static class ParameterBindingSources
                     )
                     .Concat(
                         FormBinding
-                            .BoundMembers(wkt, container, FormBinding.Binder.AsParameters)
+                            .BoundMembers(wkt, container, FormBinding.Binder.AsParameters, [])
                             .SelectMany(member =>
                                 MinimalApi(
                                     wkt,
@@ -329,6 +330,7 @@ internal static class ParameterBindingSources
                 parameter.Name,
                 modelName,
                 complex,
+                parameter.GetAttributes(),
                 source,
                 ParameterBindingHost.Mvc,
                 nested: false,
@@ -358,8 +360,10 @@ internal static class ParameterBindingSources
         // InferParameterBindingInfoConvention: a simple type comes from the route when any of
         // the action's routes has a parameter of that name, and from the query otherwise. A
         // complex type (collections included) is the body, unless it's a service, or one of the
-        // properties it binds carries a binding source of its own; then it gets none and is
-        // bound member by member from the value providers.
+        // properties MVC's metadata lists for it carries a binding source of its own; then it
+        // gets none and is bound member by member from the value providers. Those properties
+        // aren't what MVC binds: inference reads no filter, binding behaviour, or setter, and
+        // skips a record constructor's members (FormBinding.MvcBoundProperties).
         if (IsSimple(wkt, type, ParameterBindingHost.Mvc))
         {
             return [Leaf(RouteOrQuery(parameter.Name, routeParameters))];
@@ -369,8 +373,10 @@ internal static class ParameterBindingSources
             type is INamedTypeSymbol withSources
             && IsComplex(wkt, type, ParameterBindingHost.Mvc)
             && FormBinding
-                .BoundMembers(wkt, withSources, FormBinding.Binder.Mvc)
-                .Any(member => MvcOwnSource(wkt, member.MvcAttributes, member.Type) is not null)
+                .MvcBoundProperties(wkt, withSources)
+                .Any(property =>
+                    MvcOwnSource(wkt, property.GetAttributes(), property.Type) is not null
+                )
             ? Members(withSources, InputSource.ValueProviders)
             : [Leaf(InputSource.BodyOrService)];
     }
@@ -455,7 +461,10 @@ internal static class ParameterBindingSources
     /// prefix names, and then recursed into with that prefix, the way MVC's
     /// ComplexObjectModelBinder and the form mapper bind nested types. Both parse an enum
     /// member ignoring case. A type already being expanded on the path stops the recursion.
-    /// <paramref name="prefix"/> is the model name the members' keys start with (an MVC model
+    /// MVC binds only the members its filters let through (<see cref="FormBinding.Skips"/>):
+    /// a <c>[Bind]</c> include list on <paramref name="bindingAttributes"/> (the parameter's,
+    /// or the outer member's) or on the type, and a Never binding behaviour; the form mapper
+    /// reads none of them. <paramref name="prefix"/> is the model name the members' keys start with (an MVC model
     /// name on the parameter, or the outer member's key); <paramref name="nested"/> marks
     /// members of a complex member. A type the binder can't create comes first as an
     /// <see cref="InputSource.Uncreatable"/> input, and its members still follow, unless
@@ -474,6 +483,7 @@ internal static class ParameterBindingSources
         string path,
         string? prefix,
         INamedTypeSymbol type,
+        IReadOnlyList<AttributeData> bindingAttributes,
         InputSource source,
         ParameterBindingHost host,
         bool nested,
@@ -509,10 +519,14 @@ internal static class ParameterBindingSources
             );
         }
 
-        var members = FormBinding.BoundMembers(wkt, type, binder);
+        var members = FormBinding.BoundMembers(wkt, type, binder, bindingAttributes);
         if (mvc)
         {
-            members = [.. members, .. FormBinding.MvcGetOnlyStructs(wkt, type, members)];
+            members =
+            [
+                .. members,
+                .. FormBinding.MvcGetOnlyStructs(wkt, type, members, bindingAttributes),
+            ];
         }
 
         foreach (var member in members)
@@ -556,6 +570,7 @@ internal static class ParameterBindingSources
                         memberPath,
                         wireName,
                         complex,
+                        attributes,
                         own?.Inherited ?? source,
                         host,
                         nested: true,
@@ -769,7 +784,7 @@ internal static class ParameterBindingSources
                 )
                 {
                     throw Diagnostics.Error(
-                        Diagnostics.BindingInferenceUnreadable,
+                        Diagnostics.UnreadableMvcBindingSetup,
                         $"{assignment.Syntax.SourcePosition()}: "
                             + $"ApiBehaviorOptions.{property} is set to a value that isn't a compile-time "
                             + "constant, so Rivet can't tell whether MVC infers binding sources for "

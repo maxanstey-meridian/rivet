@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.CodeAnalysis;
 using Rivet.Tool;
 using Rivet.Tool.Analysis;
+using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
 
 namespace Rivet.Tests;
@@ -435,23 +436,77 @@ public sealed class FormPartNameTests
 
         Assert.Equal(["skipped", "plain"], Names(FormBinding.FormHosts.Mvc));
         Assert.Equal(["never", "plain"], Names(FormBinding.FormHosts.MinimalApi));
+        // MVC's [Bind] include lists and binding behaviour are its own.
+        Assert.Equal(
+            ["plain"],
+            GenerationParts(typeof(FormBindList), FormBinding.FormHosts.Mvc)
+                .Select(part => part.Name)
+        );
+        Assert.Equal(
+            ["plain", "left", "behavior"],
+            GenerationParts(typeof(FormBindList), FormBinding.FormHosts.MinimalApi)
+                .Select(part => part.Name)
+        );
     }
 
     [Theory]
-    [InlineData("Skipped", "skipped by the minimal-API form mapper ([IgnoreDataMember])")]
-    [InlineData("Never", "skipped by MVC's model binder ([BindNever])")]
+    [InlineData(
+        typeof(FormSkips),
+        "Skipped",
+        "skipped by the minimal-API form mapper ([IgnoreDataMember])"
+    )]
+    [InlineData(typeof(FormSkips), "Never", "skipped by MVC's model binder ([BindNever])")]
     // The form mapper both skips it and can't set it; a setter wouldn't settle it.
-    [InlineData("IgnoredFiles", "skipped by the minimal-API form mapper ([IgnoreDataMember])")]
-    public void Generation_refuses_a_member_one_host_skips(string member, string why)
+    [InlineData(
+        typeof(FormSkips),
+        "IgnoredFiles",
+        "skipped by the minimal-API form mapper ([IgnoreDataMember])"
+    )]
+    [InlineData(
+        typeof(FormBindList),
+        "Left",
+        "skipped by MVC's model binder ([Bind] on 'FormBindList', whose include list leaves it out)"
+    )]
+    [InlineData(
+        typeof(FormBindList),
+        "Behavior",
+        "skipped by MVC's model binder ([BindingBehavior(BindingBehavior.Never)])"
+    )]
+    // A positional record's constructor parameter too.
+    [InlineData(
+        typeof(FormBindRecord),
+        "Body",
+        "skipped by MVC's model binder ([Bind] on 'FormBindRecord', whose include list leaves it out)"
+    )]
+    public void Generation_refuses_a_member_one_host_skips(Type type, string member, string why)
     {
         var error = Assert.Throws<RivetUserException>(() =>
-            GenerationParts(typeof(FormSkips), FormBinding.FormHosts.Any, member)
+            GenerationParts(type, FormBinding.FormHosts.Any, member)
         );
 
         Assert.Contains("RIV1100", error.Message);
         Assert.Contains($"'{member}'", error.Message);
         Assert.Contains(why, error.Message);
         Assert.Contains("Skip it for both", error.Message);
+    }
+
+    [Fact]
+    public void Generation_refuses_a_property_filter_it_cant_read_wherever_MVC_serves()
+    {
+        foreach (var hosts in new[] { FormBinding.FormHosts.Any, FormBinding.FormHosts.Mvc })
+        {
+            var error = Assert.Throws<RivetUserException>(() =>
+                GenerationParts(typeof(FilterCustom), hosts)
+            );
+            Assert.StartsWith("error RIV1115: ", error.Message);
+            Assert.Contains("[TitleOnly] is a property filter", error.Message);
+        }
+
+        Assert.Equal(
+            ["title", "body"],
+            GenerationParts(typeof(FilterCustom), FormBinding.FormHosts.MinimalApi)
+                .Select(part => part.Name)
+        );
     }
 
     [Theory]
@@ -962,6 +1017,119 @@ public sealed class FormPartNameTests
         }
     }
 
+    [Fact]
+    public async Task A_RivetRequestBody_form_body_is_its_types_parts_as_the_hosts_read_them()
+    {
+        // FormDeclaredFields is the body: its [JsonPropertyName] member is a part under its
+        // C# name, its [DataMember]/[FromForm] one under the rename, and the input's Tag,
+        // which it doesn't declare, is no part.
+        var (compilation, wkt) = BindingHost.Probe;
+        var typeWalker = TypeWalker.Create(compilation, wkt, []);
+        var endpoints = ContractWalker
+            .Walk(
+                compilation,
+                wkt,
+                typeWalker,
+                [compilation.GetTypeByMetadataName(typeof(FormDeclaredContract).FullName!)!]
+            )
+            .Select(contract => contract.Endpoint)
+            .ToList();
+        var submit = endpoints.Single(endpoint => endpoint.Name == "submit");
+        Assert.Equal(
+            [("title", ParamSource.FormField, "t"), ("n", ParamSource.FormField, "note")],
+            submit.Params.Select(param => (param.Name, param.Source, param.BodyPropertyName))
+        );
+
+        // The part names aren't the component's JSON names, so the body is spelt out inline.
+        // An optional declared body stays optional.
+        using var document = JsonDocument.Parse(
+            OpenApiEmitter.Emit(
+                endpoints,
+                typeWalker.Definitions,
+                typeWalker.Brands,
+                typeWalker.Enums,
+                security: null
+            )
+        );
+        const string form = "application/x-www-form-urlencoded";
+        foreach (var path in new[] { "/form-parts/declared", "/form-parts/declared-optional" })
+        {
+            var schema = RequestSchema(document, path, form);
+            Assert.False(schema.TryGetProperty("$ref", out _));
+            Assert.Equal(
+                ["title", "n"],
+                schema.GetProperty("properties").EnumerateObject().Select(property => property.Name)
+            );
+        }
+
+        Assert.False(
+            RequestBody(document, "/form-parts/declared-optional")
+                .GetProperty("required")
+                .GetBoolean()
+        );
+        Assert.True(
+            RequestBody(document, "/form-parts/declared").GetProperty("required").GetBoolean()
+        );
+
+        // Both hosts bind the input from those parts.
+        foreach (var mvc in new[] { true, false })
+        {
+            await using var host = await StartAsync(mvc);
+            var (status, body) = await host.PostAsync(
+                $"/form-parts/{(mvc ? "mvc" : "minimal")}/declared",
+                new FormUrlEncodedContent(
+                    submit.Params.Select(param => KeyValuePair.Create(param.Name, param.Name))
+                )
+            );
+
+            Assert.Equal(HttpStatusCode.OK, status);
+            Assert.Equal("{\"Title\":\"title\",\"Note\":\"n\"}", body);
+        }
+    }
+
+    [Theory]
+    [InlineData("IFormFile")]
+    [InlineData("List<IFormFile>")]
+    public void A_RivetRequestBody_type_carrying_a_file_the_input_doesn_t_is_RIV1022(string file)
+    {
+        // The input alone makes a body multipart, so the declared type can't add a file.
+        var source = $$"""
+            using System.Collections.Generic;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            public sealed class Attachment
+            {
+                public string? Title { get; set; }
+
+                public {{file}}? Scan { get; set; }
+            }
+
+            public sealed class NoteInput
+            {
+                public Attachment? Attachment { get; set; }
+            }
+
+            [RivetType]
+            public sealed record NoteDto(string Id);
+
+            [RivetContract]
+            public static class NotesContract
+            {
+                [RivetRequestBody(typeof(Attachment))]
+                public static readonly RouteDefinition<NoteInput, NoteDto> Submit =
+                    Define.Post<NoteInput, NoteDto>("/api/notes").FormEncoded();
+            }
+            """;
+
+        var error = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkContract(source));
+        Assert.StartsWith("error RIV1022: ", error.Message);
+        Assert.Contains("'Attachment', which carries files", error.Message);
+        Assert.Contains("Put the file on the input type", error.Message);
+    }
+
     // ---------------------------------------------------------------
     // Helpers.
     // ---------------------------------------------------------------
@@ -1011,6 +1179,7 @@ public sealed class FormPartNameTests
                 Map<FormSkips>(app, "skips");
                 Map<FormImmutableFiles>(app, "immutable-files");
                 Map<FormInPlace>(app, "in-place");
+                Map<FormDeclaredInput>(app, "declared");
             }
         );
 
@@ -1044,14 +1213,17 @@ public sealed class FormPartNameTests
         string path,
         string mediaType
     ) =>
+        RequestBody(document, path)
+            .GetProperty("content")
+            .GetProperty(mediaType)
+            .GetProperty("schema");
+
+    private static JsonElement RequestBody(JsonDocument document, string path) =>
         document
             .RootElement.GetProperty("paths")
             .GetProperty(path)
             .GetProperty("post")
-            .GetProperty("requestBody")
-            .GetProperty("content")
-            .GetProperty(mediaType)
-            .GetProperty("schema");
+            .GetProperty("requestBody");
 }
 
 /// <summary>
@@ -1236,6 +1408,24 @@ public sealed class FormSkips
     public List<IFormFile> IgnoredFiles { get; } = [];
 }
 
+// MVC binds what its [Bind] list names and its binding behaviour allows; the form mapper
+// reads neither.
+[Bind(nameof(Plain), nameof(Behavior))]
+public sealed class FormBindList
+{
+    public string? Plain { get; set; }
+
+    public string? Left { get; set; }
+
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindingBehavior(
+        Microsoft.AspNetCore.Mvc.ModelBinding.BindingBehavior.Never
+    )]
+    public string? Behavior { get; set; }
+}
+
+[Bind(nameof(Title))]
+public sealed record FormBindRecord(string? Title, string? Body);
+
 // MVC can't fill an immutable collection in place, and building one of its own fails every
 // request: ImmutableList<T> has no parameterless constructor.
 public sealed class FormImmutableFiles
@@ -1331,6 +1521,46 @@ public struct FormAddressStruct
     public override readonly string ToString() => $"city:{City}";
 }
 
+// A [RivetRequestBody] form body: the input carries the declared type's members under the
+// same JSON names, and one more the body doesn't declare.
+public sealed record FormDeclaredFields
+{
+    [JsonPropertyName("t")]
+    public required string Title { get; init; }
+
+    [DataMember(Name = "n")]
+    [FromForm(Name = "n")]
+    public string? Note { get; init; }
+}
+
+public sealed record FormDeclaredInput
+{
+    [JsonPropertyName("t")]
+    public required string Title { get; init; }
+
+    [DataMember(Name = "n")]
+    [FromForm(Name = "n")]
+    public string? Note { get; init; }
+
+    public string? Tag { get; init; }
+}
+
+public sealed record FormDeclaredReceipt(string Id);
+
+[RivetContract]
+public static class FormDeclaredContract
+{
+    [RivetRequestBody(typeof(FormDeclaredFields))]
+    public static readonly RouteDefinition<FormDeclaredInput, FormDeclaredReceipt> Submit = Define
+        .Post<FormDeclaredInput, FormDeclaredReceipt>("/form-parts/declared")
+        .FormEncoded();
+
+    [RivetRequestBody(typeof(FormDeclaredFields), required: false)]
+    public static readonly RouteDefinition<FormDeclaredInput, FormDeclaredReceipt> Optional = Define
+        .Post<FormDeclaredInput, FormDeclaredReceipt>("/form-parts/declared-optional")
+        .FormEncoded();
+}
+
 /// <summary>The MVC handlers for <see cref="FormPartNameTests"/>.</summary>
 [ApiController]
 public sealed class FormPartController : ControllerBase
@@ -1385,4 +1615,7 @@ public sealed class FormPartController : ControllerBase
 
     [HttpPost("/form-parts/mvc/in-place")]
     public string InPlace([FromForm] FormInPlace form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/declared")]
+    public string Declared([FromForm] FormDeclaredInput form) => FormEcho.Of(form);
 }

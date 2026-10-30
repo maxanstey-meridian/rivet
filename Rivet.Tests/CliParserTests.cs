@@ -382,13 +382,11 @@ public sealed class CliParserTests
 
         foreach (var args in invalidArguments)
         {
-            RivetOptions? options = null;
-            var stderr = CompilationHelper.CaptureStdErr(() => options = CliParser.ParseArgs(args));
+            var exception = Assert.Throws<RivetUserException>(() => CliParser.ParseArgs(args));
 
-            Assert.Null(options);
-            Assert.Contains(
-                "--security with --from-openapi accepts one security scheme name",
-                stderr
+            Assert.StartsWith(
+                "error RIV2018: --security with --from-openapi accepts one security scheme name",
+                exception.Message
             );
         }
     }

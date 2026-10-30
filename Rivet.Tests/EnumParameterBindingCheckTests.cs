@@ -879,21 +879,26 @@ public sealed class EnumParameterBindingCheckTests
     }
 
     [Theory]
-    [InlineData("[FromQuery] string? Name")]
-    [InlineData("Microsoft.AspNetCore.Http.IFormFile? Name")]
+    [InlineData("[FromQuery] public string? Name")]
+    [InlineData("public Microsoft.AspNetCore.Http.IFormFile? Name")]
     public void Mvc_ApiController_Complex_Parameter_With_A_Sourced_Member_Is_Reported(
         string otherMember
     )
     {
         // InferParameterBindingInfoConvention gives a complex type no binding source when one
-        // of its members carries its own, so the type isn't a body: its other members bind
+        // of its properties carries its own, so the type isn't a body: its other members bind
         // from route, query and form, the enum among them.
         var request = $$"""
             using Microsoft.AspNetCore.Mvc;
 
             namespace Test;
 
-            public sealed record StreetRequest(StreetKind Kind, {{otherMember}});
+            public sealed class StreetRequest
+            {
+                public StreetKind Kind { get; set; }
+
+                {{otherMember}} { get; set; }
+            }
             """;
 
         var warnings = RunCheck(
@@ -906,6 +911,29 @@ public sealed class EnumParameterBindingCheckTests
         var warning = AssertReported(warnings);
         Assert.Equal("restricted_byway", warning.Expected);
         Assert.Contains("MVC parameter 'request.Kind'", warning.Message);
+    }
+
+    [Theory]
+    [InlineData("[FromQuery] string? Name")]
+    [InlineData("Microsoft.AspNetCore.Http.IFormFile? Name")]
+    public void Mvc_ApiController_Positional_Record_Sourced_Only_Through_Its_Constructor_Is_A_Body(
+        string otherMember
+    )
+    {
+        // Inference reads the properties MVC's metadata lists, which leave out those a record
+        // constructor binds, so a source on a constructor parameter counts for nothing and the
+        // record is a JSON body (MvcBindingHostTests.ApiController_inference_reads_every_property_MVC_lists).
+        var request = $$"""
+            using Microsoft.AspNetCore.Mvc;
+
+            namespace Test;
+
+            public sealed record StreetRequest(StreetKind Kind, {{otherMember}});
+            """;
+
+        AssertNotReported(
+            RunCheck(Contract, StreetKind(Snake), request, MvcHandler("StreetRequest request"))
+        );
     }
 
     [Theory]
@@ -1305,8 +1333,8 @@ public sealed class EnumParameterBindingCheckTests
             CompilationHelper.WalkEndpoints(compilation, discovered, walker)
         );
 
-        Assert.StartsWith($"error {Diagnostics.BindingInferenceUnreadable}: ", exception.Message);
-        Assert.Equal("RIV1115", Diagnostics.BindingInferenceUnreadable);
+        Assert.StartsWith($"error {Diagnostics.UnreadableMvcBindingSetup}: ", exception.Message);
+        Assert.Equal("RIV1115", Diagnostics.UnreadableMvcBindingSetup);
     }
 
     [Fact]

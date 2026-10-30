@@ -77,17 +77,18 @@ internal static class EmitPipeline
         {
             if (specPath is null)
             {
-                // CliParser rejects --verify without a target; belt-and-braces.
-                Console.Error.WriteLine(
-                    "error: '--verify' needs --output or --openapi — the committed spec to compare against"
+                throw new InvalidOperationException(
+                    "--verify reached emission with no spec path; CliParser refuses it without --output or --openapi."
                 );
-                return 1;
             }
 
             if (!File.Exists(specPath))
             {
                 Console.Error.WriteLine(
-                    $"error: --verify: {specPath} does not exist — run the same command without --verify to generate it"
+                    Diagnostics.Format(
+                        Diagnostics.CommittedSpecOutOfDate,
+                        $"--verify: {specPath} does not exist — run the same command without --verify to generate it"
+                    )
                 );
                 return 1;
             }
@@ -96,7 +97,10 @@ internal static class EmitPipeline
             if (!string.Equals(committed, openApiJson, StringComparison.Ordinal))
             {
                 Console.Error.WriteLine(
-                    $"error: --verify: {specPath} is stale — the source no longer matches it. Regenerate (run without --verify) and commit the result."
+                    Diagnostics.Format(
+                        Diagnostics.CommittedSpecOutOfDate,
+                        $"--verify: {specPath} is stale — the source no longer matches it. Regenerate (run without --verify) and commit the result."
+                    )
                 );
                 return 1;
             }

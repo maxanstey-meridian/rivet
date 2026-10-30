@@ -82,6 +82,8 @@ public sealed class ImportMetricTests
             Diagnostics.ImportEquivalentPathTemplateMerged => "equivalent-path-template-merged",
             Diagnostics.ImportUnsatisfiableSecurity => "unsatisfiable-security-dropped",
             Diagnostics.ImportIntegerEnumValueUnheld => "integer-enum-value-unheld",
+            // A closed schema whose record stays open because the schema contradicts itself.
+            Diagnostics.ImportClosedSchemaLeftOpen => "closed-schema-left-open",
             _ => $"UNCATEGORIZED: {warning}",
         };
 

@@ -244,6 +244,52 @@ internal sealed class SchemaMapper
     }
 
     /// <summary>
+    /// <paramref name="records"/>, every one the import writes, with each closed record whose
+    /// schema contradicts itself in a way only the whole import shows opened again (RIV3033):
+    /// one another record extends, which adds members its <c>additionalProperties: false</c>
+    /// refuses; a polymorphic variant, whose discriminator System.Text.Json reads as an unknown
+    /// member when the variant is read on its own (pinned by OpaqueCarrierFidelityTests); and
+    /// a component an allOf composes, whose closure refuses the members the composition adds.
+    /// </summary>
+    public IReadOnlyList<GeneratedRecord> SettleClosedRecords(
+        IReadOnlyList<GeneratedRecord> records
+    )
+    {
+        var extendedBy = records
+            .Where(record => record.BaseTypeName is not null)
+            .GroupBy(record => record.BaseTypeName!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.Ordinal);
+        var byName = records
+            .GroupBy(record => record.Name, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        return records
+            .Select(record =>
+            {
+                if (!record.IsClosed)
+                {
+                    return record;
+                }
+                var why =
+                    extendedBy.TryGetValue(record.Name, out var child)
+                        ? $"'{child}' extends it, adding members its closure refuses"
+                    : record.BaseTypeName is { } baseName
+                        ? $"it is a polymorphic variant of '{baseName}', and System.Text.Json would refuse its "
+                            + $"'{byName.GetValueOrDefault(baseName)?.Polymorphism?.DiscriminatorPropertyName}' "
+                            + "discriminator as an unknown member wherever the variant is read on its own"
+                    : _ctx.AllOfBranches.TryGetValue(record.Name, out var composition)
+                        ? $"'{composition}' composes it in an allOf, adding members its closure refuses"
+                    : null;
+                if (why is null)
+                {
+                    return record;
+                }
+                _ctx.WarnClosedSchemaLeftOpen(record.Name, why);
+                return record with { IsClosed = false };
+            })
+            .ToList();
+    }
+
+    /// <summary>
     /// Walk #/components/schemas and return C# type representations.
     /// </summary>
     public SchemaMapResult MapSchemas(
@@ -632,7 +678,8 @@ internal sealed class SchemaMapper
                                 HasExtensionData: schema.AdditionalPropertiesAllowed,
                                 DeclaresAdditionalProperties: SchemaClassifier.DeclaresAdditionalProperties(
                                     schema
-                                )
+                                ),
+                                IsClosed: !schema.AdditionalPropertiesAllowed
                             )
                         );
                     }
@@ -1980,6 +2027,13 @@ internal sealed class SchemaMapper
 
         var parent = _hierarchyRecords[parentKey];
         var parts = OwnParts(schema);
+        if (parts.Any(part => !part.AdditionalPropertiesAllowed))
+        {
+            _ctx.WarnClosedSchemaLeftOpen(
+                name,
+                "it is an allOf composition, where a closed part refuses the members the other parts add"
+            );
+        }
         var required = member.Required.ToHashSet(StringComparer.Ordinal);
         // A restatement that differs from the inherited declaration only in documentation is
         // the inherited member. It isn't extracted, so no inline type is synthesized for it: a

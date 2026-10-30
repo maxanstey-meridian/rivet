@@ -76,7 +76,7 @@ public static class Diagnostics
     public const string UnmodelledNumberHandling = "RIV1112";
     public const string UnreadableContractEndpoint = "RIV1113";
     public const string InvalidSecurityDeclaration = "RIV1114";
-    public const string BindingInferenceUnreadable = "RIV1115";
+    public const string UnreadableMvcBindingSetup = "RIV1115";
     public const string AmbiguousJsonConstructor = "RIV1116";
     public const string SchemaTypeOnNonPrimitive = "RIV1117";
     public const string InvalidJsonExtensionData = "RIV1118";
@@ -87,6 +87,7 @@ public static class Diagnostics
     public const string InvalidBuilderArgument = "RIV1123";
     public const string UnreadableFunctionsHostJson = "RIV1124";
     public const string RouteConstraintContradictsType = "RIV1125";
+    public const string CompilationFailed = "RIV1126";
 
     // RIV1024-RIV1099 were once reserved for the dropped rivet/php runtime; never reused.
 
@@ -111,6 +112,9 @@ public static class Diagnostics
     public const string PreservedFieldUnattachable = "RIV2016";
     public const string InvalidContractJson = "RIV2017";
     public const string InvalidSecurityOption = "RIV2018";
+    public const string FormFieldAnnotationDropped = "RIV2019";
+    public const string CommittedSpecOutOfDate = "RIV2020";
+    public const string InputPathNotFound = "RIV2021";
 
     // ----- RIV3xxx: import -----
     public const string ImportAliasCycleBroken = "RIV3001";
@@ -153,6 +157,7 @@ public static class Diagnostics
     public const string ImportUnsatisfiableSecurity = "RIV3030";
     public const string ImportIntegerEnumValueUnheld = "RIV3031";
     public const string InvalidOpenApiDocument = "RIV3032";
+    public const string ImportClosedSchemaLeftOpen = "RIV3033";
 
     // ----- RIV4xxx: coverage -----
     public const string CoverageMissingImplementation = "RIV4001";
@@ -162,8 +167,8 @@ public static class Diagnostics
     public const string CoverageUnbindableEnumParameter = "RIV4005";
     public const string CoverageInputBindingMismatch = "RIV4006";
 
-    // RIV4007 is skipped, not retired: it named BindingInferenceUnreadable in an unreleased
-    // commit before that became RIV1115, so it stays unused to keep git history unambiguous.
+    // RIV4007 is skipped, not retired: an unreleased commit gave it to what is now RIV1115
+    // (UnreadableMvcBindingSetup), so it stays unused to keep git history unambiguous.
     public const string CoverageSecurityMismatch = "RIV4008";
     public const string CoverageAuthorizationUnreadable = "RIV4009";
 
@@ -263,7 +268,7 @@ public static class Diagnostics
         ),
         [InvalidRequestBodyProvenance] = new(
             Severity.Error,
-            "A [RivetRequestBody] type is not represented independently by the endpoint input type."
+            "A [RivetRequestBody] type is not represented independently by the endpoint input type, or carries files the input type doesn't."
         ),
         [ImportedSchemaProvenanceConflict] = new(
             Severity.Error,
@@ -271,7 +276,7 @@ public static class Diagnostics
         ),
         [UnresolvedBindingSource] = new(
             Severity.Error,
-            "A parameter's binding source cannot be established from explicit declarations or the retained narrow conventions, a [RivetEndpoint] method or abstract [RivetContract] method has no HTTP verb or no route template, or a form input member is read under different names, or from outside the form, by the hosts that can serve it — the contract is refused, not silently completed."
+            "A parameter's binding source cannot be established from explicit declarations or the retained narrow conventions, a [RivetEndpoint] method or abstract [RivetContract] method has no HTTP verb or no route template, or a form input member is read under different names, or from outside the form, by the hosts that can serve it, or skipped by only one of them (MVC's [BindNever], [BindingBehavior(Never)] or [Bind] include list, the form mapper's [IgnoreDataMember]) — the contract is refused, not silently completed."
         ),
         [BodyForbiddenStatusExample] = new(
             Severity.Error,
@@ -317,9 +322,9 @@ public static class Diagnostics
             Severity.Error,
             "A contract endpoint's security calls contradict each other (.Anonymous() alongside .Secure() or .OrAnonymous(), or .AndSecure() with no .Secure() alternative to join), or the same contradiction among [RivetSecure]/[RivetAndSecure]/[RivetOrAnonymous]/[RivetAnonymous] on a controller or action (where [RivetAndSecure] joins the [RivetSecure] before it in source order, and may not be split across partial declarations in different files) — generation fails instead of guessing which one was meant."
         ),
-        [BindingInferenceUnreadable] = new(
+        [UnreadableMvcBindingSetup] = new(
             Severity.Error,
-            "ApiBehaviorOptions.SuppressInferBindingSourcesForParameters is assigned a value that isn't a compile-time constant, so whether MVC infers binding sources can't be read; generation and --check stop. Read only when an annotated MVC action (generation) or a contract's MVC implementation (--check) is on an [ApiController] controller."
+            "MVC binding setup that can't be read statically, so what MVC binds can't be known; generation and --check stop. ApiBehaviorOptions.SuppressInferBindingSourcesForParameters assigned a value that isn't a compile-time constant (read only when an annotated MVC action, in generation, or a contract's MVC implementation, in --check, is on an [ApiController] controller); a property filter (IPropertyFilterProvider) other than [Bind]'s include list on a parameter, type or member MVC binds member by member, or on a contract's form input type; or a BindingBehaviorAttribute subclass that sets its own behaviour. A minimal-API-only check never reads the last two."
         ),
         [AmbiguousJsonConstructor] = new(
             Severity.Error,
@@ -360,6 +365,10 @@ public static class Diagnostics
         [RouteConstraintContradictsType] = new(
             Severity.Error,
             "A route constraint can't hold with the type that declares its token ({id:int} over a string, min(1) on a string, two patterns, bounds that admit no value), so routing admits one thing and the handler binds another and generation fails instead of picking one for the spec."
+        ),
+        [CompilationFailed] = new(
+            Severity.Error,
+            "The C# can't be read: no MSBuild instance can be found to load the --project, the project yields no compilation, or the project or source files don't compile — generation, --check and --routes stop, listing the first compiler errors (any workspace failures are printed above)."
         ),
         [TaggedUnionComponentCollision] = new(
             Severity.Error,
@@ -419,11 +428,23 @@ public static class Diagnostics
         ),
         [InvalidContractJson] = new(
             Severity.Error,
-            "--from contract JSON that doesn't read (not JSON, or not the contract schema's shape) or says something the IR can't hold: a tagged-union variant whose discriminatorSchema isn't a JSON object or can't carry its tag, a variant with a description, scalarMetadata or discriminatorSchema that isn't an inline object carrying the tag property, or a routeTemplate token carrying routing syntax (a constraint, ?, a default or a catch-all), which would be written verbatim into the path key — generation fails."
+            "--from contract JSON that doesn't read (not JSON, or not the contract schema's shape) or says something the IR can't hold: a tagged-union variant whose discriminatorSchema isn't a JSON object or can't carry its tag, a variant with a description, scalarMetadata or discriminatorSchema that isn't an inline object carrying the tag property, a routeTemplate token carrying routing syntax (a constraint, ?, a default or a catch-all), which would be written verbatim into the path key, or a formField param whose style isn't form, spaceDelimited, pipeDelimited, or deepObject, the styles an Encoding Object holds — generation fails."
         ),
         [InvalidSecurityOption] = new(
             Severity.Error,
-            "A --security value isn't a scheme Rivet can define (bearer[:format], cookie:name, apikey:location:name, or name=<one of those>) — generation fails instead of guessing what was meant."
+            "A --security value isn't a scheme Rivet can define (bearer[:format], cookie:name, apikey:location:name, or name=<one of those>), or, with --from-openapi, isn't one scheme name — generation or import fails instead of guessing what was meant."
+        ),
+        [FormFieldAnnotationDropped] = new(
+            Severity.Warning,
+            "A --from contract's form field states something its form part can't carry: an example's summary, description, or externalValue; an example with no value (only an externalValue or a $ref); its examples when the part's schema is its input record's; or allowEmptyValue (query parameters only) — that much is dropped, and the rest reaches the spec."
+        ),
+        [CommittedSpecOutOfDate] = new(
+            Severity.Error,
+            "--verify found the committed spec missing, or different from the spec the input produces now — nothing is written, and the run exits 1."
+        ),
+        [InputPathNotFound] = new(
+            Severity.Error,
+            "An input path doesn't exist: the --from contract JSON, the --from-openapi document, a source file, or the --project file — Rivet stops before reading anything."
         ),
         [ImportAliasCycleBroken] = new(
             Severity.Warning,
@@ -491,7 +512,7 @@ public static class Diagnostics
         ),
         [ImportSchemalessParameterDropped] = new(
             Severity.Warning,
-            "Parameter declares content (or nothing) instead of a schema — Rivet parameters carry a schema, so the parameter is dropped."
+            "Parameter declares content instead of a schema (or, off the path, neither) — Rivet parameters carry a schema, so the parameter is dropped; a path parameter declared with content drops its whole operation, since its route token would be left untyped."
         ),
         [ImportCallbackDropped] = new(
             Severity.Warning,
@@ -516,6 +537,10 @@ public static class Diagnostics
         [InvalidOpenApiDocument] = new(
             Severity.Error,
             "The --from-openapi document is invalid: not a JSON object, one the OpenAPI reader refuses, a security scheme missing its type or a field its type needs, a security requirement naming no scheme, a component example with both value and externalValue, a local reference that targets nothing or loops, a required field missing or mistyped, a path parameter with neither a schema nor content, or an operation whose path template has a token no path parameter declares — import fails before writing anything."
+        ),
+        [ImportClosedSchemaLeftOpen] = new(
+            Severity.Warning,
+            "A schema says additionalProperties: false but contradicts itself (another record extends it, it is an allOf composition or a closed allOf branch, it is a polymorphic variant, or it is a generic template with open instances) — its record stays open, accepting and dropping an unknown member instead of refusing it."
         ),
         [CoverageMissingImplementation] = new(
             Severity.Warning,
@@ -547,7 +572,7 @@ public static class Diagnostics
         ),
         [CoverageAuthorizationUnreadable] = new(
             Severity.Error,
-            "Whether a handler requires authentication depends on authorization setup --check can't read statically (a requirement applied only under a condition, a policy it can't follow, or a convention on a builder it can't trace to its Map* call), so --check reports it instead of guessing, unless [AllowAnonymous] or the rest of the setup decides the endpoint either way."
+            "Whether a handler requires authentication depends on authorization setup --check can't read statically (a requirement applied only under a condition, a policy it can't follow, a named policy with no readable registration, a convention on a builder it can't trace to its Map* call, or a Map* call on a builder it can't trace, through locals, conventions, and route-group helpers, to its MapGroup or the app), so --check reports it instead of guessing, unless [AllowAnonymous] or the rest of the setup decides the endpoint either way. Sites under one condition fall together."
         ),
     };
 

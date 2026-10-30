@@ -64,6 +64,8 @@ public static class CoverageChecker
                 fieldMap[field] = endpoint;
             }
         }
+
+        var origins = new BuilderOrigins(compilation, wkt);
         if (fieldMap.Count == 0)
         {
             return
@@ -71,6 +73,7 @@ public static class CoverageChecker
                 .. SecurityWarnings(
                     compilation,
                     wkt,
+                    origins,
                     discovered,
                     security,
                     fieldMap,
@@ -133,6 +136,7 @@ public static class CoverageChecker
 
                 var contexts = ResolveImplementations(
                     wkt,
+                    origins,
                     adapterType,
                     mapHandlers,
                     invocation,
@@ -175,6 +179,7 @@ public static class CoverageChecker
             .. SecurityWarnings(
                 compilation,
                 wkt,
+                origins,
                 discovered,
                 security,
                 fieldMap,
@@ -399,9 +404,17 @@ public static class CoverageChecker
             // mapped with both MapGet and MapPost binds an unattributed array from the query on
             // one and the body on the other. Each mapping is read once, however many terminals
             // it returns, and a warning more than one mapping gives (they point at the handler
-            // or its parameter) is reported once.
+            // or its parameter, or two mappings share a route and verb) is reported once.
             var reported = new HashSet<CoverageWarning>();
             var mappings = new HashSet<(IMethodSymbol, SyntaxTree?, TextSpan?, string?, bool)>();
+            void Report(CoverageWarning warning)
+            {
+                if (reported.Add(warning))
+                {
+                    warnings.Add(warning);
+                }
+            }
+
             foreach (var implementation in fieldImplementations)
             {
                 if (
@@ -462,7 +475,7 @@ public static class CoverageChecker
                     )
                 )
                 {
-                    warnings.Add(
+                    Report(
                         new CoverageWarning(
                             CoverageWarningKind.HttpMethodMismatch,
                             field.ContainingType.Name,
@@ -482,7 +495,7 @@ public static class CoverageChecker
                     )
                 )
                 {
-                    warnings.Add(
+                    Report(
                         new CoverageWarning(
                             CoverageWarningKind.RouteMismatch,
                             field.ContainingType.Name,
@@ -527,9 +540,12 @@ public static class CoverageChecker
     /// <c>[RivetEndpoint]</c> method or a <c>[RivetClient]</c> controller's action, its own
     /// (<see cref="SecurityDeclaration.FromAttributes"/>); else the document's default. None at
     /// all is what the emitted OpenAPI says it is: no credentials needed. An instance method is
-    /// an MVC action; a static one is a minimal-API handler, compared at each Map* call that
-    /// names it as a method group. A secured spec over a handler anyone can reach, and a spec
-    /// admitting anonymous callers over a handler that requires authentication, are RIV4008.
+    /// an MVC action; a static one is a minimal-API handler, compared at each of its mappings:
+    /// each Map* call that names it as a method group, in each route-group chain
+    /// <see cref="BuilderOrigins.Chains"/> finds. A handler with more than one mapping is
+    /// named by the one each warning is about. A secured spec over a handler anyone can reach,
+    /// and a spec admitting anonymous callers over a handler that requires authentication, are
+    /// RIV4008.
     /// When the document declares no security scheme at all, the handlers that require
     /// authentication under a spec that says nothing are one RIV4008, since one missing default
     /// is the cause. Authorization --check can't read is RIV4009, never a guess. A handler is
@@ -539,6 +555,7 @@ public static class CoverageChecker
     private static IEnumerable<CoverageWarning> SecurityWarnings(
         Compilation compilation,
         WellKnownTypes wkt,
+        BuilderOrigins origins,
         DiscoveredSymbols discovered,
         ContractSecurityMetadata? security,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap,
@@ -552,9 +569,13 @@ public static class CoverageChecker
             yield break;
         }
 
-        var authorization = HandlerAuthorization.Scan(compilation, wkt);
+        var authorization = HandlerAuthorization.Scan(compilation, wkt, origins);
         var comparison = new SecurityComparison(security);
-        var compared = new HashSet<(ISymbol, ISymbol, SyntaxNode?)>();
+        var compared = new HashSet<(ISymbol, ISymbol, BuilderChain?)>();
+
+        // Two mappings at one route (a helper called twice) give the same warning: it's
+        // reported once.
+        var reported = new HashSet<CoverageWarning>();
         var handled = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
         foreach (var (field, endpoint) in fieldMap)
         {
@@ -570,13 +591,14 @@ public static class CoverageChecker
                 endpoint.Security,
                 AttributesOn: null
             );
-            foreach (
-                var context in fieldImplementations.Select(implementation => implementation.Context)
-            )
+            var contexts = fieldImplementations
+                .Select(implementation => implementation.Context)
+                .ToList();
+            foreach (var context in contexts)
             {
                 if (
                     context.Handler is not { } handler
-                    || !compared.Add((field, handler, context.MapCall?.Syntax))
+                    || !compared.Add((field, handler, context.Chain))
                 )
                 {
                     continue;
@@ -588,18 +610,33 @@ public static class CoverageChecker
                     { BindingHost: ParameterBindingHost.Functions } => authorization.ForFunction(
                         handler
                     ),
-                    {
-                        BindingHost: ParameterBindingHost.MinimalApi,
-                        MapCall: { } mapCall,
-                        Groups: { } groups,
-                    } => authorization.ForMinimalApi(handler, mapCall, groups.Groups, groups.Root),
+                    { BindingHost: ParameterBindingHost.MinimalApi, Chain: { } chain } =>
+                        authorization.ForMinimalApi(handler, chain),
                     { BindingHost: ParameterBindingHost.Mvc } => authorization.ForMvc(handler),
                     _ => null,
                 };
+
+                // A handler mapped more than once is named by the mapping each warning is about.
+                var mappings = contexts
+                    .Where(other =>
+                        SymbolEqualityComparer.Default.Equals(other.Handler, handler)
+                        && other.Chain is not null
+                    )
+                    .Select(other => other.Chain)
+                    .Distinct()
+                    .Count();
+                var mappedSpec =
+                    mappings > 1 && context.Chain is { } mapped
+                        ? spec with
+                        {
+                            Label = $"{spec.Label}, {Mapping(mapped, context.Route)}",
+                        }
+                        : spec;
                 if (
                     verdict is not null
-                    && comparison.Compare(spec, verdict, handler.Locations.FirstOrDefault())
+                    && comparison.Compare(mappedSpec, verdict, handler.Locations.FirstOrDefault())
                         is { } warning
+                    && reported.Add(warning)
                 )
                 {
                     yield return warning;
@@ -614,36 +651,49 @@ public static class CoverageChecker
                 continue;
             }
 
-            IEnumerable<Verdict> verdicts;
+            List<(Verdict Verdict, SecuritySpec Spec)> verdicts;
             if (EndpointWalker.HostOf(handler) == ParameterBindingHost.MinimalApi)
             {
                 mapHandlers ??= IndexMapHandlers(compilation, wkt);
-                verdicts = handler.SourceBody() is { } body
-                    ? mapHandlers
-                        .GetValueOrDefault((body.Syntax.SyntaxTree, body.Syntax.Span))
-                        ?.Select(mapped =>
-                        {
-                            var groups = ResolveMapGroups(wkt, mapped.MapCall.Arguments[0].Value);
-                            return authorization.ForMinimalApi(
-                                mapped.Symbol,
-                                mapped.MapCall,
-                                groups.Groups,
-                                groups.Root
-                            );
-                        })
+                var chains = handler.SourceBody() is { } body
+                    ? (
+                        mapHandlers.GetValueOrDefault((body.Syntax.SyntaxTree, body.Syntax.Span))
                         ?? []
+                    )
+                        .SelectMany(mapped =>
+                            origins
+                                .Chains(mapped.MapCall)
+                                .Select(chain => (mapped.Symbol, Chain: chain))
+                        )
+                        .ToList()
                     : [];
+                verdicts =
+                [
+                    .. chains.Select(mapped =>
+                        (
+                            authorization.ForMinimalApi(mapped.Symbol, mapped.Chain),
+                            chains.Count > 1
+                                ? spec with
+                                {
+                                    Label =
+                                        $"{spec.Label}, {Mapping(mapped.Chain, MappedRoute(mapped.Chain))}",
+                                }
+                                : spec
+                        )
+                    ),
+                ];
             }
             else
             {
-                verdicts = [authorization.ForMvc(handler)];
+                verdicts = [(authorization.ForMvc(handler), spec)];
             }
 
-            foreach (var verdict in verdicts)
+            foreach (var (verdict, mappedSpec) in verdicts)
             {
                 if (
-                    comparison.Compare(spec, verdict, handler.Locations.FirstOrDefault()) is
-                    { } warning
+                    comparison.Compare(mappedSpec, verdict, handler.Locations.FirstOrDefault())
+                        is { } warning
+                    && reported.Add(warning)
                 )
                 {
                     yield return warning;
@@ -765,8 +815,8 @@ public static class CoverageChecker
                     $"{spec.Label}: --check can't tell whether the handler requires "
                         + $"authentication: {string.Join("; ", verdict.Because)}. Apply "
                         + "authorization unconditionally, from values --check can read (a "
-                        + "constant policy name, or a policy built inline with "
-                        + "AuthorizationPolicyBuilder), or decide the endpoint with "
+                        + "policy name registered inline with AddPolicy, or a policy built "
+                        + "inline with AuthorizationPolicyBuilder), or decide the endpoint with "
                         + "[AllowAnonymous]."
                 );
             }
@@ -787,7 +837,11 @@ public static class CoverageChecker
 
                 if (_noSchemes)
                 {
-                    _undeclared.Add(spec.Label);
+                    if (!_undeclared.Contains(spec.Label))
+                    {
+                        _undeclared.Add(spec.Label);
+                    }
+
                     return null;
                 }
 
@@ -937,10 +991,13 @@ public static class CoverageChecker
 
     /// <summary>
     /// The endpoints <paramref name="terminal"/> implements: its MVC action or Azure Function,
-    /// or else one per Map* call of the minimal-API handler it's returned from.
+    /// or else one per mapping of the minimal-API handler it's returned from, each Map* call
+    /// in each route-group chain it's made in (<see cref="BuilderOrigins.Chains"/>). When
+    /// there's more than one, an unresolved route says which mapping it is.
     /// </summary>
     private static IReadOnlyList<EndpointContext> ResolveImplementations(
         WellKnownTypes wkt,
+        BuilderOrigins origins,
         INamedTypeSymbol? adapterType,
         MapHandlerIndex mapHandlers,
         IInvocationOperation terminal,
@@ -968,11 +1025,49 @@ public static class CoverageChecker
             }
         }
 
-        return MapHandler(mapHandlers, terminal)
-            .Select(handler => TryResolveMinimalApi(wkt, adapterType, terminal, handler, fieldMap))
+        var contexts = MapHandler(mapHandlers, terminal)
+            .Where(handler =>
+                IsReturnedThroughAdapter(terminal, handler.Body, "ToResult", adapterType)
+            )
+            .SelectMany(handler =>
+                origins
+                    .Chains(handler.MapCall)
+                    .Select(chain => TryResolveMinimalApi(wkt, handler, chain, fieldMap))
+            )
             .Where(context => context.IsEndpoint)
             .ToList();
+        return contexts.Count > 1
+            ?
+            [
+                .. contexts.Select(context =>
+                    context is { RouteError: { } routeError, Chain: { } chain }
+                        ? context with
+                        {
+                            RouteError = $"{routeError} ({Mapping(chain, null)})",
+                        }
+                        : context
+                ),
+            ]
+            : contexts;
     }
+
+    /// <summary>
+    /// Which mapping of a handler mapped more than once a warning is about: its route, or
+    /// where --check lost the trace when that can't be read.
+    /// </summary>
+    private static string Mapping(BuilderChain chain, string? route) =>
+        route is not null ? $"as mapped at {route}"
+        : chain.Unresolved
+            ? $"as mapped on '{chain.End.Syntax}' at {chain.End.Syntax.SourcePosition()}"
+        : $"as mapped by the {chain.MapCall.TargetMethod.Name} call at {chain.MapCall.Syntax.SourcePosition()}";
+
+    /// <summary>A chain's route from constants alone: its prefix and its Map* call's template.</summary>
+    private static string? MappedRoute(BuilderChain chain) =>
+        chain.Prefix() is { } prefix
+        && Argument(chain.MapCall, "pattern")?.ConstantValue
+            is { HasValue: true, Value: string template }
+            ? TransportIdentity.NormalizeRoute($"{prefix}/{template.Trim('/')}")
+            : null;
 
     /// <summary>
     /// The method declaring the terminal and its operation body, when the method returns
@@ -1032,19 +1127,12 @@ public static class CoverageChecker
 
     private static EndpointContext TryResolveMinimalApi(
         WellKnownTypes wkt,
-        INamedTypeSymbol adapterType,
-        IInvocationOperation terminal,
         MappedHandler handler,
+        BuilderChain chain,
         IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
     )
     {
         var mapCall = handler.MapCall;
-        if (!IsReturnedThroughAdapter(terminal, handler.Body, "ToResult", adapterType))
-        {
-            return EndpointContext.None;
-        }
-
-        var groups = ResolveMapGroups(wkt, mapCall.Arguments[0].Value);
 
         IReadOnlyList<string> methods;
         if (_minimalApiMethodMap.TryGetValue(mapCall.TargetMethod.Name, out var verb))
@@ -1078,7 +1166,7 @@ public static class CoverageChecker
                     BindingHost = ParameterBindingHost.MinimalApi,
                     InfersBody = true,
                     MapCall = mapCall,
-                    Groups = groups,
+                    Chain = chain,
                 };
             }
 
@@ -1107,7 +1195,7 @@ public static class CoverageChecker
             // Constant MapGroup receiver chains: prepend accumulated group prefixes
             // (nested groups accumulate). Unresolvable receivers keep the route
             // unresolved rather than inventing a prefix.
-            var groupPrefix = groups.Prefix();
+            var groupPrefix = chain.Prefix();
             routeError = groupPrefix is null
                 ? "unresolved route: receiver chain does not resolve to constant MapGroup prefixes"
                 : null;
@@ -1126,7 +1214,7 @@ public static class CoverageChecker
             BindingHost = ParameterBindingHost.MinimalApi,
             InfersBody = EnumParameterBinding.MinimalApiInfersBody(methods),
             MapCall = mapCall,
-            Groups = groups,
+            Chain = chain,
         };
     }
 
@@ -1322,115 +1410,6 @@ public static class CoverageChecker
                     : Passed(leaf)
                 );
     }
-
-    /// <summary>
-    /// The MapGroup calls a minimal-API receiver is built from, innermost first, and the
-    /// receiver the chain starts from. It follows locals with one known value and convention
-    /// calls that hand back the builder they're given (<c>.RequireAuthorization()</c>,
-    /// <c>.WithTags(...)</c>), so <c>var api = app.MapGroup("/api").RequireAuthorization();</c>
-    /// still names the group. A local it can't follow leaves the chain unresolved, and so does
-    /// a route group it can't trace to its MapGroup call. The route
-    /// prefix (<see cref="Prefix"/>) and the groups' authorization (K.5) both read it.
-    /// </summary>
-    private sealed record MapGroupChain(
-        IReadOnlyList<IInvocationOperation> Groups,
-        bool Unresolved,
-        IOperation Root
-    )
-    {
-        /// <summary>
-        /// The accumulated prefix, or null when it can't be known statically: the chain is
-        /// unresolved, or a prefix isn't a compile-time constant (mirroring the extractor's
-        /// constant-string policy). A receiver that isn't a group, the app or any other root,
-        /// adds no prefix.
-        /// </summary>
-        public string? Prefix()
-        {
-            if (Unresolved)
-            {
-                return null;
-            }
-
-            var prefix = "";
-            foreach (var group in Groups.Reverse())
-            {
-                if (
-                    Argument(group, "prefix")?.ConstantValue
-                    is not { HasValue: true, Value: string part }
-                )
-                {
-                    return null;
-                }
-
-                prefix = TransportIdentity.NormalizeRoute($"{prefix}/{part.Trim('/')}");
-            }
-
-            return prefix;
-        }
-    }
-
-    private static MapGroupChain ResolveMapGroups(WellKnownTypes wkt, IOperation receiver)
-    {
-        var groups = new List<IInvocationOperation>();
-        var visitedLocals = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default);
-        var current = receiver;
-        while (true)
-        {
-            switch (WithoutImplicitConversions(current))
-            {
-                case ILocalReferenceOperation local:
-                    if (visitedLocals.Add(local.Local) && ProvenanceValue(local) is { } value)
-                    {
-                        current = value;
-                        continue;
-                    }
-
-                    return new MapGroupChain(groups, Unresolved: true, local);
-                case IInvocationOperation { TargetMethod.Name: "MapGroup" } group
-                    when SymbolEqualityComparer.Default.Equals(
-                        group.TargetMethod.ContainingType,
-                        wkt.EndpointRouteBuilderExtensions
-                    ):
-                    groups.Add(group);
-                    current = group.Arguments[0].Value;
-                    continue;
-                case IInvocationOperation call when PassedBuilder(call) is { } passed:
-                    current = passed;
-                    continue;
-                case var root:
-                    // A route group the chain doesn't reach a MapGroup call for (a parameter,
-                    // a field, or a helper's answer) has a prefix --check can't see, so the
-                    // route stays unresolved rather than losing it.
-                    return new MapGroupChain(
-                        groups,
-                        Unresolved: (root?.Type).DerivesFrom(wkt.RouteGroupBuilder),
-                        root!
-                    );
-            }
-        }
-    }
-
-    /// <summary>
-    /// The builder a convention call hands back, when it returns the type it takes: an
-    /// extension method returning its <c>this</c> parameter's type, as
-    /// <c>RequireAuthorization&lt;TBuilder&gt;(this TBuilder)</c> and <c>WithName</c> do, or an
-    /// instance method returning its receiver's. Null for anything else, a call that makes a
-    /// new builder (MapGroup, MapGet) included.
-    /// </summary>
-    internal static IOperation? PassedBuilder(IInvocationOperation call) =>
-        call switch
-        {
-            {
-                TargetMethod: { IsExtensionMethod: true, ReturnType: var returned },
-                Arguments: [var first, ..]
-            }
-                when first.Parameter is { Ordinal: 0 } parameter
-                    && SymbolEqualityComparer.Default.Equals(returned, parameter.Type) =>
-                first.Value,
-            { Instance: { Type: var receiverType } instance, TargetMethod.ReturnType: var returned }
-                when SymbolEqualityComparer.Default.Equals(returned, receiverType) => instance,
-            _ => null,
-        };
 
     private static EndpointContext TryResolveFunction(
         WellKnownTypes wkt,
@@ -1796,7 +1775,7 @@ public static class CoverageChecker
         /// <summary>A minimal API's Map* call, whose conventions K.5 reads.</summary>
         public IInvocationOperation? MapCall { get; init; }
 
-        /// <summary>The route groups a minimal API's Map* call is made on.</summary>
-        public MapGroupChain? Groups { get; init; }
+        /// <summary>The mapping a minimal API's Map* call is made in: its route-group chain.</summary>
+        public BuilderChain? Chain { get; init; }
     }
 }
