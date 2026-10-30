@@ -7065,6 +7065,109 @@ public sealed class OpenApiImporterTests
     }
 
     /// <summary>
+    /// A oneOf whose every branch adds nothing to the object around it (Vercel's
+    /// <c>connectConfigurations</c> item) is that object: a closed record with its members.
+    /// A branch that adds anything keeps the union.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "type": "object" }""", false)]
+    [InlineData("{}", false)]
+    [InlineData("""{ "type": "object", "properties": { "x": { "type": "string" } } }""", true)]
+    public void Composition_That_Adds_Nothing_Is_The_Object_It_Composes(string branch, bool union)
+    {
+        var spec = CompilationHelper.BuildSpec(
+            schemas: $$"""
+            "Project": {
+                "type": "object",
+                "properties": {
+                    "connectConfigurations": {
+                        "type": "array",
+                        "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                                "envId": { "type": "string" },
+                                "connectConfigurationId": { "type": "string" },
+                                "passive": { "type": "boolean" },
+                                "buildsEnabled": { "type": "boolean" }
+                            },
+                            "required": ["envId", "connectConfigurationId", "passive", "buildsEnabled"],
+                            "oneOf": [{{branch}}]
+                        }
+                    }
+                }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        var closed = result.Warnings.Where(warning =>
+            warning.StartsWith("RIV3033", StringComparison.Ordinal)
+        );
+        var types = result
+            .Files.Where(file => file.FileName.StartsWith("Types/", StringComparison.Ordinal))
+            .ToList();
+        if (union)
+        {
+            Assert.Single(closed);
+            Assert.Contains(types, file => file.Content.Contains("[RivetUnion]"));
+            return;
+        }
+        Assert.Empty(closed);
+        Assert.DoesNotContain(types, file => file.Content.Contains("RivetUnion"));
+        var item = Assert.Single(types, file => file.FileName != "Types/Project.cs");
+        Assert.Contains(
+            "[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]",
+            item.Content
+        );
+        // Every member is required, so none is nullable.
+        foreach (
+            var member in new[]
+            {
+                "string EnvId",
+                "string ConnectConfigurationId",
+                "bool Passive",
+                "bool BuildsEnabled",
+            }
+        )
+        {
+            Assert.Contains(member, item.Content);
+        }
+        Assert.DoesNotContain("?", item.Content.Split("record", 2)[1]);
+    }
+
+    /// <summary>
+    /// An <c>x-</c> entry under <c>paths</c> is an extension, not a path item: no drop pass
+    /// reads an operation in it, and its fields aren't preserved as a path's.
+    /// </summary>
+    [Fact]
+    public void Extension_Under_Paths_Is_Not_A_Path_Item()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "x-draft": {
+              "summary": "Not a path",
+              "get": {
+                "operationId": "draft",
+                "parameters": [{ "name": "id", "in": "path", "required": true, "content": { "text/plain": { "schema": { "type": "string" } } } }],
+                "security": [{ "missing": [] }],
+                "responses": { "204": { "description": "No Content" } }
+              }
+            },
+            "/pets": {
+              "get": { "operationId": "listPets", "responses": { "204": { "description": "No Content" } } }
+            }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("x-draft"));
+        using var emitted = CompilationHelper.EmitImported(result);
+        Assert.DoesNotContain("Not a path", emitted.RootElement.ToString());
+    }
+
+    /// <summary>
     /// A <c>$ref</c>'d path item's operations are held to the security rule (RIV3030) as an
     /// inline one's are: one naming only an undefined scheme goes, and its sibling stays.
     /// </summary>

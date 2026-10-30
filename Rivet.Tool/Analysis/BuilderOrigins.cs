@@ -68,6 +68,8 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                 );
             case IInvocationOperation call when PassedBuilder(call) is { } passed:
                 return Trace(passed, descended, path);
+            case IInvocationOperation call when MayHandBack(call):
+                return [Ends(TraceEnd.Untraced)];
             case IInvocationOperation:
                 return [Ends(TraceEnd.Made)];
             case IParameterReferenceOperation { Parameter: var parameter }:
@@ -461,6 +463,40 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                 _ => null,
             };
 
+    /// <summary>
+    /// Whether a call --check can't follow (no body, and not <see cref="PassedBuilder"/>'s
+    /// pass-through) may hand back a builder the project made, so the trace ends untraced
+    /// rather than at a builder the call made of its own:
+    /// <list type="bullet">
+    /// <item>a delegate, which may return a builder it captured;</item>
+    /// <item>a method the project declares without a body (an interface or abstract method),
+    /// whose implementations may return any builder the project made;</item>
+    /// <item>a call on, or given, a convention builder (a group or an endpoint's builder);</item>
+    /// <item>a call given a route builder (the app or a group) that returns one, as
+    /// <c>Lib.Wrap(IEndpointRouteBuilder)</c> returning a <c>RouteGroupBuilder</c> may hand
+    /// back the group it was given.</item>
+    /// </list>
+    /// A framework call that maps endpoints of its own (<c>MapHealthChecks</c>, <c>MapHub</c>)
+    /// is given the app or a group but returns only a convention builder for what it mapped,
+    /// so it made that builder.
+    /// </summary>
+    private bool MayHandBack(IInvocationOperation call)
+    {
+        var method = call.TargetMethod.ReducedFrom ?? call.TargetMethod;
+        IEnumerable<ITypeSymbol?> given =
+        [
+            call.Instance?.Type,
+            .. method.Parameters.Select(parameter => parameter.Type),
+        ];
+        return call.TargetMethod.MethodKind == MethodKind.DelegateInvoke
+            || !method.OriginalDefinition.DeclaringSyntaxReferences.IsEmpty
+            || given.Any(type => type.Implements(wkt.EndpointConventionBuilder))
+            || (
+                call.Type.Implements(wkt.EndpointRouteBuilder)
+                && given.Any(type => type.Implements(wkt.EndpointRouteBuilder))
+            );
+    }
+
     // ---------------------------------------------------------------
     // Conditions
     // ---------------------------------------------------------------
@@ -534,7 +570,7 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
     /// <summary>
     /// What each call to the local function <paramref name="function"/> runs only under,
     /// relative to <paramref name="origin"/>, through the local functions that call it in
-    /// turn. A call from inside its own call graph adds nothing; a delegate made from it
+    /// turn. A call back into a function already on the path adds nothing; a delegate made from it
     /// can't be followed.
     /// </summary>
     private List<Condition?> CapturedCalls(
@@ -578,6 +614,9 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                 null
             ))
         );
+
+        // The set holds the path only: another local function calling this one is its own way.
+        visiting.Remove(function);
         return conditions;
     }
 
@@ -894,7 +933,10 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
 /// <summary>How a trace ends.</summary>
 internal enum TraceEnd
 {
-    /// <summary>At the call that made the builder: a Map*, MapGroup, or MapControllers call, or another call without source.</summary>
+    /// <summary>
+    /// At the call that made the builder: a Map*, MapGroup, or MapControllers call, or another
+    /// call without source that made one of its own (<see cref="BuilderOrigins"/>' <c>MayHandBack</c> says which).
+    /// </summary>
     Made,
 
     /// <summary>At a parameter of a method nothing in the project calls or names.</summary>
@@ -903,7 +945,11 @@ internal enum TraceEnd
     /// <summary>At a lambda's parameter.</summary>
     Lambda,
 
-    /// <summary>At a value --check can't follow: a field, a local without one known value, or a helper's parameter handed on as a delegate.</summary>
+    /// <summary>
+    /// At a value --check can't follow: a field, a local without one known value, a helper's
+    /// parameter handed on as a delegate, a helper nesting itself, or a call without source
+    /// that may hand back a builder the project made.
+    /// </summary>
     Untraced,
 }
 

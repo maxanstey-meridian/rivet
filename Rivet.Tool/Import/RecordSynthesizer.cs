@@ -91,8 +91,9 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
 
     /// <summary>
     /// The <c>[RivetUnion]</c> wrapper for <paramref name="schema"/>'s oneOf or anyOf
-    /// <paramref name="variants"/>. It is never closed: its members come from the variants
-    /// (RIV3033).
+    /// <paramref name="variants"/>. It is never closed: its members come from the variants, so
+    /// a closed union with a variant that can be an object contradicts itself (RIV3033). One
+    /// whose variants are all scalars doesn't: additionalProperties constrains only objects.
     /// </summary>
     public GeneratedRecord ResolveUnionRecord(
         string name,
@@ -100,7 +101,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         IList<IOpenApiSchema> variants
     )
     {
-        if (!schema.AdditionalPropertiesAllowed)
+        if (!schema.AdditionalPropertiesAllowed && variants.Any(AdmitsObject))
         {
             ctx.WarnClosedSchemaLeftOpen(schema, name, ResolutionContext.ClosedUnionReason);
         }
@@ -147,6 +148,15 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             IsUnion: true
         );
     }
+
+    /// <summary>
+    /// Whether an instance of <paramref name="variant"/> (a <c>$ref</c> read through to its
+    /// target) can be an object: it says <c>type: object</c>, or says no type and isn't an enum.
+    /// </summary>
+    private static bool AdmitsObject(IOpenApiSchema variant) =>
+        variant.Type is { } type && type != 0
+            ? type.HasFlag(JsonSchemaType.Object)
+            : variant.Enum is not { Count: > 0 };
 
     /// <summary>
     /// The record properties <paramref name="schema"/> declares, each type resolved (and any

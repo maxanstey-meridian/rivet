@@ -167,8 +167,11 @@ by its pointer when it's inline) and why:
   applies a closed part's `false` to the members every other part brings;
 - a polymorphic variant, whose discriminator the record leaves to its base, so System.Text.Json
   would turn the variant's own tag away wherever it's read on its own;
-- a `oneOf` or `anyOf` union, which imports as a wrapper that takes its variants' members,
-  members the union's own `false` refuses;
+- a `oneOf` or `anyOf` union with a variant that can be an object, whose members come from its
+  variants, which the union's own `false` refuses. A union of scalars loses nothing, since
+  `additionalProperties` constrains only objects. And a `oneOf` or `anyOf` whose every branch is
+  empty or says only `type: object`, beside an object's own properties, adds nothing, so that
+  object imports as its closed record instead;
 - a generic template instance, when the same template also serves instances that aren't closed,
   since one C# type serves them all.
 

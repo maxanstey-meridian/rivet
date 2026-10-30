@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using Rivet.Tool.Model;
+using static Rivet.Tool.RoslynExtensions;
 
 namespace Rivet.Tool.Analysis;
 
@@ -1622,9 +1623,10 @@ public static class ContractWalker
     /// The body a <c>[RivetRequestBody(typeof(X))]</c> declares, or null with none. <c>X</c> must
     /// be what the input carries: the type of one of its non-route members, or a type whose
     /// every member the input declares under the same JSON name, type, and optionality. It
-    /// can't carry files the input doesn't (<see cref="FormBinding.CarriesFormFiles"/>), since
-    /// the input alone makes a body multipart (<see cref="RequestInputLowering"/>, as the
-    /// runtime decides it). Either is <c>RIV1022</c>.
+    /// can't hold files (a list of them, or a member that carries them) while the input carries
+    /// none the form binders bind (<see cref="FormBinding.CarriesFormFiles"/>), since the input
+    /// alone makes a body multipart (<see cref="RequestInputLowering"/>, as the runtime decides
+    /// it). Either is <c>RIV1022</c>.
     /// </summary>
     private static TsType? GetRequestBodyType(
         WellKnownTypes wkt,
@@ -1657,15 +1659,24 @@ public static class ContractWalker
             );
         }
 
-        if (!inputCarriesFiles && FormBinding.CarriesFormFiles(wkt, typeWalker, bodyType))
+        // A declared body that is a list of files holds files, though it wouldn't make an
+        // input multipart.
+        if (
+            !inputCarriesFiles
+            && (
+                FormBinding.CarriesFiles(wkt, typeWalker, bodyType)
+                || FormBinding.CarriesFormFiles(wkt, typeWalker, bodyType)
+            )
+        )
         {
             throw Diagnostics.Error(
                 Diagnostics.InvalidRequestBodyProvenance,
                 $"{declares}, which carries files, but its input type '{inputType.Name}' carries "
-                    + "none of its own: a file nested in one of its members doesn't make the body "
-                    + "multipart. The input type alone makes a body multipart, as the runtime decides "
-                    + "it, so a declared body type can't add a file to it. Put the file directly on "
-                    + "the input type, as one of its own members."
+                    + "none the form binders bind: a file nested in one of its members, or one without "
+                    + "a public getter, doesn't make the body multipart. The input type alone makes a "
+                    + "body multipart, as the runtime decides it, so a declared body type can't add a "
+                    + "file to it. Put the file on the input type as one of its own members, with a "
+                    + "public getter."
             );
         }
 
@@ -1889,7 +1900,7 @@ public static class ContractWalker
 
         var calls = new List<IInvocationOperation>();
         var operation = compilation.GetSemanticModel(value.SyntaxTree).GetOperation(value);
-        while (WithoutConversions(operation) is IInvocationOperation invocation)
+        while (operation is not null && Unwrap(operation) is IInvocationOperation invocation)
         {
             calls.Add(invocation);
             operation =
@@ -1956,9 +1967,7 @@ public static class ContractWalker
         IFieldSymbol field
     )
     {
-        var value = WithoutConversions(
-            call.Arguments.FirstOrDefault(argument => argument.Parameter?.Name == "scopes")?.Value
-        );
+        var value = Argument(call, "scopes") is { } scopesArgument ? Unwrap(scopesArgument) : null;
         IEnumerable<IOperation>? elements = value switch
         {
             IArrayCreationOperation { Initializer: { } initializer } => initializer.ElementValues,
@@ -1967,7 +1976,7 @@ public static class ContractWalker
             _ => null,
         };
         var scopes = elements
-            ?.Select(element => WithoutConversions(element)?.ConstantValue)
+            ?.Select(element => Unwrap(element).ConstantValue)
             .Select(constant => constant is { HasValue: true, Value: string scope } ? scope : null)
             .ToList();
         return scopes is not null && scopes.All(scope => scope is not null)
@@ -1998,7 +2007,7 @@ public static class ContractWalker
                 argument.ArgumentKind is ArgumentKind.DefaultValue
                 || argument.Parameter is not { } parameter
                 || !IsConstantReadParameter(parameter.Type)
-                || WithoutConversions(argument.Value)?.ConstantValue is { HasValue: true }
+                || Unwrap(argument.Value).ConstantValue is { HasValue: true }
             )
             {
                 continue;
@@ -2045,15 +2054,9 @@ public static class ContractWalker
                 + $"the operation. {remedy}"
         );
 
-    private static IOperation? WithoutConversions(IOperation? operation) =>
-        operation is IConversionOperation conversion
-            ? WithoutConversions(conversion.Operand)
-            : operation;
-
     private static object? ConstantArg(this IInvocationOperation call, string parameter) =>
-        call.Arguments.FirstOrDefault(argument => argument.Parameter?.Name == parameter)
-            is { } argument
-        && WithoutConversions(argument.Value)?.ConstantValue is { HasValue: true } constant
+        Argument(call, parameter) is { } value
+        && Unwrap(value).ConstantValue is { HasValue: true } constant
             ? constant.Value
             : null;
 

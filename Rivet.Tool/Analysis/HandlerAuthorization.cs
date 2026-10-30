@@ -527,17 +527,15 @@ internal sealed class HandlerAuthorization
                 continue;
             }
 
-            // A call without source that isn't a Map* call made the builder. One that maps
-            // endpoints of its own (MapHealthChecks, MapHub) hands back their builder, which
-            // holds no contract endpoint; one that may hand back a builder the project made
-            // (a delegate, or a call given one as a convention builder) is a builder --check
-            // can't trace.
-            if (trace.Origin is { } made && !_origins.IsMapCall(made) && !MayHandBack(made))
+            // A call without source that isn't a Map* call made a builder of its own
+            // (MapHealthChecks, MapHub), which holds no contract endpoint. One that may hand
+            // back a builder the project made ends the trace untraced, below.
+            if (trace.Origin is { } made && !_origins.IsMapCall(made))
             {
                 continue;
             }
 
-            var origin = trace.Origin is { } mapped && _origins.IsMapCall(mapped) ? mapped : null;
+            var origin = trace.Origin;
             var on = origin switch
             {
                 null => "a builder",
@@ -619,15 +617,6 @@ internal sealed class HandlerAuthorization
             }
         }
     }
-
-    // Whether a call without source may hand back a builder the project made: a delegate,
-    // which may return one it captured, or a method given one as a convention builder.
-    private bool MayHandBack(IInvocationOperation call) =>
-        call.TargetMethod.MethodKind == MethodKind.DelegateInvoke
-        || call.Instance?.Type.Implements(_wkt.EndpointConventionBuilder) == true
-        || (call.TargetMethod.ReducedFrom ?? call.TargetMethod).Parameters.Any(parameter =>
-            parameter.Type.Implements(_wkt.EndpointConventionBuilder)
-        );
 
     // ---------------------------------------------------------------
     // MVC filters

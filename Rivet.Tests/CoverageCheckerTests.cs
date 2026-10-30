@@ -2222,6 +2222,47 @@ public sealed class CoverageCheckerTests
         }
     }
 
+    // A call without source that may hand back a builder the project made ends the trace
+    // without a known origin; the route reads as it always did. An interface method's group
+    // is unresolved, and a delegate's WebApplication is the app.
+    [Theory]
+    [InlineData(
+        "IApi api = new Api(); api.Map().MapGet(\"/items\", Handler);",
+        "public interface IApi { RouteGroupBuilder Map(); }\n"
+            + "public sealed class Api : IApi { public RouteGroupBuilder Map() => _app.MapGroup(\"/v2\"); }\n"
+            + "private static WebApplication _app = null!;",
+        "unresolved route"
+    )]
+    [InlineData(
+        "System.Func<WebApplication> make = () => _app; make().MapGet(\"/v2/items\", Handler);",
+        "private static WebApplication _app = null!;",
+        null
+    )]
+    public void Builder_from_a_call_without_source(string body, string members, string? actual)
+    {
+        var warnings = CompilationHelper.CheckCoverage(
+            CompilationHelper.CreateFrameworkCompilation(
+                Microsoft.CodeAnalysis.OutputKind.DynamicallyLinkedLibrary,
+                GroupedTasksContract,
+                GroupedEndpoints(body, members)
+            )
+        );
+
+        var found = warnings
+            .Where(item =>
+                item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
+            )
+            .ToList();
+        if (actual is null)
+        {
+            Assert.Empty(found);
+        }
+        else
+        {
+            Assert.Contains(actual, Assert.Single(found).Actual);
+        }
+    }
+
     [Fact]
     public void Helper_called_from_two_groups_is_checked_at_both()
     {

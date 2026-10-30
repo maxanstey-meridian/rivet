@@ -341,13 +341,16 @@ after `var v2 = api.V2(); v2.RequireAuthorization();`, what's mapped on `v2` req
 and what's mapped on `api` doesn't, and a group made inside a helper is a new group at every
 call. A requirement in the helper's own body reaches each of them. A convention on a builder
 it can't trace to its `Map*` call (a lambda's parameter, a field, a method handed on as a
-delegate, a delegate's answer, or what a library call returns when it's handed a builder, as
-in `Lib.Wrap(api).RequireAuthorization()`) may cover any endpoint on that host, so those
+delegate, a delegate's answer, what an interface or abstract method returns, or what a
+library call returns when it's handed a builder, as in `Lib.Wrap(api).RequireAuthorization()`)
+may cover any endpoint on that host, so those
 endpoints become `RIV4009`, and so does an endpoint mapped on a builder it can't follow to its
 `MapGroup` call or the app, or on a group a helper nests by calling itself, whose depth
 `--check` can't know. A framework call that maps endpoints of its own, such as
-`MapHealthChecks` or `MapHub`, hands back their builder only, so a requirement on it covers
-none of your contract's.
+`MapHealthChecks` or `MapHub`, is handed the app or a group but returns only a builder for
+what it mapped, never a route builder, so a requirement on it covers none of your contract's.
+`--check` tells the two apart by that return type: a call handed a builder that returns a
+route builder (the app or a group) may be handing back the one it was given.
 
 App-wide setup in a helper (an `AuthorizeFilter`, or a fallback or default policy) applies
 where the helper is called: under that call's condition, unconditionally if any call is, and

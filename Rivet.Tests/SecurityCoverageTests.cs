@@ -1338,6 +1338,88 @@ public sealed class SecurityCoverageTests
     }
 
     [Fact]
+    public void A_convention_on_what_an_interface_method_returns_is_unreadable()
+    {
+        // IApi.Map has no body to follow, and its implementation makes the endpoint's group.
+        var warnings = Check(
+            Contract(".Anonymous()", SecuredDefault),
+            App(
+                "IApi api = new Api(app); api.Map().RequireAuthorization();",
+                "public interface IApi { RouteGroupBuilder Map(); }\n"
+                    + "public sealed class Api(WebApplication app) : IApi { public RouteGroupBuilder Map() "
+                    + $"{{ var g = app.MapGroup(\"/api\"); g.MapGet(\"/items\", {Handler}); return g; }} }}"
+            )
+        );
+
+        AssertVerdict(warnings, "RIV4009");
+    }
+
+    [Fact]
+    public void A_convention_on_what_a_library_call_returns_for_a_builder_is_unreadable()
+    {
+        // Wrap takes the group as an IEndpointRouteBuilder and may hand it back.
+        var library = CompilationHelper
+            .CreateFrameworkCompilation(
+                OutputKind.DynamicallyLinkedLibrary,
+                """
+                using Microsoft.AspNetCore.Routing;
+
+                namespace Lib;
+
+                public static class Routes
+                {
+                    public static RouteGroupBuilder Wrap(IEndpointRouteBuilder builder) =>
+                        (RouteGroupBuilder)builder;
+                }
+                """
+            )
+            .WithAssemblyName("Lib");
+        using var image = new MemoryStream();
+        Assert.True(library.Emit(image).Success);
+        var mapping = $$"""
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Http;
+            using Rivet;
+
+            namespace Test;
+
+            public static class Mapping
+            {
+                public static void Map(WebApplication app)
+                {
+                    var api = app.MapGroup("/api");
+                    api.MapGet("/items", {{Handler}});
+                    Lib.Routes.Wrap(api).RequireAuthorization();
+                }
+            }
+            """;
+        var app = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
+            "App",
+            new[]
+            {
+                Program("var app = builder.Build(); Mapping.Map(app); app.Run();"),
+                Contract(".Anonymous()", SecuredDefault),
+                mapping,
+            }.Select(source =>
+                Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
+                    source,
+                    new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
+                        Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
+                    )
+                )
+            ),
+            [.. library.References, MetadataReference.CreateFromImage(image.ToArray())],
+            new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
+                OutputKind.ConsoleApplication,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+        Assert.Empty(app.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
+
+        AssertVerdict(CompilationHelper.CheckCoverage(app), "RIV4009");
+    }
+
+    [Fact]
     public void Method_group_handler_attributes_count()
     {
         var warnings = Check(
@@ -1661,7 +1743,18 @@ public sealed class SecurityCoverageTests
         "static RouteGroupBuilder Same(RouteGroupBuilder g) => g;"
             + " void Secure() => Same(Same(api)).RequireAuthorization(); if (on) Secure();"
     )]
-    public void A_captured_local_function_runs_under_its_calls_conditions(string body)
+    // Two local functions call Secure under opposite conditions, through one caller: with
+    // !Flags.On, B secures the group and the endpoint's AllowAnonymous doesn't run.
+    [InlineData(
+        "void Secure() => api.RequireAuthorization(); void A() { if (Flags.On) Secure(); }"
+            + " void B() { if (!Flags.On) Secure(); } void Wire() { A(); B(); } Wire();"
+            + " if (Flags.On) e.AllowAnonymous();",
+        ".Anonymous()"
+    )]
+    public void A_captured_local_function_runs_under_its_calls_conditions(
+        string body,
+        string security = ""
+    )
     {
         var warnings = CheckWith(
             OutputKind.ConsoleApplication,
@@ -1671,7 +1764,7 @@ public sealed class SecurityCoverageTests
                     + body
                     + " app.Run();"
             ),
-            Contract(assembly: SecuredDefault),
+            Contract(security, SecuredDefault),
             Flags
         );
 

@@ -159,7 +159,7 @@ internal sealed class ResolutionContext(List<string> warnings)
 
     /// <summary>Why a oneOf or anyOf union can't be closed (RIV3033).</summary>
     public const string ClosedUnionReason =
-        "it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses";
+        "it is a oneOf/anyOf union, whose members come from its variants, which its own additionalProperties: false refuses";
 
     /// <summary>
     /// Where each schema object sits in the document, for naming an inline one

@@ -43,7 +43,7 @@ internal static class UnrepresentedFieldReporter
         {
             foreach (var (path, value) in paths)
             {
-                if (value is JsonObject pathItem)
+                if (!OpenApiStructure.IsExtension(path) && value is JsonObject pathItem)
                 {
                     ReportPathItem(
                         root,

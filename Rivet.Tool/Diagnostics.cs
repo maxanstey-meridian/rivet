@@ -268,7 +268,7 @@ public static class Diagnostics
         ),
         [InvalidRequestBodyProvenance] = new(
             Severity.Error,
-            "A [RivetRequestBody] type is not represented independently by the endpoint input type, or carries files while the input type carries none of its own (a file nested in one of its members doesn't count)."
+            "A [RivetRequestBody] type is not represented independently by the endpoint input type, or carries files while the input type carries none the form binders bind (a file nested in one of its members, or one without a public getter, doesn't count)."
         ),
         [ImportedSchemaProvenanceConflict] = new(
             Severity.Error,
@@ -540,7 +540,7 @@ public static class Diagnostics
         ),
         [ImportClosedSchemaLeftOpen] = new(
             Severity.Warning,
-            "A schema says additionalProperties: false but contradicts itself (another record extends it, it is an allOf composition or a closed allOf branch, it is a polymorphic variant, it is a oneOf/anyOf union, or it is a generic template with open instances) — its record stays open, accepting and dropping an unknown member instead of refusing it."
+            "A schema says additionalProperties: false but contradicts itself (another record extends it, it is an allOf composition or a closed allOf branch, it is a polymorphic variant, it is a oneOf/anyOf union with a variant that can be an object, or it is a generic template with open instances) — its record stays open, accepting and dropping an unknown member instead of refusing it."
         ),
         [CoverageMissingImplementation] = new(
             Severity.Warning,

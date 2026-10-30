@@ -334,7 +334,7 @@ keyed by ID) — new categories are added consciously, never absorbed:
 | `RIV3029` | `equivalent-path-template-merged` | A path repeats an earlier path's template under other parameter names, which OpenAPI forbids; its operations merge into the earlier path and adopt its parameter names. |
 | `RIV3030` | `unsatisfiable-security-dropped` | A security alternative names a scheme the document never defines; the alternative is dropped, and an operation left with none is dropped too. |
 | `RIV3031` | `integer-enum-value-unheld` | An integer enum lists a whole value its C# integer type can't hold; the values survive as metadata, but C# code using that type can't read or write those values. |
-| `RIV3033` | `closed-schema-left-open` | A schema says `additionalProperties: false` but contradicts itself (another record extends it, it is an `allOf` composition or a component one composes, a polymorphic variant, a `oneOf`/`anyOf` union, or a generic template instance beside open ones), so its record stays open instead of refusing unknown members. |
+| `RIV3033` | `closed-schema-left-open` | A schema says `additionalProperties: false` but contradicts itself (another record extends it, it is an `allOf` composition or a component one composes, a polymorphic variant, a `oneOf`/`anyOf` union with a variant that can be an object, or a generic template instance beside open ones), so its record stays open instead of refusing unknown members. |
 
 - **Paths**: two paths that differ only in their parameter names
   (`/deployments/{idOrUrl}` and `/deployments/{id}`) are one template, which

@@ -1115,9 +1115,23 @@ public sealed class FormPartNameTests
     }
 
     [Theory]
-    [InlineData("IFormFile")]
-    [InlineData("List<IFormFile>")]
-    public void A_RivetRequestBody_type_carrying_a_file_the_input_doesn_t_is_RIV1022(string file)
+    // The input holds the file in a member of a member, which the form binders don't bind.
+    [InlineData("public Attachment? Attachment { get; set; }", "Attachment", "IFormFile")]
+    [InlineData("public Attachment? Attachment { get; set; }", "Attachment", "List<IFormFile>")]
+    // The input holds it in a member with no public getter, which they don't bind either. A
+    // declared body that is a list of files holds files, though it wouldn't make an input
+    // multipart.
+    [InlineData("public IFormFile? Scan { private get; set; }", "IFormFile", "IFormFile")]
+    [InlineData(
+        "public List<IFormFile>? Scans { private get; set; }",
+        "List<IFormFile>",
+        "IFormFile"
+    )]
+    public void A_RivetRequestBody_type_carrying_a_file_the_input_doesn_t_is_RIV1022(
+        string inputMember,
+        string declared,
+        string file
+    )
     {
         // The input alone makes a body multipart, so the declared type can't add a file.
         var source = $$"""
@@ -1136,7 +1150,7 @@ public sealed class FormPartNameTests
 
             public sealed class NoteInput
             {
-                public Attachment? Attachment { get; set; }
+                {{inputMember}}
             }
 
             [RivetType]
@@ -1145,7 +1159,7 @@ public sealed class FormPartNameTests
             [RivetContract]
             public static class NotesContract
             {
-                [RivetRequestBody(typeof(Attachment))]
+                [RivetRequestBody(typeof({{declared}}))]
                 public static readonly RouteDefinition<NoteInput, NoteDto> Submit =
                     Define.Post<NoteInput, NoteDto>("/api/notes").FormEncoded();
             }
@@ -1153,9 +1167,12 @@ public sealed class FormPartNameTests
 
         var error = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkContract(source));
         Assert.StartsWith("error RIV1022: ", error.Message);
-        Assert.Contains("'Attachment', which carries files", error.Message);
-        Assert.Contains("'NoteInput' carries none of its own", error.Message);
-        Assert.Contains("Put the file directly on the input type", error.Message);
+        Assert.Contains("which carries files", error.Message);
+        Assert.Contains("'NoteInput' carries none the form binders bind", error.Message);
+        Assert.Contains(
+            "Put the file on the input type as one of its own members, with a public getter",
+            error.Message
+        );
     }
 
     // ---------------------------------------------------------------

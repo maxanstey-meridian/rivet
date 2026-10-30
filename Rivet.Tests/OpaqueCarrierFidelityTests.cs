@@ -70,6 +70,10 @@ public sealed class OpaqueCarrierFidelityTests
                 "type": "object",
                 "properties": {
                     "choice": {
+                        "anyOf": [{ "type": "string" }, { "$ref": "#/components/schemas/Item" }],
+                        "additionalProperties": false
+                    },
+                    "scalars": {
                         "anyOf": [{ "type": "string" }, { "type": "integer" }],
                         "additionalProperties": false
                     },
@@ -131,16 +135,17 @@ public sealed class OpaqueCarrierFidelityTests
         );
 
         // A closed schema that contradicts itself stays open, and says why. Each spec still
-        // emits its closure.
+        // emits its closure. A closed union of scalars (Holder.scalars) doesn't contradict
+        // itself, since additionalProperties constrains only objects, so it draws no warning.
         Assert.Equal(
             [
                 "RIV3033: Closed schema imported open: 'Circle' says additionalProperties: false, but it is a polymorphic variant of 'Shape', and System.Text.Json would refuse its 'kind' discriminator as an unknown member wherever the variant is read on its own. Its record accepts and drops an unknown member instead of refusing it.",
                 "RIV3033: Closed schema imported open: 'ClosedPart' says additionalProperties: false, but 'Composite' composes it in an allOf, adding members its closure refuses. Its record accepts and drops an unknown member instead of refusing it.",
                 "RIV3033: Closed schema imported open: 'Page_Item' says additionalProperties: false, but it is an instance of the generic template 'Page', which serves 'Page_ClosedPart' too, and that one isn't closed. Its record accepts and drops an unknown member instead of refusing it.",
                 "RIV3033: Closed schema imported open: 'Pet' says additionalProperties: false, but 'Cat' extends it, adding members its closure refuses. Its record accepts and drops an unknown member instead of refusing it.",
-                "RIV3033: Closed schema imported open: 'Shape' says additionalProperties: false, but it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
-                "RIV3033: Closed schema imported open: 'closed_union' says additionalProperties: false, but it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
-                "RIV3033: Closed schema imported open: the schema at #/components/schemas/Holder/properties/choice says additionalProperties: false, but it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'Shape' says additionalProperties: false, but it is a oneOf/anyOf union, whose members come from its variants, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'closed_union' says additionalProperties: false, but it is a oneOf/anyOf union, whose members come from its variants, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: the schema at #/components/schemas/Holder/properties/choice says additionalProperties: false, but it is a oneOf/anyOf union, whose members come from its variants, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
                 "RIV3033: Closed schema imported open: the schema at #/components/schemas/Holder/properties/part says additionalProperties: false, but it is an allOf composition, where a closed part refuses the members the other parts add. Its record accepts and drops an unknown member instead of refusing it.",
             ],
             CompilationHelper

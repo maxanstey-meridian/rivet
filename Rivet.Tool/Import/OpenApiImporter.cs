@@ -74,6 +74,7 @@ public static partial class OpenApiImporter
         };
         NormalizeLocalPathReferences(root);
         NormalizeSchemaReferenceMetadataSiblings(root);
+        DropCompositionsThatAddNothing(root);
         MarkEnumNullMembers(root);
         var swaggerSchemaLessResponses = ReadSwaggerSchemaLessResponses(root);
         OpenApiJsonNodeSerializer.EscapeLiteralSentinels(root);
@@ -475,7 +476,12 @@ public static partial class OpenApiImporter
         }
 
         var earliest = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var path in paths.Select(entry => entry.Key).ToList())
+        foreach (
+            var path in paths
+                .Select(entry => entry.Key)
+                .Where(key => !OpenApiStructure.IsExtension(key))
+                .ToList()
+        )
         {
             var template = PathTemplateParameter().Replace(path, "{}");
             if (!earliest.TryGetValue(template, out var target))
@@ -787,7 +793,8 @@ public static partial class OpenApiImporter
         foreach (var (route, node) in paths.ToList())
         {
             if (
-                node is JsonObject pathItem
+                !OpenApiStructure.IsExtension(route)
+                && node is JsonObject pathItem
                 && edit(route, pathItem)
                 && !OperationMethods.Any(pathItem.ContainsKey)
             )
@@ -902,6 +909,41 @@ public static partial class OpenApiImporter
                     if (!seen.Add(members[index]?.ToJsonString() ?? "null"))
                     {
                         members.RemoveAt(index--);
+                    }
+                }
+            }
+        );
+
+    /// <summary>
+    /// A oneOf or anyOf whose every branch adds nothing to the object schema around it (a
+    /// branch that is empty or says only <c>type: object</c>) matches every instance the
+    /// schema already does, so the schema is read without it, as the object it is (Vercel's
+    /// <c>connectConfigurations</c> item). Read as a union, its wrapper would drop the
+    /// object's own members and closure.
+    /// </summary>
+    private static void DropCompositionsThatAddNothing(JsonObject root) =>
+        OpenApiStructure.VisitObjects(
+            root,
+            IsSwagger2(root),
+            (obj, _) =>
+            {
+                if (StringValue(obj["type"]) != "object" && obj["properties"] is not JsonObject)
+                {
+                    return;
+                }
+                foreach (var composition in new[] { "oneOf", "anyOf" })
+                {
+                    if (
+                        obj[composition] is JsonArray { Count: > 0 } branches
+                        && branches.All(branch =>
+                            branch is JsonObject parts
+                            && parts.All(part =>
+                                part.Key == "type" && StringValue(part.Value) == "object"
+                            )
+                        )
+                    )
+                    {
+                        obj.Remove(composition);
                     }
                 }
             }
@@ -1070,7 +1112,9 @@ public static partial class OpenApiImporter
         }
 
         var result = new HashSet<(string Path, string Method, string Status)>();
-        foreach (var (path, pathItem) in paths)
+        foreach (
+            var (path, pathItem) in paths.Where(entry => !OpenApiStructure.IsExtension(entry.Key))
+        )
         {
             foreach (var method in OperationMethods)
             {

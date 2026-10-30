@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
+using static Rivet.Tool.RoslynExtensions;
 
 namespace Rivet.Tool.Analysis;
 
@@ -252,11 +253,7 @@ internal static class MvcRouteValues
                 return null;
             }
 
-            var value = argument.Value;
-            while (value is IConversionOperation conversion)
-            {
-                value = conversion.Operand;
-            }
+            var value = Unwrap(argument.Value);
 
             if (value.ConstantValue.HasValue)
             {
