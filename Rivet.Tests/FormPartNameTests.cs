@@ -447,6 +447,17 @@ public sealed class FormPartNameTests
             GenerationParts(typeof(FormBindList), FormBinding.FormHosts.MinimalApi)
                 .Select(part => part.Name)
         );
+        // A positional record's constructor parameter reads its own [BindNever].
+        Assert.Equal(
+            ["title"],
+            GenerationParts(typeof(FormNeverRecord), FormBinding.FormHosts.Mvc)
+                .Select(part => part.Name)
+        );
+        Assert.Equal(
+            ["title", "body"],
+            GenerationParts(typeof(FormNeverRecord), FormBinding.FormHosts.MinimalApi)
+                .Select(part => part.Name)
+        );
     }
 
     [Theory]
@@ -478,6 +489,7 @@ public sealed class FormPartNameTests
         "Body",
         "skipped by MVC's model binder ([Bind] on 'FormBindRecord', whose include list leaves it out)"
     )]
+    [InlineData(typeof(FormNeverRecord), "Body", "skipped by MVC's model binder ([BindNever])")]
     public void Generation_refuses_a_member_one_host_skips(Type type, string member, string why)
     {
         var error = Assert.Throws<RivetUserException>(() =>
@@ -1071,6 +1083,21 @@ public sealed class FormPartNameTests
             RequestBody(document, "/form-parts/declared").GetProperty("required").GetBoolean()
         );
 
+        // A declared type whose component lists exactly its parts, under the same names, is
+        // the body's $ref.
+        Assert.Equal(
+            [("tag", ParamSource.FormField, "tag")],
+            endpoints
+                .Single(endpoint => endpoint.Name == "tag")
+                .Params.Select(param => (param.Name, param.Source, param.BodyPropertyName))
+        );
+        Assert.Equal(
+            "#/components/schemas/FormDeclaredTag",
+            RequestSchema(document, "/form-parts/declared-tag", form)
+                .GetProperty("$ref")
+                .GetString()
+        );
+
         // Both hosts bind the input from those parts.
         foreach (var mvc in new[] { true, false })
         {
@@ -1127,7 +1154,8 @@ public sealed class FormPartNameTests
         var error = Assert.Throws<RivetUserException>(() => CompilationHelper.WalkContract(source));
         Assert.StartsWith("error RIV1022: ", error.Message);
         Assert.Contains("'Attachment', which carries files", error.Message);
-        Assert.Contains("Put the file on the input type", error.Message);
+        Assert.Contains("'NoteInput' carries none of its own", error.Message);
+        Assert.Contains("Put the file directly on the input type", error.Message);
     }
 
     // ---------------------------------------------------------------
@@ -1426,6 +1454,11 @@ public sealed class FormBindList
 [Bind(nameof(Title))]
 public sealed record FormBindRecord(string? Title, string? Body);
 
+public sealed record FormNeverRecord(
+    string? Title,
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] string? Body
+);
+
 // MVC can't fill an immutable collection in place, and building one of its own fails every
 // request: ImmutableList<T> has no parameterless constructor.
 public sealed class FormImmutableFiles
@@ -1545,6 +1578,12 @@ public sealed record FormDeclaredInput
     public string? Tag { get; init; }
 }
 
+// A declared type whose part names are its JSON names: its component describes the body.
+public sealed record FormDeclaredTag
+{
+    public string? Tag { get; init; }
+}
+
 public sealed record FormDeclaredReceipt(string Id);
 
 [RivetContract]
@@ -1558,6 +1597,11 @@ public static class FormDeclaredContract
     [RivetRequestBody(typeof(FormDeclaredFields), required: false)]
     public static readonly RouteDefinition<FormDeclaredInput, FormDeclaredReceipt> Optional = Define
         .Post<FormDeclaredInput, FormDeclaredReceipt>("/form-parts/declared-optional")
+        .FormEncoded();
+
+    [RivetRequestBody(typeof(FormDeclaredTag))]
+    public static readonly RouteDefinition<FormDeclaredInput, FormDeclaredReceipt> Tag = Define
+        .Post<FormDeclaredInput, FormDeclaredReceipt>("/form-parts/declared-tag")
         .FormEncoded();
 }
 

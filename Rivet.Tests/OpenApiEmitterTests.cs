@@ -3298,9 +3298,7 @@ public sealed class OpenApiEmitterTests
         );
         using var docGuard = doc;
 
-        // (CaptureStdErr may see unrelated warnings from parallel tests — assert only
-        // that no synthesis happened for THIS scheme.)
-        Assert.DoesNotContain("security scheme 'bearer'", stderr);
+        Assert.Equal("", stderr);
 
         var schemes = doc!.RootElement.GetProperty("components").GetProperty("securitySchemes");
         Assert.Single(schemes.EnumerateObject());
@@ -4515,12 +4513,21 @@ public sealed class OpenApiEmitterTests
         );
     }
 
-    [Fact]
-    public void Form_field_serialization_goes_in_the_encoding_and_its_named_examples_join_its_schema()
+    [Theory]
+    [InlineData("application/x-www-form-urlencoded")]
+    [InlineData("multipart/form-data")]
+    public void Form_field_serialization_goes_in_the_encoding_and_its_named_examples_join_its_schema(
+        string mediaType
+    )
     {
         // Decision 7: contract JSON's form-field style, explode, allowReserved, and named
-        // examples used to be dropped without a word.
+        // examples used to be dropped without a word. A file part makes the body multipart,
+        // whose Encoding Object takes the same serialization as of OpenAPI 3.1.1.
         static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement;
+        TsEndpointParam[] file =
+            mediaType == "multipart/form-data"
+                ? [new TsEndpointParam("document", new TsType.Primitive("File"), ParamSource.File)]
+                : [];
         var endpoints = new List<TsEndpointDefinition>
         {
             new(
@@ -4528,6 +4535,7 @@ public sealed class OpenApiEmitterTests
                 "POST",
                 "/api/search",
                 [
+                    .. file,
                     new TsEndpointParam(
                         "tags",
                         new TsType.Array(new TsType.Primitive("string")),
@@ -4545,7 +4553,7 @@ public sealed class OpenApiEmitterTests
                             """
                             {
                               "a": { "value": 1 },
-                              "b": { "summary": "x", "value": 2 },
+                              "b": { "summary": "x", "description": "y", "externalValue": "https://example.com/b.json", "value": 2 },
                               "c": { "externalValue": "https://example.com/c.json" }
                             }
                             """
@@ -4586,7 +4594,7 @@ public sealed class OpenApiEmitterTests
             .GetProperty("post")
             .GetProperty("requestBody")
             .GetProperty("content")
-            .GetProperty("application/x-www-form-urlencoded");
+            .GetProperty(mediaType);
         var encoding = media.GetProperty("encoding");
         var tags = Assert.Single(encoding.EnumerateObject());
         Assert.Equal("tags", tags.Name);
@@ -4613,7 +4621,7 @@ public sealed class OpenApiEmitterTests
         Assert.Equal(2, warnings.Count);
         Assert.Contains(
             "warning RIV2019: form field 'count' on endpoint 'search.search' drops what a form part can't carry: "
-                + "example 'b''s summary; example 'c', which has no value",
+                + "the summary, description, and externalValue of example 'b'; example 'c', which has no value",
             warnings
         );
         Assert.Contains(
@@ -4623,11 +4631,29 @@ public sealed class OpenApiEmitterTests
         );
     }
 
-    [Fact]
-    public void A_form_body_that_references_its_record_keeps_the_encoding_and_warns_for_the_examples()
+    [Theory]
+    // The record's component lists exactly the parts, so the body would reference it.
+    [InlineData("exact", true)]
+    [InlineData("exact", false)]
+    // The component lists a member that isn't a part: the parts are spelled out inline,
+    // each taking its record property's schema.
+    [InlineData("wider", false)]
+    [InlineData("wider", true)]
+    // A multipart body named by a definition the contract ships, its parts naming no property.
+    [InlineData("multipart", true)]
+    [InlineData("multipart", false)]
+    public void A_form_fields_named_examples_join_its_part_wherever_the_input_record_is_behind_it(
+        string shape,
+        bool examples
+    )
     {
-        // The body $refs the input's component, so no part is spelled out for an example
-        // to join; the serialization still goes in the encoding, keyed by the part's name.
+        // Decision 7: each example's value joins the field schema's examples. A component
+        // can't hold one operation's examples, so a field that states them spells the body
+        // out; the serialization goes in the encoding either way, keyed by the part's name.
+        var multipart = shape == "multipart";
+        TsEndpointParam[] file = multipart
+            ? [new TsEndpointParam("document", new TsType.Primitive("File"), ParamSource.File)]
+            : [];
         var endpoints = new List<TsEndpointDefinition>
         {
             new(
@@ -4635,12 +4661,15 @@ public sealed class OpenApiEmitterTests
                 "POST",
                 "/api/search",
                 [
+                    .. file,
                     new TsEndpointParam(
                         "tags",
                         new TsType.Array(new TsType.Primitive("string")),
                         ParamSource.FormField,
-                        BodyPropertyName: "tags",
-                        Examples: JsonDocument.Parse("""{ "a": { "value": ["x"] } }""").RootElement,
+                        BodyPropertyName: multipart ? null : "tags",
+                        Examples: examples
+                            ? JsonDocument.Parse("""{ "a": { "value": ["x"] } }""").RootElement
+                            : null,
                         Style: "pipeDelimited"
                     ),
                 ],
@@ -4650,12 +4679,22 @@ public sealed class OpenApiEmitterTests
                 InputTypeName: "SearchForm"
             ),
         };
+        TsPropertyDefinition[] others = shape switch
+        {
+            "wider" => [new TsPropertyDefinition("page", new TsType.Primitive("number"), true)],
+            "multipart" =>
+            [
+                new TsPropertyDefinition("document", new TsType.Primitive("File"), false),
+            ],
+            _ => [],
+        };
         var definitions = new Dictionary<string, TsTypeDefinition>
         {
             ["SearchForm"] = new(
                 "SearchForm",
                 [],
                 [
+                    .. others,
                     new TsPropertyDefinition(
                         "tags",
                         new TsType.Array(new TsType.Primitive("string")),
@@ -4682,19 +4721,27 @@ public sealed class OpenApiEmitterTests
             .GetProperty("post")
             .GetProperty("requestBody")
             .GetProperty("content")
-            .GetProperty("application/x-www-form-urlencoded");
-        Assert.Equal(
-            "#/components/schemas/SearchForm",
-            media.GetProperty("schema").GetProperty("$ref").GetString()
-        );
+            .GetProperty(multipart ? "multipart/form-data" : "application/x-www-form-urlencoded");
         Assert.Equal(
             """{"tags":{"style":"pipeDelimited"}}""",
             JsonSerializer.Serialize(media.GetProperty("encoding"))
         );
-        Assert.Contains(
-            "warning RIV2019: form field 'tags' on endpoint 'search.search' drops what a form part can't carry: "
-                + "example 'a' (the part's schema is its input record's)",
-            stderr
+        Assert.DoesNotContain("RIV2019", stderr, StringComparison.Ordinal);
+        var schema = media.GetProperty("schema");
+        if (!examples && shape != "wider")
+        {
+            Assert.Equal("#/components/schemas/SearchForm", schema.GetProperty("$ref").GetString());
+            return;
+        }
+
+        Assert.False(schema.TryGetProperty("$ref", out _));
+        Assert.Equal("SearchRequest", schema.GetProperty("x-rivet-input-type").GetString());
+        var tags = schema.GetProperty("properties").GetProperty("tags");
+        Assert.Equal(
+            examples ? """[["x"]]""" : null,
+            tags.TryGetProperty("examples", out var values)
+                ? JsonSerializer.Serialize(values)
+                : null
         );
     }
 

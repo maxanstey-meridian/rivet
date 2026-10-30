@@ -32,6 +32,7 @@ public sealed class AuthorizationHostTests
         ["AllowAnonymous on a handler beats a requiring fallback"] = false,
         ["A requiring fallback secures a bare endpoint"] = true,
         ["The fallback doesn't apply over a named policy that admits anyone"] = false,
+        ["AddFallbackPolicy registers its policy under its name too"] = false,
         ["A policy name is looked up ignoring case"] = false,
         ["Combined policies require a user when any one does"] = true,
         ["A minimal API reads its handler method's attributes, not its class's"] = false,
@@ -42,11 +43,13 @@ public sealed class AuthorizationHostTests
     {
         ["AllowAnonymous on an action beats its controller's Authorize"] = new(
             "/auth/controller",
-            Mvc: true
+            Mvc: true,
+            Control: "/auth/controller-control"
         ),
         ["AllowAnonymous on an action beats a global AuthorizeFilter"] = new(
             "/auth/filtered",
             Mvc: true,
+            Control: "/auth/filtered-control",
             Services: services =>
                 services.Configure<MvcOptions>(options =>
                     options.Filters.Add(new AuthorizeFilter())
@@ -54,10 +57,13 @@ public sealed class AuthorizationHostTests
         ),
         ["AllowAnonymous on a handler beats its group's RequireAuthorization"] = new(
             "/auth/group/items",
+            Control: "/auth/group/control",
             Map: app =>
-                app.MapGroup("/auth/group")
-                    .RequireAuthorization()
-                    .MapGet("/items", [AllowAnonymous] () => "ok")
+            {
+                var group = app.MapGroup("/auth/group").RequireAuthorization();
+                group.MapGet("/items", [AllowAnonymous] () => "ok");
+                group.MapGet("/control", () => "ok");
+            }
         ),
         ["AllowAnonymous on a handler beats a requiring fallback"] = new(
             "/auth/fallback-anonymous",
@@ -79,6 +85,14 @@ public sealed class AuthorizationHostTests
                 );
             },
             Map: app => app.MapGet("/auth/open", [Authorize(Policy = "open")] () => "ok")
+        ),
+        ["AddFallbackPolicy registers its policy under its name too"] = new(
+            "/auth/named-fallback",
+            Services: services =>
+                services
+                    .AddAuthorizationBuilder()
+                    .AddFallbackPolicy("open", policy => policy.RequireAssertion(_ => true)),
+            Map: app => app.MapGet("/auth/named-fallback", [Authorize(Policy = "open")] () => "ok")
         ),
         ["A policy name is looked up ignoring case"] = new(
             "/auth/open-case",
@@ -133,6 +147,10 @@ public sealed class AuthorizationHostTests
         ["The fallback doesn't apply over a named policy that admits anyone"] = Program(
             $"builder.Services.AddAuthorization(o => {{ o.FallbackPolicy = {Requiring}; "
                 + "o.AddPolicy(\"open\", p => p.RequireAssertion(_ => true)); });",
+            $"app.MapGet(\"/api/items\", [Authorize(Policy = \"open\")] {Handler});"
+        ),
+        ["AddFallbackPolicy registers its policy under its name too"] = Program(
+            "builder.Services.AddAuthorizationBuilder().AddFallbackPolicy(\"open\", p => p.RequireAssertion(_ => true));",
             $"app.MapGet(\"/api/items\", [Authorize(Policy = \"open\")] {Handler});"
         ),
         ["A policy name is looked up ignoring case"] = Program(
@@ -190,6 +208,13 @@ public sealed class AuthorizationHostTests
 
         var (status, _) = await running.GetAsync(host.Path);
         Assert.Equal(requires ? HttpStatusCode.Unauthorized : HttpStatusCode.OK, status);
+
+        // The same registration without the rule's opt-out: the requirement it beats is in force.
+        if (host.Control is { } control)
+        {
+            var (controlStatus, _) = await running.GetAsync(control);
+            Assert.Equal(HttpStatusCode.Unauthorized, controlStatus);
+        }
 
         var warnings = CompilationHelper.CheckCoverage(
             CompilationHelper.CreateFrameworkCompilation(
@@ -270,22 +295,25 @@ public sealed class AuthorizationHostTests
         }
 
         var warning = Assert.Single(warnings);
-        return warning.Kind switch
+        return warning switch
         {
-            CoverageWarningKind.SecurityMismatch
-                when warning.Message.Contains(
-                    "anyone can call the handler",
-                    StringComparison.Ordinal
-                ) => false,
-            CoverageWarningKind.AuthorizationUnreadable => null,
+            { Kind: CoverageWarningKind.SecurityMismatch, Message: { } message }
+                when message.Contains("anyone can call the handler", StringComparison.Ordinal) =>
+                false,
+            { Kind: CoverageWarningKind.AuthorizationUnreadable } => null,
             _ => throw new Xunit.Sdk.XunitException($"Unexpected warning: {warning.Message}"),
         };
     }
 
-    /// <summary>A rule as the host registers it, served at <paramref name="Path"/>.</summary>
+    /// <summary>
+    /// A rule as the host registers it, served at <paramref name="Path"/>. A rule that says one
+    /// thing beats another has a <paramref name="Control"/>: a path the same registration
+    /// serves without it, which an anonymous caller is refused.
+    /// </summary>
     private sealed record Rule(
         string Path,
         bool Mvc = false,
+        string? Control = null,
         Action<IServiceCollection>? Services = null,
         Action<WebApplication>? Map = null
     );
@@ -318,6 +346,9 @@ public sealed class AuthHostController : ControllerBase
     [AllowAnonymous]
     [HttpGet("controller")]
     public string Get() => "ok";
+
+    [HttpGet("controller-control")]
+    public string Control() => "ok";
 }
 
 [Route("auth")]
@@ -326,6 +357,9 @@ public sealed class AuthHostFilteredController : ControllerBase
     [AllowAnonymous]
     [HttpGet("filtered")]
     public string Get() => "ok";
+
+    [HttpGet("filtered-control")]
+    public string Control() => "ok";
 }
 
 [Authorize]

@@ -29103,7 +29103,7 @@
         "corpusId": "stripe",
         "shape": "object-properties-additional-properties-false",
         "carrier": "record",
-        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself",
+        "behaviorTest": "OpaqueCarrierFidelityTests.Closed_form_body_record_drops_an_unknown_part_while_its_spec_stays_closed",
         "ownerPointers": [
           "#/paths/~1v1~1account_links/post/requestBody/content/application~1x-www-form-urlencoded/schema",
           "#/paths/~1v1~1account_sessions/post/requestBody/content/application~1x-www-form-urlencoded/schema",

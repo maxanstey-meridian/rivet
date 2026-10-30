@@ -43,6 +43,7 @@ public static partial class OpenApiImporter
     {
         var warnings = new List<string>();
         var root = ParseJson(json);
+        DetachPaths(root);
         DropUnimportableOperations(root, warnings);
         MergeEquivalentPathTemplates(root, warnings);
         DropExternalDiscriminatorMappings(root, warnings);
@@ -91,7 +92,7 @@ public static partial class OpenApiImporter
         var securityMetadata = ReadSecurityMetadata(doc);
         RemoveConvertedSwaggerProducesContent(doc, swaggerSchemaLessResponses);
         var files = new List<GeneratedFile>();
-        var mapper = new SchemaMapper(warnings);
+        var mapper = new SchemaMapper(warnings, doc);
 
         var schemas = doc.Components?.Schemas;
 
@@ -654,9 +655,9 @@ public static partial class OpenApiImporter
             && securitySchemeOverride is null;
         EditPathItems(
             root,
-            warnings,
             (route, pathItem) =>
             {
+                var changed = false;
                 foreach (var method in OperationMethods)
                 {
                     if (pathItem[method] is not JsonObject operation)
@@ -665,14 +666,17 @@ public static partial class OpenApiImporter
                     }
                     var operationName = $"{method.ToUpperInvariant()} {route}";
                     var declaresSecurity = operation.ContainsKey("security");
+                    var alternatives = (operation["security"] as JsonArray)?.Count ?? 0;
                     var reachable = declaresSecurity
                         ? PruneSecurity(operation, operationName, defined, warnings)
                         : !inheritedUnsatisfiable;
+                    changed |= ((operation["security"] as JsonArray)?.Count ?? 0) != alternatives;
                     if (reachable)
                     {
                         continue;
                     }
                     pathItem.Remove(method);
+                    changed = true;
                     warnings.Add(
                         Diagnostics.Prefix(
                             Diagnostics.ImportUnsatisfiableSecurity,
@@ -682,6 +686,7 @@ public static partial class OpenApiImporter
                         )
                     );
                 }
+                return changed;
             }
         );
     }
@@ -696,9 +701,9 @@ public static partial class OpenApiImporter
     private static void DropUnimportableOperations(JsonObject root, List<string> warnings) =>
         EditPathItems(
             root,
-            warnings,
             (route, pathItem) =>
             {
+                var changed = false;
                 foreach (var method in OperationMethods)
                 {
                     if (
@@ -709,8 +714,10 @@ public static partial class OpenApiImporter
                     {
                         pathItem.Remove(method);
                         warnings.Add(warning);
+                        changed = true;
                     }
                 }
+                return changed;
             }
         );
 
@@ -729,10 +736,12 @@ public static partial class OpenApiImporter
     )
     {
         var contentDeclared = MergeParameterArrays(
-                ResolvedParameters(pathItem["parameters"], root),
-                ResolvedParameters(operation["parameters"], root)
+                pathItem["parameters"] as JsonArray ?? [],
+                operation["parameters"] as JsonArray ?? [],
+                root
             )
             .OfType<JsonObject>()
+            .Select(parameter => ResolveReferenceObject(parameter, root, "parameter"))
             .Where(parameter =>
                 StringValue(parameter["in"]) == "path"
                 && !parameter.ContainsKey("schema")
@@ -763,32 +772,13 @@ public static partial class OpenApiImporter
     }
 
     /// <summary>
-    /// <paramref name="parameters"/> with each local reference resolved, so a path item's and
-    /// an operation's lists merge by name and location as the import merges them.
+    /// Runs <paramref name="edit"/> on each path item under <c>paths</c>, which
+    /// <see cref="DetachPaths"/> has made inline and free of references into <c>paths</c>, so
+    /// an edit changes no other path's reading. <paramref name="edit"/> says whether it changed
+    /// the item; a changed item left with no operation is removed, so none of its fields
+    /// outlives the operations they belonged to.
     /// </summary>
-    private static JsonArray ResolvedParameters(JsonNode? parameters, JsonObject root) =>
-        new(
-            (parameters as JsonArray ?? [])
-                .Select(parameter =>
-                    parameter is JsonObject parameterObject
-                        ? ResolveReferenceObject(parameterObject, root, "parameter")
-                        : parameter?.DeepClone()
-                )
-                .ToArray()
-        );
-
-    /// <summary>
-    /// Runs <paramref name="edit"/> on each path item under <c>paths</c> as the import reads it:
-    /// an inline item itself, and a <c>$ref</c>'d one as a copy with the item it references laid
-    /// under it, which replaces the reference only when the edit changed it. Every edit warns,
-    /// so a new warning is the sign of a change. A path item left with no operation is removed,
-    /// so none of its fields outlives the operations they belonged to.
-    /// </summary>
-    private static void EditPathItems(
-        JsonObject root,
-        List<string> warnings,
-        Action<string, JsonObject> edit
-    )
+    private static void EditPathItems(JsonObject root, Func<string, JsonObject, bool> edit)
     {
         if (root["paths"] is not JsonObject paths)
         {
@@ -796,27 +786,52 @@ public static partial class OpenApiImporter
         }
         foreach (var (route, node) in paths.ToList())
         {
-            if (node is not JsonObject pathItem)
-            {
-                continue;
-            }
-            var item = GetLocalReference(pathItem) is null
-                ? pathItem
-                : ResolvePathItem(pathItem, root, [], normalize: false);
-            var warned = warnings.Count;
-            edit(route, item);
-            if (warnings.Count == warned)
-            {
-                continue;
-            }
-            if (!OperationMethods.Any(item.ContainsKey))
+            if (
+                node is JsonObject pathItem
+                && edit(route, pathItem)
+                && !OperationMethods.Any(pathItem.ContainsKey)
+            )
             {
                 paths.Remove(route);
             }
-            else if (!ReferenceEquals(item, pathItem))
+        }
+    }
+
+    /// <summary>
+    /// Makes <c>paths</c> stand on its own before any pass edits it: each <c>$ref</c>'d path
+    /// item is inlined, and so is each reference from a path item's contents into
+    /// <c>paths</c> (a parameter, request body, response, header, or example), marked as a
+    /// reference the way <see cref="NormalizePathItemContents"/> marks one. A pass that drops an
+    /// operation or a path then can't break a reference into it, or change what another path
+    /// reads, whatever order it visits paths in. Other references stay as written for the
+    /// passes that record them.
+    /// </summary>
+    private static void DetachPaths(JsonObject root)
+    {
+        if (root["paths"] is not JsonObject paths)
+        {
+            return;
+        }
+        var routes = paths
+            .Where(entry => !OpenApiStructure.IsExtension(entry.Key) && entry.Value is JsonObject)
+            .Select(entry => entry.Key)
+            .ToList();
+        // Every item resolves against the document as written before any is replaced.
+        var detached = routes.ToDictionary(
+            route => route,
+            route =>
             {
-                paths[route] = item;
+                var pathItem = (JsonObject)paths[route]!;
+                var item = GetLocalReference(pathItem) is null
+                    ? (JsonObject)pathItem.DeepClone()
+                    : ResolvePathItem(pathItem, root, []);
+                NormalizePathItemContents(item, root, pathsOnly: true);
+                return item;
             }
+        );
+        foreach (var route in routes)
+        {
+            paths[route] = detached[route];
         }
     }
 
@@ -1106,8 +1121,8 @@ public static partial class OpenApiImporter
 
     /// <summary>
     /// Microsoft.OpenApi does not reliably resolve non-component references, so inline them on
-    /// operation surfaces (path items, parameters, request bodies, responses, headers and
-    /// examples). Schema nodes stay opaque.
+    /// operation surfaces (parameters, request bodies, responses, headers and examples; path
+    /// items are inline already, <see cref="DetachPaths"/>). Schema nodes stay opaque.
     /// </summary>
     private static void NormalizeLocalPathReferences(JsonObject root)
     {
@@ -1116,12 +1131,14 @@ public static partial class OpenApiImporter
             return;
         }
 
-        foreach (var (path, node) in paths.ToList())
+        foreach (
+            var pathItem in paths
+                .Where(entry => !OpenApiStructure.IsExtension(entry.Key))
+                .Select(entry => entry.Value)
+                .OfType<JsonObject>()
+        )
         {
-            if (node is JsonObject pathItem)
-            {
-                paths[path] = ResolvePathItem(pathItem, root, []);
-            }
+            NormalizePathItemContents(pathItem, root);
         }
     }
 
@@ -1130,19 +1147,29 @@ public static partial class OpenApiImporter
     /// <see cref="NormalizeLocalPathReferences"/> inlines it: a fresh copy of the value itself,
     /// a local reference to anything but a <paramref name="componentPrefix"/> component
     /// resolved, or null for a reference it keeps (a component's fields are its own, kept as
-    /// raw provenance, and a remote reference isn't followed).
+    /// raw provenance, and a remote reference isn't followed). With
+    /// <paramref name="pathsOnly"/>, only a reference into <c>paths</c> is resolved
+    /// (<see cref="DetachPaths"/>).
     /// </summary>
     private static JsonObject? Inlined(
         JsonObject value,
         JsonObject root,
         string componentPrefix,
-        string kind
+        string kind,
+        bool pathsOnly = false
     ) =>
         !value.ContainsKey("$ref") ? (JsonObject)value.DeepClone()
         : GetLocalReference(value) is { } reference
-        && !reference.StartsWith(componentPrefix, StringComparison.Ordinal)
+        && (
+            pathsOnly
+                ? IsPathsReference(reference)
+                : !reference.StartsWith(componentPrefix, StringComparison.Ordinal)
+        )
             ? ResolveReferenceObject(value, root, kind)
         : null;
+
+    private static bool IsPathsReference(string reference) =>
+        reference.StartsWith("#/paths/", StringComparison.Ordinal);
 
     /// <summary>The response the import builds the contract from, read by <see cref="Inlined"/>.</summary>
     internal static JsonObject? InlinedResponse(JsonObject response, JsonObject root) =>
@@ -1153,15 +1180,13 @@ public static partial class OpenApiImporter
         Inlined(requestBody, root, ComponentRequestBodiesPrefix, "request body");
 
     /// <summary>
-    /// <paramref name="pathItem"/> with the path item it references (itself resolved) laid
-    /// under it. With <paramref name="normalize"/>, its contents' references are inlined too
-    /// (<see cref="NormalizePathItemContents"/>); without, the copy keeps them as written.
+    /// A copy of <paramref name="pathItem"/> with the path item it references (itself
+    /// resolved) laid under it; its contents keep their references as written.
     /// </summary>
     private static JsonObject ResolvePathItem(
         JsonObject pathItem,
         JsonObject root,
-        HashSet<string> referenceChain,
-        bool normalize = true
+        HashSet<string> referenceChain
     )
     {
         JsonObject? referenced = null;
@@ -1177,16 +1202,12 @@ public static partial class OpenApiImporter
                 ?? throw InvalidSpec(
                     $"Local path-item reference '{reference}' does not target an object."
                 );
-            referenced = ResolvePathItem(referenced, root, referenceChain, normalize);
+            referenced = ResolvePathItem(referenced, root, referenceChain);
             referenceChain.Remove(reference);
         }
 
         var local = (JsonObject)pathItem.DeepClone();
         local.Remove("$ref");
-        if (normalize)
-        {
-            NormalizePathItemContents(local, root);
-        }
         if (referenced is null)
         {
             return local;
@@ -1212,11 +1233,20 @@ public static partial class OpenApiImporter
         return merged;
     }
 
-    private static void NormalizePathItemContents(JsonObject pathItem, JsonObject root)
+    /// <summary>
+    /// Inlines the references in <paramref name="pathItem"/>'s parameters, request bodies,
+    /// responses, headers, and examples that the import builds contracts from, or with
+    /// <paramref name="pathsOnly"/> just those into <c>paths</c> (see <see cref="Inlined"/>).
+    /// </summary>
+    private static void NormalizePathItemContents(
+        JsonObject pathItem,
+        JsonObject root,
+        bool pathsOnly = false
+    )
     {
         if (pathItem["parameters"] is JsonArray pathParameters)
         {
-            pathItem["parameters"] = NormalizeParameterArray(pathParameters, root);
+            pathItem["parameters"] = NormalizeParameterArray(pathParameters, root, pathsOnly);
         }
 
         foreach (var method in OperationMethods)
@@ -1228,19 +1258,30 @@ public static partial class OpenApiImporter
 
             if (operation["parameters"] is JsonArray operationParameters)
             {
-                operation["parameters"] = NormalizeParameterArray(operationParameters, root);
+                operation["parameters"] = NormalizeParameterArray(
+                    operationParameters,
+                    root,
+                    pathsOnly
+                );
             }
 
             if (
                 operation["requestBody"] is JsonObject requestBody
-                && InlinedRequestBody(requestBody, root) is { } inlinedBody
+                && Inlined(
+                    requestBody,
+                    root,
+                    ComponentRequestBodiesPrefix,
+                    "request body",
+                    pathsOnly
+                )
+                    is { } inlinedBody
             )
             {
                 if (GetLocalReference(requestBody) is { } reference)
                 {
                     inlinedBody[ImportedRequestBodyReferenceExtension] = reference;
                 }
-                NormalizeContentExamples(inlinedBody, root);
+                NormalizeContentExamples(inlinedBody, root, pathsOnly);
                 operation["requestBody"] = inlinedBody;
             }
 
@@ -1250,10 +1291,17 @@ public static partial class OpenApiImporter
                 {
                     if (
                         response is JsonObject responseObject
-                        && InlinedResponse(responseObject, root) is { } inlinedResponse
+                        && Inlined(
+                            responseObject,
+                            root,
+                            ComponentResponsesPrefix,
+                            "response",
+                            pathsOnly
+                        )
+                            is { } inlinedResponse
                     )
                     {
-                        NormalizeResponse(inlinedResponse, root);
+                        NormalizeResponse(inlinedResponse, root, pathsOnly);
                         responses[status] = inlinedResponse;
                     }
                 }
@@ -1261,9 +1309,9 @@ public static partial class OpenApiImporter
         }
     }
 
-    private static void NormalizeResponse(JsonObject response, JsonObject root)
+    private static void NormalizeResponse(JsonObject response, JsonObject root, bool pathsOnly)
     {
-        NormalizeContentExamples(response, root);
+        NormalizeContentExamples(response, root, pathsOnly);
         if (response["headers"] is not JsonObject headers)
         {
             return;
@@ -1273,18 +1321,18 @@ public static partial class OpenApiImporter
         {
             if (
                 header is JsonObject headerObject
-                && Inlined(headerObject, root, ComponentHeadersPrefix, "response header")
+                && Inlined(headerObject, root, ComponentHeadersPrefix, "response header", pathsOnly)
                     is { } inlined
             )
             {
-                NormalizeExamples(inlined, root);
-                NormalizeContentExamples(inlined, root);
+                NormalizeExamples(inlined, root, pathsOnly);
+                NormalizeContentExamples(inlined, root, pathsOnly);
                 headers[name] = inlined;
             }
         }
     }
 
-    private static void NormalizeContentExamples(JsonObject owner, JsonObject root)
+    private static void NormalizeContentExamples(JsonObject owner, JsonObject root, bool pathsOnly)
     {
         if (owner["content"] is not JsonObject content)
         {
@@ -1293,11 +1341,11 @@ public static partial class OpenApiImporter
 
         foreach (var media in content.Select(entry => entry.Value).OfType<JsonObject>())
         {
-            NormalizeExamples(media, root);
+            NormalizeExamples(media, root, pathsOnly);
         }
     }
 
-    private static void NormalizeExamples(JsonObject owner, JsonObject root)
+    private static void NormalizeExamples(JsonObject owner, JsonObject root, bool pathsOnly)
     {
         if (owner["examples"] is not JsonObject examples)
         {
@@ -1308,7 +1356,8 @@ public static partial class OpenApiImporter
         {
             if (
                 example is JsonObject exampleObject
-                && Inlined(exampleObject, root, ComponentExamplesPrefix, "example") is { } inlined
+                && Inlined(exampleObject, root, ComponentExamplesPrefix, "example", pathsOnly)
+                    is { } inlined
             )
             {
                 examples[name] = inlined;
@@ -1316,25 +1365,33 @@ public static partial class OpenApiImporter
         }
     }
 
-    private static JsonArray NormalizeParameterArray(JsonArray parameters, JsonObject root)
+    private static JsonArray NormalizeParameterArray(
+        JsonArray parameters,
+        JsonObject root,
+        bool pathsOnly
+    )
     {
         var normalized = new JsonArray();
         foreach (var parameter in parameters)
         {
-            if (parameter is not JsonObject parameterObject)
+            var reference = parameter is JsonObject referencing
+                ? GetLocalReference(referencing)
+                : null;
+            // A pass inlining only references into paths keeps every other reference.
+            var kept = pathsOnly && reference is not null && !IsPathsReference(reference);
+            if (parameter is not JsonObject parameterObject || kept)
             {
                 normalized.Add(parameter?.DeepClone());
                 continue;
             }
 
-            var reference = GetLocalReference(parameterObject);
             var resolved = ResolveReferenceObject(parameterObject, root, "parameter");
             if (reference is not null)
             {
                 resolved[ImportedParameterReferenceExtension] = reference;
             }
-            NormalizeExamples(resolved, root);
-            NormalizeContentExamples(resolved, root);
+            NormalizeExamples(resolved, root, pathsOnly);
+            NormalizeContentExamples(resolved, root, pathsOnly);
             normalized.Add(resolved);
         }
 

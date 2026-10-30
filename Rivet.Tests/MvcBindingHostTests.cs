@@ -452,6 +452,16 @@ public sealed class MvcBindingHostTests : IDisposable
             { nameof(FilterController.Behavior), ["Title"], ["Body"] },
             // A class-level [BindNever] skips every member but one with a behaviour of its own.
             { nameof(FilterController.ClassNever), ["Title"], ["Body"] },
+            // A base's [Bind] list and [BindNever] reach its derived type, as reflection
+            // inherits them, and so does a [BindNever] on the property an override overrides.
+            { nameof(FilterController.ListedBase), ["Title"], ["Body"] },
+            { nameof(FilterController.NeverBase), ["Title"], ["Body"] },
+            { nameof(FilterController.Overridden), ["Title"], ["Body"] },
+            // A positional record's constructor parameter reads its own [BindNever] and is
+            // constructed as null, but never its class's: MVC reads a parameter's behaviour
+            // from the parameter alone.
+            { nameof(FilterController.RecordNever), ["Title"], ["Body"] },
+            { nameof(FilterController.RecordClassNever), ["Title", "Body"], [] },
         };
 
     [Theory]
@@ -522,17 +532,27 @@ public sealed class MvcBindingHostTests : IDisposable
             );
         }
 
-        var behavior = Assert.Throws<RivetUserException>(() =>
-            BindingHost.CheckerInputs(
-                typeof(FilterUnreadable),
+        // A custom binding behaviour on a member or on a record constructor's parameter.
+        foreach (
+            var handler in new[]
+            {
                 nameof(FilterUnreadable.CustomBehavior),
-                ParameterBindingHost.Mvc,
-                infersBody: true,
-                route: "/unreadable"
-            )
-        );
-        Assert.StartsWith("error RIV1115: ", behavior.Message);
-        Assert.Contains("[Skipped] is a BindingBehaviorAttribute", behavior.Message);
+                nameof(FilterUnreadable.CustomRecordBehavior),
+            }
+        )
+        {
+            var behavior = Assert.Throws<RivetUserException>(() =>
+                BindingHost.CheckerInputs(
+                    typeof(FilterUnreadable),
+                    handler,
+                    ParameterBindingHost.Mvc,
+                    infersBody: true,
+                    route: "/unreadable"
+                )
+            );
+            Assert.StartsWith("error RIV1115: ", behavior.Message);
+            Assert.Contains("[Skipped] is a BindingBehaviorAttribute", behavior.Message);
+        }
     }
 
     [Theory]
@@ -772,6 +792,50 @@ public sealed class FilterClassNever
     public string? Body { get; set; }
 }
 
+[Bind(nameof(Title))]
+public class FilterListedBase
+{
+    public string? Title { get; set; }
+
+    public string? Body { get; set; }
+}
+
+public sealed class FilterListedDerived : FilterListedBase;
+
+[Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
+public class FilterNeverBase
+{
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindingBehavior(
+        Microsoft.AspNetCore.Mvc.ModelBinding.BindingBehavior.Optional
+    )]
+    public string? Title { get; set; }
+
+    public string? Body { get; set; }
+}
+
+public sealed class FilterNeverDerived : FilterNeverBase;
+
+public class FilterOverriddenBase
+{
+    public string? Title { get; set; }
+
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
+    public virtual string? Body { get; set; }
+}
+
+public sealed class FilterOverridden : FilterOverriddenBase
+{
+    public override string? Body { get; set; }
+}
+
+public sealed record FilterRecordNever(
+    string? Title,
+    [Microsoft.AspNetCore.Mvc.ModelBinding.BindNever] string? Body
+);
+
+[Microsoft.AspNetCore.Mvc.ModelBinding.BindNever]
+public sealed record FilterRecordClassNever(string? Title, string? Body);
+
 /// <summary>The MVC handlers <see cref="BindingHost"/> serves for the property-filter pins.</summary>
 [ApiController]
 public sealed class FilterController : ControllerBase
@@ -800,6 +864,21 @@ public sealed class FilterController : ControllerBase
 
     [HttpPost("/filters/ClassNever")]
     public string ClassNever([FromForm] FilterClassNever f) => BindingHost.Echo(f);
+
+    [HttpPost("/filters/ListedBase")]
+    public string ListedBase([FromForm] FilterListedDerived f) => BindingHost.Echo(f);
+
+    [HttpPost("/filters/NeverBase")]
+    public string NeverBase([FromForm] FilterNeverDerived f) => BindingHost.Echo(f);
+
+    [HttpPost("/filters/Overridden")]
+    public string Overridden([FromForm] FilterOverridden f) => BindingHost.Echo(f);
+
+    [HttpPost("/filters/RecordNever")]
+    public string RecordNever([FromForm] FilterRecordNever f) => BindingHost.Echo(f);
+
+    [HttpPost("/filters/RecordClassNever")]
+    public string RecordClassNever([FromForm] FilterRecordClassNever f) => BindingHost.Echo(f);
 }
 
 /// <summary>A property filter that runs code: nothing static can say what it lets through.</summary>
@@ -834,6 +913,8 @@ public sealed class FilterCustomBehavior
     public string? Body { get; set; }
 }
 
+public sealed record FilterCustomRecordBehavior(string? Title, [Skipped] string? Body);
+
 /// <summary>Handlers the checker reads (never served) for the unreadable-filter pins.</summary>
 public static class FilterUnreadable
 {
@@ -842,6 +923,9 @@ public static class FilterUnreadable
     public static string OnParameter([FromForm, TitleOnly] FilterPlain f) => BindingHost.Echo(f);
 
     public static string CustomBehavior([FromForm] FilterCustomBehavior f) => BindingHost.Echo(f);
+
+    public static string CustomRecordBehavior([FromForm] FilterCustomRecordBehavior f) =>
+        BindingHost.Echo(f);
 }
 
 public sealed class InferNever

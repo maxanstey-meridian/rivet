@@ -360,8 +360,8 @@ public static class JsonContractReader
         throw new JsonException(
             $"form field '{field.Name}' on endpoint '{endpoint.ControllerName}.{endpoint.Name}' "
                 + $"has the style '{field.Style}', which a form part can't take. Its style goes in the "
-                + "form body's encoding, which holds 'form', 'spaceDelimited', 'pipeDelimited', or "
-                + "'deepObject'."
+                + $"form body's encoding, which holds {string.Join(", ", _formFieldStyles[..^1].Select(style => $"'{style}'"))}, "
+                + $"or '{_formFieldStyles[^1]}'."
         );
     }
 

@@ -111,8 +111,9 @@ internal static class FormBinding
     /// The members <paramref name="binder"/> binds on <paramref name="type"/>: each parameter
     /// of the constructor it calls (<see cref="BoundConstructor"/>) with the property it sets,
     /// then every other property it can see and set (<see cref="Sets"/>), less those an
-    /// attribute takes out for it (<see cref="Skips"/>). On MVC a property filter
-    /// (<see cref="MvcFilterLeavesOut"/>) takes a constructor parameter out too, read from
+    /// attribute takes out for it (<see cref="Skips"/>). On MVC a constructor parameter's own
+    /// binding behaviour or a property filter takes it out too
+    /// (<see cref="MvcSkipsParameter"/>), the filter read from
     /// <paramref name="bindingAttributes"/> (what binds the type: the handler parameter, or the
     /// complex member) and from the type. <c>[AsParameters]</c> stops at the constructor: given
     /// one with parameters, RequestDelegateFactory binds its arguments and sets no property.
@@ -138,11 +139,11 @@ internal static class FormBinding
                 string.Equals(candidate.Name, parameter.Name, StringComparison.OrdinalIgnoreCase)
             );
             bound.Add(parameter.Name);
-            // CanBindItem runs MVC's property filters over its constructor parameters as over
-            // its properties; the parameter it leaves out is constructed with its default.
+            // CanBindItem runs over MVC's constructor parameters as over its properties; the
+            // parameter it skips is constructed with its default.
             if (
                 binder == Binder.Mvc
-                && MvcFilterLeavesOut(wkt, type, bindingAttributes, parameter.Name) is not null
+                && MvcSkipsParameter(wkt, type, parameter, bindingAttributes) is not null
             )
             {
                 continue;
@@ -524,7 +525,9 @@ internal static class FormBinding
     /// <item>MVC (ComplexObjectModelBinder.CanBindItem) skips a member whose binding behaviour
     /// is Never (<see cref="MvcBindsNever"/>) and one a property filter leaves out
     /// (<see cref="MvcFilterLeavesOut"/>), read from <paramref name="bindingAttributes"/> (what
-    /// binds the type: the handler parameter, or the complex member) and from the type.</item>
+    /// binds the type: the handler parameter, or the complex member) and from the type. A
+    /// member its record constructor binds (<see cref="BoundConstructor"/>) is judged by the
+    /// constructor's parameter (<see cref="MvcSkipsParameter"/>).</item>
     /// <item>The form mapper skips an <c>[IgnoreDataMember]</c> member.</item>
     /// </list>
     /// </summary>
@@ -537,12 +540,51 @@ internal static class FormBinding
     ) =>
         binder switch
         {
-            Binder.Mvc => MvcBindsNever(wkt, type, property)
-                ?? MvcFilterLeavesOut(wkt, type, bindingAttributes, property.Name),
+            Binder.Mvc => MvcConstructorParameter(wkt, type, property) is { } parameter
+                ? MvcSkipsParameter(wkt, type, parameter, bindingAttributes)
+                : MvcBindsNever(wkt, type, property)
+                    ?? MvcFilterLeavesOut(wkt, type, bindingAttributes, property.Name),
             Binder.FormMapper when property.HasAttribute(wkt.IgnoreDataMember) =>
                 "[IgnoreDataMember]",
             _ => null,
         };
+
+    /// <summary>
+    /// The parameter of the record constructor MVC creates <paramref name="type"/> with
+    /// (<see cref="BoundConstructor"/>) that binds <paramref name="property"/>, or null when
+    /// MVC sets the property itself.
+    /// </summary>
+    private static IParameterSymbol? MvcConstructorParameter(
+        WellKnownTypes wkt,
+        ITypeSymbol type,
+        IPropertySymbol property
+    ) =>
+        type is INamedTypeSymbol named
+            ? BoundConstructor(named, FormBoundProperties(wkt.Compilation, named), Binder.Mvc)
+                ?.Parameters.FirstOrDefault(parameter => parameter.Name == property.Name)
+            : null;
+
+    /// <summary>
+    /// Why MVC skips <paramref name="parameter"/> of the record constructor it creates
+    /// <paramref name="type"/> with, or null when it binds it. CanBindItem asks of each bound
+    /// constructor parameter what it asks of a property: its binding behaviour, which
+    /// FindBindingBehavior reads from the parameter's own attributes alone, so a class-level
+    /// <c>[BindNever]</c> doesn't reach it; and the property filters, which compare its name.
+    /// Pinned on a real host by
+    /// <c>MvcBindingHostTests.Host_binds_what_MVCs_filters_let_through</c>.
+    /// </summary>
+    private static string? MvcSkipsParameter(
+        WellKnownTypes wkt,
+        ITypeSymbol type,
+        IParameterSymbol parameter,
+        IReadOnlyList<AttributeData> bindingAttributes
+    )
+    {
+        var own = parameter.GetAttributes().FirstOrDefault(attribute => IsBehavior(wkt, attribute));
+        return own is not null && IsNever(wkt, own)
+            ? DisplayBehavior(own)
+            : MvcFilterLeavesOut(wkt, type, bindingAttributes, parameter.Name);
+    }
 
     // BindingBehavior.Never, as the enum's value: [BindingBehavior(BindingBehavior.Never)]
     // reaches the attribute's constructor as this int.
@@ -553,9 +595,10 @@ internal static class FormBinding
     /// <paramref name="type"/>, or null when it may bind it. DefaultBindingMetadataProvider
     /// (FindBindingBehavior) reads the property's own <c>BindingBehaviorAttribute</c>
     /// (<c>[BindNever]</c>, <c>[BindRequired]</c>, or the attribute itself with its
-    /// behaviour), on it or the property it overrides, and only without one the bound type's,
-    /// as reflection finds it on the type or a base (<see cref="TypeAttributes"/>). So a
-    /// property's <c>[BindRequired]</c> or <c>[BindingBehavior(BindingBehavior.Optional)]</c>
+    /// behaviour), as reflection hands it over from the property and the ones it overrides
+    /// (<see cref="RoslynExtensions.InheritedAttributes"/>), and only without one the bound
+    /// type's, as reflection finds it on the type or a base (<see cref="TypeAttributes"/>). So
+    /// a property's <c>[BindRequired]</c> or <c>[BindingBehavior(BindingBehavior.Optional)]</c>
     /// binds it under a class-level <c>[BindNever]</c>. Never is the only behaviour that skips.
     /// </summary>
     private static string? MvcBindsNever(
@@ -564,47 +607,56 @@ internal static class FormBinding
         IPropertySymbol property
     )
     {
+        var chain = new List<ISymbol>();
         for (
             IPropertySymbol? current = property;
             current is not null;
             current = current.OverriddenProperty
         )
         {
-            if (current.GetAttributes().FirstOrDefault(IsBehavior) is { } own)
-            {
-                return IsNever(own) ? Display(own) : null;
-            }
+            chain.Add(current);
+        }
+
+        if (
+            chain
+                .InheritedAttributes(wkt.AttributeUsage)
+                .Select(found => found.Attribute)
+                .FirstOrDefault(attribute => IsBehavior(wkt, attribute)) is
+            { } own
+        )
+        {
+            return IsNever(wkt, own) ? DisplayBehavior(own) : null;
         }
 
         return
-            TypeAttributes(wkt, type).FirstOrDefault(found => IsBehavior(found.Attribute))
+            TypeAttributes(wkt, type).FirstOrDefault(found => IsBehavior(wkt, found.Attribute))
                 is ({ } classLevel, var on)
-            && IsNever(classLevel)
-            ? $"{Display(classLevel)} on '{on.Name}'"
+            && IsNever(wkt, classLevel)
+            ? $"{DisplayBehavior(classLevel)} on '{on.Name}'"
             : null;
-
-        bool IsBehavior(AttributeData attribute) =>
-            attribute.AttributeClass.DerivesFrom(wkt.BindingBehaviorAttribute);
-
-        // [BindNever] and [BindRequired] are sealed and set their behaviour in a constructor
-        // with no parameters; any other subclass sets one Rivet can't see.
-        bool IsNever(AttributeData attribute) =>
-            attribute.Is(wkt.BindNever) ? true
-            : attribute.Is(wkt.BindRequired) ? false
-            : attribute.Is(wkt.BindingBehaviorAttribute)
-                ? attribute.ConstructorArguments is [{ Value: BindingBehaviorNever }]
-            : throw UnreadableMvcSetup(
-                attribute,
-                "is a BindingBehaviorAttribute whose behaviour its own constructor sets, so Rivet "
-                    + "can't tell whether MVC binds the members it covers",
-                "Use [BindNever], [BindRequired], or [BindingBehavior(BindingBehavior.Never)] instead."
-            );
-
-        static string Display(AttributeData attribute) =>
-            attribute.ConstructorArguments is [{ Value: BindingBehaviorNever }]
-                ? "[BindingBehavior(BindingBehavior.Never)]"
-                : AttributeDisplay(attribute);
     }
+
+    private static bool IsBehavior(WellKnownTypes wkt, AttributeData attribute) =>
+        attribute.AttributeClass.DerivesFrom(wkt.BindingBehaviorAttribute);
+
+    // [BindNever] and [BindRequired] are sealed and set their behaviour in a constructor with
+    // no parameters; any other subclass sets one Rivet can't see.
+    private static bool IsNever(WellKnownTypes wkt, AttributeData attribute) =>
+        attribute.Is(wkt.BindNever) ? true
+        : attribute.Is(wkt.BindRequired) ? false
+        : attribute.Is(wkt.BindingBehaviorAttribute)
+            ? attribute.ConstructorArguments is [{ Value: BindingBehaviorNever }]
+        : throw UnreadableMvcSetup(
+            attribute,
+            "is a BindingBehaviorAttribute whose behaviour its own constructor sets, so Rivet "
+                + "can't tell whether MVC binds the members it covers",
+            "Use [BindNever], [BindRequired], or [BindingBehavior(BindingBehavior.Never)] instead."
+        );
+
+    private static string DisplayBehavior(AttributeData attribute) =>
+        attribute.ConstructorArguments is [{ Value: BindingBehaviorNever }]
+            ? "[BindingBehavior(BindingBehavior.Never)]"
+            : AttributeDisplay(attribute);
 
     /// <summary>
     /// The <c>[Bind]</c> include list that leaves the member <paramref name="name"/> (a
@@ -1054,6 +1106,22 @@ internal static class FormBinding
 
         return ordered.OfType<IPropertySymbol>().ToList();
     }
+
+    /// <summary>
+    /// Whether <paramref name="type"/> makes a form body multipart: it's an <c>IFormFile</c>
+    /// itself, or one of the properties the form binders bind (<see cref="FormBoundProperties"/>)
+    /// <see cref="CarriesFiles"/>; a collection of files counts only as a member, as at
+    /// runtime. The runtime twin is <c>RequestInputLowering.CarriesFormFiles</c>, held to this
+    /// by <c>FormFileTests.Tool_and_runtime_agree_on_which_inputs_carry_files</c>.
+    /// </summary>
+    internal static bool CarriesFormFiles(
+        WellKnownTypes wkt,
+        TypeWalker typeWalker,
+        ITypeSymbol type
+    ) =>
+        SymbolEqualityComparer.Default.Equals(type, wkt.IFormFile)
+        || FormBoundProperties(wkt.Compilation, type)
+            .Any(property => CarriesFiles(wkt, typeWalker, property.Type));
 
     /// <summary>
     /// A form-bound property that carries files: an <c>IFormFile</c>, or an array, <c>List&lt;T&gt;</c>

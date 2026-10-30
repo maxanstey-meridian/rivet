@@ -309,6 +309,8 @@ public sealed class WellKnownTypes(Compilation c)
         c.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.RouteGroupBuilder");
     public INamedTypeSymbol? EndpointRouteBuilder { get; } =
         c.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder");
+    public INamedTypeSymbol? EndpointConventionBuilder { get; } =
+        c.GetTypeByMetadataName("Microsoft.AspNetCore.Builder.IEndpointConventionBuilder");
     public INamedTypeSymbol? FunctionsAuthorizationLevel { get; } =
         c.GetTypeByMetadataName("Microsoft.Azure.Functions.Worker.AuthorizationLevel");
 

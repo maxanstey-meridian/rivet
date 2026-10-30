@@ -268,7 +268,7 @@ public static class Diagnostics
         ),
         [InvalidRequestBodyProvenance] = new(
             Severity.Error,
-            "A [RivetRequestBody] type is not represented independently by the endpoint input type, or carries files the input type doesn't."
+            "A [RivetRequestBody] type is not represented independently by the endpoint input type, or carries files while the input type carries none of its own (a file nested in one of its members doesn't count)."
         ),
         [ImportedSchemaProvenanceConflict] = new(
             Severity.Error,
@@ -368,7 +368,7 @@ public static class Diagnostics
         ),
         [CompilationFailed] = new(
             Severity.Error,
-            "The C# can't be read: no MSBuild instance can be found to load the --project, the project yields no compilation, or the project or source files don't compile — generation, --check and --routes stop, listing the first compiler errors (any workspace failures are printed above)."
+            "The C# can't be read: no MSBuild instance can be found to load the --project, MSBuild can't open the --project file as a C# project (a solution, another language's project, or a stray file), the project yields no compilation, or the project or source files don't compile — generation, --check and --routes stop, listing the first compiler errors (any workspace failures are printed above)."
         ),
         [TaggedUnionComponentCollision] = new(
             Severity.Error,
@@ -436,7 +436,7 @@ public static class Diagnostics
         ),
         [FormFieldAnnotationDropped] = new(
             Severity.Warning,
-            "A --from contract's form field states something its form part can't carry: an example's summary, description, or externalValue; an example with no value (only an externalValue or a $ref); its examples when the part's schema is its input record's; or allowEmptyValue (query parameters only) — that much is dropped, and the rest reaches the spec."
+            "A --from contract's form field states something its form part can't carry: an example's summary, description, or externalValue; an example with no value (only an externalValue or a $ref); or allowEmptyValue (query parameters only). That much is dropped; its style, explode, and allowReserved still reach the body's encoding."
         ),
         [CommittedSpecOutOfDate] = new(
             Severity.Error,
@@ -540,7 +540,7 @@ public static class Diagnostics
         ),
         [ImportClosedSchemaLeftOpen] = new(
             Severity.Warning,
-            "A schema says additionalProperties: false but contradicts itself (another record extends it, it is an allOf composition or a closed allOf branch, it is a polymorphic variant, or it is a generic template with open instances) — its record stays open, accepting and dropping an unknown member instead of refusing it."
+            "A schema says additionalProperties: false but contradicts itself (another record extends it, it is an allOf composition or a closed allOf branch, it is a polymorphic variant, it is a oneOf/anyOf union, or it is a generic template with open instances) — its record stays open, accepting and dropping an unknown member instead of refusing it."
         ),
         [CoverageMissingImplementation] = new(
             Severity.Warning,

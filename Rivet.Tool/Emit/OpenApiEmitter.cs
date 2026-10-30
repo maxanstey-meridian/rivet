@@ -1374,12 +1374,11 @@ public sealed class OpenApiEmitter
     /// and a property schema holds example values, not Example Objects. What the part can't
     /// carry is warned about with RIV2019 rather than dropped silently: an example's summary,
     /// description, or <c>externalValue</c>; an example with no <c>value</c> (only an
-    /// <c>externalValue</c> or a <c>$ref</c>); and <c>allowEmptyValue</c>, which OpenAPI
-    /// defines for query parameters only. A null <paramref name="schema"/> is a part whose
-    /// schema comes from its input record, which the field's examples can't join.
+    /// <c>externalValue</c> or a <c>$ref</c>); and <c>allowEmptyValue</c>
+    /// (<see cref="WarnFormFieldDropped"/>).
     /// </summary>
     private static void JoinFormFieldExamples(
-        JsonObject? schema,
+        JsonObject schema,
         TsEndpointParam field,
         string context
     )
@@ -1392,11 +1391,6 @@ public sealed class OpenApiEmitter
             )
             {
                 var example = entry!.AsObject();
-                if (schema is null)
-                {
-                    dropped.Add($"example '{name}' (the part's schema is its input record's)");
-                    continue;
-                }
                 if (!example.TryGetPropertyValue("value", out var value))
                 {
                     dropped.Add($"example '{name}', which has no value");
@@ -1415,10 +1409,25 @@ public sealed class OpenApiEmitter
                     .ToList();
                 if (rest.Count > 0)
                 {
-                    dropped.Add($"example '{name}''s {string.Join(" and ", rest)}");
+                    dropped.Add($"the {ListOf(rest)} of example '{name}'");
                 }
             }
         }
+
+        WarnFormFieldDropped(field, context, dropped);
+    }
+
+    /// <summary>
+    /// Warns RIV2019 for what a form field states that its part can't carry: the example
+    /// parts <see cref="JoinFormFieldExamples"/> couldn't join (<paramref name="dropped"/>), and
+    /// <c>allowEmptyValue</c>, which OpenAPI defines for query parameters only.
+    /// </summary>
+    private static void WarnFormFieldDropped(
+        TsEndpointParam field,
+        string context,
+        List<string> dropped
+    )
+    {
         if (field.AllowEmptyValue)
         {
             dropped.Add("allowEmptyValue, which OpenAPI defines for query parameters only");
@@ -1432,6 +1441,12 @@ public sealed class OpenApiEmitter
             );
         }
     }
+
+    /// <summary>"a", "a and b", or "a, b, and c".</summary>
+    private static string ListOf(IReadOnlyList<string> items) =>
+        items.Count < 3
+            ? string.Join(" and ", items)
+            : $"{string.Join(", ", items.Take(items.Count - 1))}, and {items[^1]}";
 
     /// <summary>
     /// A param's schema with the annotations that live on the schema: the leaf's pinned
@@ -1608,7 +1623,9 @@ public sealed class OpenApiEmitter
     /// A form body says nothing about fields it doesn't list: a form binder neither fills a
     /// <c>[JsonExtensionData]</c> bag nor refuses a field it doesn't bind, so neither the
     /// component's open <c>additionalProperties</c> nor its closed one is true of the form.
-    /// A component that states either is spelled out inline instead of referenced.
+    /// A component that states either is spelled out inline instead of referenced. So is the
+    /// body of a form field that states named examples: their values join its part's schema
+    /// (<see cref="JoinFormFieldExamples"/>), which a component every operation shares can't hold.
     /// </para>
     /// </summary>
     private JsonObject FormBodySchema(
@@ -1625,7 +1642,9 @@ public sealed class OpenApiEmitter
                 : null;
         // Files first, then fields: the order a body with no record behind it has always had.
         IReadOnlyList<TsEndpointParam> parts = [.. fileParams, .. formFieldParams];
-        var formShaped = definition is { AdditionalProperties: null };
+        var referable =
+            definition is { AdditionalProperties: null }
+            && formFieldParams.All(field => field.Examples is null);
         if (definition is not null && parts.All(part => part.BodyPropertyName is not null))
         {
             var properties = definition.Properties.ToDictionary(
@@ -1641,7 +1660,7 @@ public sealed class OpenApiEmitter
                 .Select(property => property.Name)
                 .ToHashSet(StringComparer.Ordinal);
             if (
-                formShaped
+                referable
                 && parts.All(part => part.Name == part.BodyPropertyName)
                 && sent.SetEquals(parts.Select(part => part.BodyPropertyName!))
                 && !parts.Any(part =>
@@ -1650,7 +1669,7 @@ public sealed class OpenApiEmitter
                 )
             )
             {
-                JoinRecordFormFieldExamples(ep, formFieldParams);
+                WarnRecordFormFields(ep, formFieldParams);
                 return MapTypeReference(
                     new TsType.TypeRef(ep.InputTypeName!),
                     $"form input on endpoint '{ep.ControllerName}.{ep.Name}'"
@@ -1668,10 +1687,10 @@ public sealed class OpenApiEmitter
             return inline;
         }
 
-        if (formShaped && fileParams.Count > 0)
+        if (referable && fileParams.Count > 0)
         {
             // A --from contract's multipart input named by a definition it ships.
-            JoinRecordFormFieldExamples(ep, formFieldParams);
+            WarnRecordFormFields(ep, formFieldParams);
             return MapTypeReference(
                 new TsType.TypeRef(ep.InputTypeName!),
                 $"multipart input on endpoint '{ep.ControllerName}.{ep.Name}'"
@@ -1723,7 +1742,11 @@ public sealed class OpenApiEmitter
                 }
                 if (part.Source == ParamSource.FormField)
                 {
-                    JoinFormFieldExamples(null, part, FormFieldContext(ep, part));
+                    JoinFormFieldExamples(
+                        properties[part.Name]!.AsObject(),
+                        part,
+                        FormFieldContext(ep, part)
+                    );
                 }
 
                 continue;
@@ -1776,17 +1799,18 @@ public sealed class OpenApiEmitter
         $"form field '{field.Name}' on endpoint '{ep.ControllerName}.{ep.Name}'";
 
     /// <summary>
-    /// A body that references its input record's component spells out no part, so no form
-    /// field's examples can join one (<see cref="JoinFormFieldExamples"/>).
+    /// A body that references its input record's component spells out no part. None of its
+    /// fields states examples (those spell the body out), so only what no form part carries is
+    /// left to warn about (<see cref="WarnFormFieldDropped"/>).
     /// </summary>
-    private static void JoinRecordFormFieldExamples(
+    private static void WarnRecordFormFields(
         TsEndpointDefinition ep,
         IReadOnlyList<TsEndpointParam> formFieldParams
     )
     {
         foreach (var field in formFieldParams)
         {
-            JoinFormFieldExamples(null, field, FormFieldContext(ep, field));
+            WarnFormFieldDropped(field, FormFieldContext(ep, field), []);
         }
     }
 

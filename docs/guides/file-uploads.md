@@ -165,9 +165,10 @@ form part isn't a parameter, so they land in different places:
 
 That field comes out as `encoding: { "tags": { "style": "form", "explode": false } }` on the
 form media type, `examples: [["red", "blue"]]` on the `tags` property, and one `RIV2019`
-for the summary. When the field's part takes its schema from the input record (the body
-`$ref`s the record's component, or the part is its record property), its examples have
-nothing to join, so they're all dropped with the warning; the encoding still applies.
+for the summary. When the part takes its schema from the input record, the examples join that
+property schema. A component is shared by every operation that names it, so it can't hold one
+operation's examples: a field with examples spells its body out instead of `$ref`ing the
+record's component. Either way, the encoding applies.
 
 ## Raw binary request bodies
 

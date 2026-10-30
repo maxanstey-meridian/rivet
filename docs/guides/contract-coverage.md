@@ -299,7 +299,9 @@ A policy counts as requiring authentication when it's built inline with one of
 `RequireClaim`, `RequireUserName`), held in a local or not, as in
 `new AuthorizeFilter(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())` or
 `.RequireAuthorization(policy => policy.RequireRole("Staff"))`, and when an
-`[Authorize]`-style `IAuthorizeData` names roles. A caller passes a policy only when every
+`[Authorize]`-style `IAuthorizeData` names roles. A blank `Roles = ""` counts too: ASP.NET
+still builds a role requirement from it, one nobody passes. A blank policy name is no name,
+so it means the default policy. A caller passes a policy only when every
 requirement in it passes, and each of those four turns an anonymous caller away, so one of
 them decides the policy whatever else it holds: an assertion, a custom requirement, or
 anything else `--check` can't read. In a configure lambda it counts only where it always
@@ -313,7 +315,9 @@ A policy name means the policy registered under it, with
 `AddAuthorizationBuilder()`'s `AddPolicy`, `AddDefaultPolicy`, or `AddFallbackPolicy`, and
 looked up ignoring case, as ASP.NET does. So `[Authorize(Policy = "open")]` over a policy
 registered with `RequireAssertion(_ => true)` lets anyone in, and the fallback policy stays
-out of it, since the endpoint has authorization of its own. A name without a registration
+out of it, since the endpoint has authorization of its own. Under a secured contract that's
+`RIV4008`, and it names the policy that lets everyone through rather than asking for the
+`[Authorize]` the endpoint already has. A name without a registration
 `--check` can read is `RIV4009`: a name nothing registers, one registered only under a
 condition, one whose policy it can't read (`AddPolicy("Staff", policyFromConfig)`), and every
 name once the app registers a policy under a name it can't read
@@ -336,9 +340,14 @@ to, at each call site. A requirement on what a helper returns covers only that c
 after `var v2 = api.V2(); v2.RequireAuthorization();`, what's mapped on `v2` requires a user
 and what's mapped on `api` doesn't, and a group made inside a helper is a new group at every
 call. A requirement in the helper's own body reaches each of them. A convention on a builder
-it can't trace to its `Map*` call (a lambda's parameter, a field, or a method handed on as a
-delegate) may cover any endpoint on that host, so those endpoints become `RIV4009`, and so
-does an endpoint mapped on a builder it can't follow to its `MapGroup` call or the app.
+it can't trace to its `Map*` call (a lambda's parameter, a field, a method handed on as a
+delegate, a delegate's answer, or what a library call returns when it's handed a builder, as
+in `Lib.Wrap(api).RequireAuthorization()`) may cover any endpoint on that host, so those
+endpoints become `RIV4009`, and so does an endpoint mapped on a builder it can't follow to its
+`MapGroup` call or the app, or on a group a helper nests by calling itself, whose depth
+`--check` can't know. A framework call that maps endpoints of its own, such as
+`MapHealthChecks` or `MapHub`, hands back their builder only, so a requirement on it covers
+none of your contract's.
 
 App-wide setup in a helper (an `AuthorizeFilter`, or a fallback or default policy) applies
 where the helper is called: under that call's condition, unconditionally if any call is, and
@@ -433,9 +442,11 @@ when it's the only place the fallback is set and it requires a user, so
 `if (entraEnabled) o.FallbackPolicy = …` beside `if (!entraEnabled) endpoint.RequireAuthorization()`
 requires a user either way.
 
-Anything else stays its own unknown: a site under two conditions, a `switch`, a loop, `&&`
-or `||`, a method call, or a parameter. So does a condition inside a method that may run
-more than once, or under its callers' conditions as well as its own: a condition counts
+Anything else stays its own unknown: a site under two conditions, a `switch`, a loop, or
+`&&` or `||`. Two conditions that call a method or read a parameter are two unknowns, even
+when they read the same thing: only one `if`'s own two branches share theirs. A condition
+inside a method that may run more than once, or under its callers' conditions as well as its
+own, is its own unknown too: a condition counts
 when the requirement and the group or endpoint it's applied to are made in the same method,
 which runs them together, or when it's in top-level statements or the entry point, which run
 exactly once. A `const` or `static readonly` field holds one value everywhere, so a

@@ -93,8 +93,10 @@ Verified limits of the current tool, so you don't discover them in production.
   parts and what `--check` compares on an MVC handler. A `[Bind("A", "B")]` include list
   on the parameter and one on its class both apply (MVC runs both), a nested type's own
   list applies wherever it's bound, and `[BindNever]` or
-  `[BindingBehavior(BindingBehavior.Never)]` skips a member, on the member or its class.
-  Any other property filter (an `IPropertyFilterProvider`) is code Rivet can't run, so
+  `[BindingBehavior(BindingBehavior.Never)]` skips a member, on the member (or the base
+  property it overrides) or its class, a base class's included. A positional record's
+  constructor parameter is read as MVC reads it: its own `[BindNever]` skips it, and the
+  record is constructed with its default, but a class-level one doesn't reach it. Any other property filter (an `IPropertyFilterProvider`) is code Rivet can't run, so
   it stops generation and `--check` with `RIV1115` rather than guess; a minimal-API
   handler never trips it, since the form mapper reads no MVC filter.
 - The spec reflects *declared* C# types and the default System.Text.Json

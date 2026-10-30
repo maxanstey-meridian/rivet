@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
 using Rivet.Tool.Model;
+using static Rivet.Tool.RoslynExtensions;
 
 namespace Rivet.Tool.Analysis;
 
@@ -86,7 +87,7 @@ public static class CoverageChecker
         }
 
         var adapterType = compilation.GetTypeByMetadataName("Rivet.RivetResultExtensions");
-        var mapHandlers = IndexMapHandlers(compilation, wkt);
+        var mapHandlers = IndexMapHandlers(compilation, origins);
 
         var implementations = new Dictionary<IFieldSymbol, List<TerminalImplementation>>(
             SymbolEqualityComparer.Default
@@ -423,14 +424,14 @@ public static class CoverageChecker
                             Handler: { } handler,
                             BindingHost: { } host,
                             InfersBody: var infersBody,
-                            MapCall: var mapCall,
+                            Chain: var chain,
                             Route: var mappedRoute,
                         }
                     && mappings.Add(
                         (
                             handler.OriginalDefinition,
-                            mapCall?.Syntax.SyntaxTree,
-                            mapCall?.Syntax.Span,
+                            chain?.MapCall.Syntax.SyntaxTree,
+                            chain?.MapCall.Syntax.Span,
                             mappedRoute,
                             infersBody
                         )
@@ -654,7 +655,7 @@ public static class CoverageChecker
             List<(Verdict Verdict, SecuritySpec Spec)> verdicts;
             if (EndpointWalker.HostOf(handler) == ParameterBindingHost.MinimalApi)
             {
-                mapHandlers ??= IndexMapHandlers(compilation, wkt);
+                mapHandlers ??= IndexMapHandlers(compilation, origins);
                 var chains = handler.SourceBody() is { } body
                     ? (
                         mapHandlers.GetValueOrDefault((body.Syntax.SyntaxTree, body.Syntax.Span))
@@ -676,7 +677,7 @@ public static class CoverageChecker
                                 ? spec with
                                 {
                                     Label =
-                                        $"{spec.Label}, {Mapping(mapped.Chain, MappedRoute(mapped.Chain))}",
+                                        $"{spec.Label}, {Mapping(mapped.Chain, MappedRoute(wkt, mapped.Chain, fieldMap))}",
                                 }
                                 : spec
                         )
@@ -893,6 +894,16 @@ public static class CoverageChecker
             var requires = inherited
                 ? "the spec requires credentials (the document's default security)"
                 : "the spec requires credentials";
+            if (verdict.PolicyAdmits)
+            {
+                return Warning(
+                    CoverageWarningKind.SecurityMismatch,
+                    $"{spec.Label}: {requires}, but anyone can call the handler: the policy "
+                        + $"it's authorized with lets anyone in ({why}). Make that policy "
+                        + $"require an authenticated user, or {anonymous}."
+                );
+            }
+
             return Warning(
                 CoverageWarningKind.SecurityMismatch,
                 $"{spec.Label}: {requires}, but anyone can call the handler ({why}). "
@@ -1052,21 +1063,41 @@ public static class CoverageChecker
     }
 
     /// <summary>
-    /// Which mapping of a handler mapped more than once a warning is about: its route, or
-    /// where --check lost the trace when that can't be read.
+    /// Which mapping of a handler mapped more than once a warning is about: its route; where
+    /// --check lost the trace, when it's unresolved; or else its prefix, when that's known,
+    /// and its Map* call (decision 15).
     /// </summary>
-    private static string Mapping(BuilderChain chain, string? route) =>
-        route is not null ? $"as mapped at {route}"
-        : chain.Unresolved
-            ? $"as mapped on '{chain.End.Syntax}' at {chain.End.Syntax.SourcePosition()}"
-        : $"as mapped by the {chain.MapCall.TargetMethod.Name} call at {chain.MapCall.Syntax.SourcePosition()}";
+    private static string Mapping(BuilderChain chain, string? route)
+    {
+        if (route is not null)
+        {
+            return $"as mapped at {route}";
+        }
 
-    /// <summary>A chain's route from constants alone: its prefix and its Map* call's template.</summary>
-    private static string? MappedRoute(BuilderChain chain) =>
-        chain.Prefix() is { } prefix
-        && Argument(chain.MapCall, "pattern")?.ConstantValue
-            is { HasValue: true, Value: string template }
-            ? TransportIdentity.NormalizeRoute($"{prefix}/{template.Trim('/')}")
+        if (chain.Unresolved)
+        {
+            return $"as mapped on '{chain.End.Syntax}' at {chain.End.Syntax.SourcePosition()}";
+        }
+
+        var call =
+            $"the {chain.MapCall.TargetMethod.Name} call at {chain.MapCall.Syntax.SourcePosition()}";
+        return chain.Prefix() is { Length: > 0 } prefix
+            ? $"as mapped under {prefix}, by {call}"
+            : $"as mapped by {call}";
+    }
+
+    /// <summary>
+    /// A mapping's route: its Map* call's template (a constant or a contract field's
+    /// <c>.Route</c>) in its chain. Null when either can't be read.
+    /// </summary>
+    private static string? MappedRoute(
+        WellKnownTypes wkt,
+        BuilderChain chain,
+        IReadOnlyDictionary<IFieldSymbol, TsEndpointDefinition> fieldMap
+    ) =>
+        Argument(chain.MapCall, "pattern") is { } pattern
+        && ResolveRouteArgument(wkt, pattern, fieldMap) is { } template
+            ? chain.Route(template)
             : null;
 
     /// <summary>
@@ -1165,7 +1196,6 @@ public static class CoverageChecker
                     Handler = handler.Symbol,
                     BindingHost = ParameterBindingHost.MinimalApi,
                     InfersBody = true,
-                    MapCall = mapCall,
                     Chain = chain,
                 };
             }
@@ -1195,13 +1225,10 @@ public static class CoverageChecker
             // Constant MapGroup receiver chains: prepend accumulated group prefixes
             // (nested groups accumulate). Unresolvable receivers keep the route
             // unresolved rather than inventing a prefix.
-            var groupPrefix = chain.Prefix();
-            routeError = groupPrefix is null
+            route = chain.Route(template);
+            routeError = route is null
                 ? "unresolved route: receiver chain does not resolve to constant MapGroup prefixes"
                 : null;
-            route = groupPrefix is null
-                ? null
-                : TransportIdentity.NormalizeRoute($"{groupPrefix}/{template.Trim('/')}");
         }
 
         // The method-mismatch check compares verbs case-blind, but body inference reads them
@@ -1213,7 +1240,6 @@ public static class CoverageChecker
             Handler = handler.Symbol,
             BindingHost = ParameterBindingHost.MinimalApi,
             InfersBody = EnumParameterBinding.MinimalApiInfersBody(methods),
-            MapCall = mapCall,
             Chain = chain,
         };
     }
@@ -1226,7 +1252,7 @@ public static class CoverageChecker
     /// method without source has no body to read, so it's left out: no terminal can be found
     /// in it anyway.
     /// </summary>
-    private static MapHandlerIndex IndexMapHandlers(Compilation compilation, WellKnownTypes wkt)
+    private static MapHandlerIndex IndexMapHandlers(Compilation compilation, BuilderOrigins origins)
     {
         var index = new MapHandlerIndex();
         foreach (var tree in compilation.SyntaxTrees)
@@ -1248,10 +1274,7 @@ public static class CoverageChecker
                 semanticModel ??= compilation.GetSemanticModel(tree);
                 if (
                     semanticModel.GetOperation(syntax) is not IInvocationOperation call
-                    || !SymbolEqualityComparer.Default.Equals(
-                        call.TargetMethod.ContainingType,
-                        wkt.EndpointRouteBuilderExtensions
-                    )
+                    || !origins.IsMapCall(call)
                 )
                 {
                     continue;
@@ -1571,7 +1594,20 @@ public static class CoverageChecker
     private static IEnumerable<IOperation> ReturnedValues(
         IOperation function,
         HashSet<IMethodSymbol> expanded
-    ) =>
+    ) => ReachableReturns(function).SelectMany(returned => ValuesOf(returned, expanded));
+
+    /// <summary>
+    /// What <paramref name="function"/> itself hands back: the leaves (<see cref="LeavesOf"/>)
+    /// of its reachable returns, without <see cref="ReturnedValues(IOperation)"/>'s step into
+    /// the functions passed to a returned call. A builder helper returning
+    /// <c>group.AddEndpointFilter(async (c, next) => await next(c))</c> returns the group, not
+    /// what the filter returns.
+    /// </summary>
+    internal static IEnumerable<IOperation> ReturnedLeaves(IOperation function) =>
+        ReachableReturns(function).SelectMany(LeavesOf);
+
+    // The values of function's own returns that can run.
+    private static IEnumerable<IOperation?> ReachableReturns(IOperation function) =>
         OwnDescendants(function)
             .OfType<IReturnOperation>()
             .Where(returned =>
@@ -1582,7 +1618,7 @@ public static class CoverageChecker
                         is { Succeeded: true, StartPointIsReachable: true }
                 )
             )
-            .SelectMany(returned => ValuesOf(returned.ReturnedValue, expanded));
+            .Select(returned => returned.ReturnedValue);
 
     /// <summary>
     /// The leaf values an expression can produce: each switch arm and conditional branch
@@ -1701,18 +1737,6 @@ public static class CoverageChecker
         }
     }
 
-    /// <summary>
-    /// Operations from separate GetOperation calls are separate trees, so identity is
-    /// compared through the syntax they were bound from.
-    /// </summary>
-    private static bool IsSameSyntax(SyntaxNode left, SyntaxNode right) =>
-        left.SyntaxTree == right.SyntaxTree && left.Span == right.Span;
-
-    private static IOperation? Argument(IInvocationOperation invocation, string parameter) =>
-        invocation
-            .Arguments.FirstOrDefault(argument => argument.Parameter?.Name == parameter)
-            ?.Value;
-
     private static IOperation? WithoutImplicitConversions(IOperation? operation) =>
         operation is IConversionOperation { IsImplicit: true } conversion
             ? WithoutImplicitConversions(conversion.Operand)
@@ -1771,9 +1795,6 @@ public static class CoverageChecker
         /// or <see cref="EnumParameterBinding.MvcInfersBody"/>. Unused for Azure Functions.
         /// </summary>
         public bool InfersBody { get; init; }
-
-        /// <summary>A minimal API's Map* call, whose conventions K.5 reads.</summary>
-        public IInvocationOperation? MapCall { get; init; }
 
         /// <summary>The mapping a minimal API's Map* call is made in: its route-group chain.</summary>
         public BuilderChain? Chain { get; init; }

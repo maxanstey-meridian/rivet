@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace Rivet.Tool;
 
@@ -27,6 +28,28 @@ internal static class RoslynExtensions
             }
         }
     }
+
+    /// <summary>The operation under every conversion wrapped around it.</summary>
+    public static IOperation Unwrap(IOperation operation) =>
+        operation is IConversionOperation conversion ? Unwrap(conversion.Operand) : operation;
+
+    /// <summary><paramref name="actual"/> is <paramref name="expected"/>, or a construction of it.</summary>
+    public static bool IsType(INamedTypeSymbol? actual, INamedTypeSymbol? expected) =>
+        expected is not null
+        && SymbolEqualityComparer.Default.Equals(actual?.OriginalDefinition, expected);
+
+    /// <summary>
+    /// Operations from separate GetOperation calls are separate trees, so identity is
+    /// compared through the syntax they were bound from.
+    /// </summary>
+    public static bool IsSameSyntax(SyntaxNode left, SyntaxNode right) =>
+        left.SyntaxTree == right.SyntaxTree && left.Span == right.Span;
+
+    /// <summary>The value <paramref name="invocation"/> passes for the parameter named <paramref name="parameter"/>.</summary>
+    public static IOperation? Argument(IInvocationOperation invocation, string parameter) =>
+        invocation
+            .Arguments.FirstOrDefault(argument => argument.Parameter?.Name == parameter)
+            ?.Value;
 
     public static bool Is(this AttributeData attribute, INamedTypeSymbol? type) =>
         type is not null && SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, type);

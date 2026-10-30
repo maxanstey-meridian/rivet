@@ -19,9 +19,10 @@ Omit `--output` to preview the generated C# on stdout. `--namespace` defaults to
 A DTO keeps what its schema says about extra members. One that says
 `additionalProperties: false` is `[JsonUnmappedMemberHandling(Disallow)]`, so your host turns
 away a request carrying a member the spec doesn't allow, rather than accepting it and quietly
-dropping it. A closed schema that contradicts itself (an `allOf` base another record extends,
-say) stays open, and the import tells you which and why (`RIV3033`). The
-[type mapping](/reference/type-mapping#open-and-closed-objects) has the details.
+dropping it. A form body is the exception for now: the form binders don't read that attribute,
+so they still drop the unknown part. A closed schema that contradicts itself (an `allOf` base
+another record extends, say) stays open, and the import tells you which and why (`RIV3033`).
+The [type mapping](/reference/type-mapping#open-and-closed-objects) has the details.
 
 What imports cleanly, every diagnostic category, and what is out of scope are
 documented in the [Import Profile](/reference/import-profile). The quality gate:

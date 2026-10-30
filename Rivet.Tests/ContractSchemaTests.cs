@@ -598,11 +598,15 @@ public sealed class ContractSchemaTests
     }
 
     /// <summary>
-    /// The verdicts on one response, from the schema (over the whole contract, by Json.Schema,
-    /// whose <c>$</c>, unlike ECMA's, matches before a final newline) and from the reader. The rest of the contract is valid for both, so the
-    /// response decides each verdict.
+    /// The verdicts on one response, and on one param when there is one, from the schema (over
+    /// the whole contract, by Json.Schema, whose <c>$</c>, unlike ECMA's, matches before a final
+    /// newline) and from the reader. The rest of the contract is valid for both, so the
+    /// response and the param decide each verdict.
     /// </summary>
-    private static (bool Schema, bool Reader) Verdicts(JsonObject response)
+    private static (bool Schema, bool Reader) Verdicts(
+        JsonObject response,
+        JsonObject? param = null
+    )
     {
         var contract = new JsonObject
         {
@@ -611,11 +615,11 @@ public sealed class ContractSchemaTests
             ["endpoints"] = new JsonArray(
                 new JsonObject
                 {
-                    ["name"] = "get",
-                    ["httpMethod"] = "GET",
+                    ["name"] = "post",
+                    ["httpMethod"] = "POST",
                     ["routeTemplate"] = "/things",
                     ["controllerName"] = "things",
-                    ["params"] = new JsonArray(),
+                    ["params"] = param is null ? new JsonArray() : new JsonArray(param),
                     ["responses"] = new JsonArray(response),
                 }
             ),
@@ -669,6 +673,33 @@ public sealed class ContractSchemaTests
     [InlineData(600, false)]
     public void Schema_And_Reader_Agree_On_A_StatusCode(int code, bool valid) =>
         Assert.Equal((valid, valid), Verdicts(new JsonObject { ["statusCode"] = code }));
+
+    [Theory]
+    [InlineData("matrix", false)]
+    [InlineData("label", false)]
+    [InlineData("simple", false)]
+    [InlineData("form", true)]
+    [InlineData("spaceDelimited", true)]
+    [InlineData("pipeDelimited", true)]
+    [InlineData("deepObject", true)]
+    public void Schema_And_Reader_Agree_On_A_Form_Field_Style(string style, bool valid)
+    {
+        // Decision 7: a form field's style goes in the form body's encoding, which holds
+        // these four; the reader and the schema refuse the rest.
+        var field = new JsonObject
+        {
+            ["name"] = "tags",
+            ["type"] = new JsonObject
+            {
+                ["kind"] = "array",
+                ["element"] = new JsonObject { ["kind"] = "primitive", ["type"] = "string" },
+            },
+            ["source"] = "formField",
+            ["style"] = style,
+        };
+
+        Assert.Equal((valid, valid), Verdicts(new JsonObject { ["statusCode"] = 204 }, field));
+    }
 
     [Fact]
     public void Deeply_Nested_Types_Validate()

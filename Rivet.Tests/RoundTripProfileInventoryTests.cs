@@ -608,7 +608,7 @@ public sealed class RoundTripProfileInventoryTests
             RegexOptions.Multiline
         );
 
-        Assert.Equal(18, proofs.Count);
+        Assert.Equal(19, proofs.Count);
         foreach (Match proof in proofs)
         {
             var method = typeof(RoundTripProfileInventoryTests)

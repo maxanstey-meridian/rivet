@@ -257,59 +257,68 @@ public static class CompilationHelper
         return System.Text.Json.JsonDocument.Parse(json);
     }
 
-    private static readonly object _stdErrLock = new();
+    /// <summary>
+    /// Captures what this flow writes to Console.Error while <paramref name="action"/> runs.
+    /// Writes from other tests, which run in parallel on their own flows, never land in it.
+    /// </summary>
+    public static string CaptureStdErr(Action action) => FlowConsole.Error.Capture(action);
 
     /// <summary>
-    /// Captures everything written to Console.Error while <paramref name="action"/> runs.
-    /// Serialized behind a process-wide lock because Console.SetError is global —
-    /// concurrent captures from parallel test collections would otherwise race.
-    /// Assert with Contains (other tests may emit unrelated warnings concurrently).
+    /// Captures what this flow writes to Console.Out while <paramref name="action"/> runs.
+    /// Writes from other tests, which run in parallel on their own flows, never land in it.
     /// </summary>
-    public static string CaptureStdErr(Action action)
-    {
-        lock (_stdErrLock)
-        {
-            var original = Console.Error;
-            // Not disposed: another thread may still hold the swapped writer, and a write after Dispose throws.
-            var writer = new StringWriter();
-            try
-            {
-                Console.SetError(writer);
-                action();
-            }
-            finally
-            {
-                Console.SetError(original);
-            }
+    public static string CaptureStdOut(Action action) => FlowConsole.Out.Capture(action);
 
-            return writer.ToString();
+    /// <summary>
+    /// Console.Error and Console.Out are process-wide, so each is replaced once, for the whole
+    /// test run, by a writer that routes every write by async flow: to the capture that flow
+    /// set, else to the real stream. A capture never swaps the console, so it needs no lock.
+    /// </summary>
+    private static class FlowConsole
+    {
+        public static readonly FlowRoutedWriter Error = Install(Console.Error, Console.SetError);
+        public static readonly FlowRoutedWriter Out = Install(Console.Out, Console.SetOut);
+
+        private static FlowRoutedWriter Install(TextWriter original, Action<TextWriter> set)
+        {
+            var writer = new FlowRoutedWriter(original);
+            set(writer);
+            return writer;
         }
     }
 
-    private static readonly object _stdOutLock = new();
-
-    /// <summary>
-    /// Captures everything written to Console.Out while <paramref name="action"/> runs.
-    /// Serialized behind a process-wide lock because Console.SetOut is global —
-    /// an unguarded swap can leave a disposed writer installed for a concurrent test
-    /// to write to (or restore), poisoning Console.Out for the rest of the run.
-    /// Assert with Contains (other tests may print unrelated output concurrently).
-    /// </summary>
-    public static string CaptureStdOut(Action action)
+    private sealed class FlowRoutedWriter(TextWriter original) : TextWriter
     {
-        lock (_stdOutLock)
+        private readonly AsyncLocal<StringWriter?> _capture = new();
+
+        private TextWriter Target => _capture.Value ?? original;
+
+        public override System.Text.Encoding Encoding => original.Encoding;
+
+        public override void Write(char value) => Target.Write(value);
+
+        public override void Write(string? value) => Target.Write(value);
+
+        public override void Write(char[] buffer, int index, int count) =>
+            Target.Write(buffer, index, count);
+
+        public override void WriteLine(string? value) => Target.WriteLine(value);
+
+        public override void Flush() => Target.Flush();
+
+        public string Capture(Action action)
         {
-            var original = Console.Out;
-            // Not disposed: another thread may still hold the swapped writer, and a write after Dispose throws.
+            var outer = _capture.Value;
             var writer = new StringWriter();
+            _capture.Value = writer;
             try
             {
-                Console.SetOut(writer);
                 action();
             }
             finally
             {
-                Console.SetOut(original);
+                // A synchronous method's AsyncLocal change outlives it, so restore the caller's.
+                _capture.Value = outer;
             }
 
             return writer.ToString();

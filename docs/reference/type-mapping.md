@@ -155,9 +155,11 @@ reads as "anything else goes") comes back without it, and one that writes
 An imported record whose source says `additionalProperties: false` is
 `[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]`, so the host turns away an
 unknown member, as the spec does, instead of quietly dropping it. That goes for a component, a
-property-less component, and an inline object with properties alike. Some closed schemas
-contradict themselves, though, and those records stay open, with `RIV3033` naming each one
-and why:
+property-less component, and an inline object with properties alike. A form body is the
+exception for now: the form binders don't read that attribute, so they still drop a part the
+record doesn't have, while the spec says `false`. Some closed schemas contradict themselves,
+though, and those records stay open, with `RIV3033` naming each one (by its component key, or
+by its pointer when it's inline) and why:
 
 - one another record extends (an `allOf` hierarchy's base), whose `false` refuses the very
   members the child adds;
@@ -165,12 +167,15 @@ and why:
   applies a closed part's `false` to the members every other part brings;
 - a polymorphic variant, whose discriminator the record leaves to its base, so System.Text.Json
   would turn the variant's own tag away wherever it's read on its own;
+- a `oneOf` or `anyOf` union, which imports as a wrapper that takes its variants' members,
+  members the union's own `false` refuses;
 - a generic template instance, when the same template also serves instances that aren't closed,
   since one C# type serves them all.
 
 The spec still says `additionalProperties: false` for every one of them. An inline
 `{"type": "object", "additionalProperties": false}` with no properties isn't a record at all:
-it imports as a dictionary, which has no members to be unknown.
+it imports as a `Dictionary<string, JsonElement>`, which takes any member, so the host doesn't
+refuse one yet; the spec still says `additionalProperties: false`.
 
 ## Constraint and metadata flow
 

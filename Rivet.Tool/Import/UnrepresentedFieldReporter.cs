@@ -13,8 +13,8 @@ namespace Rivet.Tool.Import;
 /// contracts, are reported. Runs before reference normalisation, so a <c>$ref</c> is still a
 /// reference: a request body component is handled once, at the component; response
 /// components and parameters, kept as raw provenance, are skipped; and any other reference
-/// the import inlines (a path item, a request body, or a response) is read through it, the
-/// way the import reads it.
+/// the import inlines (a request body or a response) is read through it, the way the import
+/// reads it. A path item is inline already (<c>OpenApiImporter.DetachPaths</c>).
 /// </summary>
 internal static class UnrepresentedFieldReporter
 {
@@ -47,7 +47,7 @@ internal static class UnrepresentedFieldReporter
                 {
                     ReportPathItem(
                         root,
-                        EffectivePathItem(root, pathItem, []),
+                        pathItem,
                         $"#/paths/{JsonPointer.Escape(path)}",
                         warnings,
                         preserved
@@ -94,36 +94,6 @@ internal static class UnrepresentedFieldReporter
     private const string CallbackReason =
         "Rivet contracts describe the requests an API receives, not the ones it sends. "
         + "Document the outgoing call in the operation description, or give the receiving service its own contract.";
-
-    /// <summary>
-    /// The path item the import inlines for a <c>$ref</c>'d one: the referenced item (itself
-    /// resolved) with the referencing item's own fields laid over it. A reference that does
-    /// not resolve, or cycles, is left for the import to refuse.
-    /// </summary>
-    private static JsonObject EffectivePathItem(
-        JsonObject root,
-        JsonObject pathItem,
-        HashSet<string> referenceChain
-    )
-    {
-        if (
-            pathItem["$ref"] is not JsonValue referenceValue
-            || !referenceValue.TryGetValue<string>(out var reference)
-            || !referenceChain.Add(reference)
-            || !JsonPointer.TryResolve(root, reference, out var target)
-            || target is not JsonObject referenced
-        )
-        {
-            return pathItem;
-        }
-
-        var effective = (JsonObject)EffectivePathItem(root, referenced, referenceChain).DeepClone();
-        foreach (var (name, value) in pathItem.Where(entry => entry.Key != "$ref"))
-        {
-            effective[name] = value?.DeepClone();
-        }
-        return effective;
-    }
 
     private static void ReportPathItem(
         JsonObject root,

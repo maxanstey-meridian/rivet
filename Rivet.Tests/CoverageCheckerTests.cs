@@ -2103,11 +2103,123 @@ public sealed class CoverageCheckerTests
         "app.MapGroup(\"/v2\").MapItems();",
         "private static IEndpointRouteBuilder MapItems(this IEndpointRouteBuilder endpoints) { endpoints.MapGet(\"/items\", Handler); return endpoints; }"
     )]
+    // What a lambda handed to the returned call returns isn't what the helper returns.
+    [InlineData(
+        "app.MapApi().MapGet(\"/items\", Handler);",
+        "private static RouteGroupBuilder MapApi(this IEndpointRouteBuilder app) => "
+            + "app.MapGroup(\"/v2\").AddEndpointFilter(async (context, next) => await next(context));"
+    )]
     public void Route_group_helper_keeps_its_prefix(string body, string members)
     {
         var warnings = RunCheck(GroupedTasksContract, GroupedEndpoints(body, members));
 
         Assert.DoesNotContain(warnings, warning => warning.FieldName == "ListItems");
+    }
+
+    [Fact]
+    public void One_helper_nested_in_itself_keeps_each_prefix()
+    {
+        var warnings = RunCheck(
+            GroupedTasksContract,
+            GroupedEndpoints(
+                "app.V2().V2().MapGet(\"/items\", Handler);",
+                "private static RouteGroupBuilder V2(this IEndpointRouteBuilder group) => group.MapGroup(\"/v2\");"
+            )
+        );
+
+        var warning = Assert.Single(warnings, item => item.FieldName == "ListItems");
+        Assert.Equal(CoverageWarningKind.RouteMismatch, warning.Kind);
+        Assert.Equal("/v2/v2/items", warning.Actual);
+    }
+
+    [Fact]
+    public void Group_helper_nesting_by_recursion_is_unresolved()
+    {
+        // Nest(g, 2) is /api/x/x: its depth isn't fixed, so the mapping is unresolved rather
+        // than read as /api or /api/x.
+        var warnings = RunCheck(
+            GroupedTasksContract,
+            GroupedEndpoints(
+                "var api = Nest(app.MapGroup(\"/api\"), 2); api.MapGet(\"/items\", Handler);",
+                "private static RouteGroupBuilder Nest(RouteGroupBuilder g, int n) => "
+                    + "n == 0 ? g : Nest(g.MapGroup(\"/x\"), n - 1);"
+            )
+        );
+
+        Assert.Contains(
+            warnings,
+            item =>
+                item.FieldName == "ListItems"
+                && item.Kind == CoverageWarningKind.RouteMismatch
+                && item.Actual!.Contains("unresolved route")
+        );
+    }
+
+    [Fact]
+    public void Non_constant_route_mapped_from_two_groups_names_each_mapping()
+    {
+        var warnings = RunCheck(
+            GroupedTasksContract,
+            GroupedEndpoints(
+                "MapItems(app.MapGroup(\"/v1\")); MapItems(app.MapGroup(\"/v2\"));",
+                "private static string ItemsRoute = \"/items\";\n"
+                    + "private static void MapItems(RouteGroupBuilder group) => group.MapGet(ItemsRoute, Handler);"
+            )
+        );
+
+        var found = warnings
+            .Where(item =>
+                item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
+            )
+            .ToList();
+        Assert.Equal(2, found.Count);
+        Assert.Single(
+            found,
+            item => item.Actual!.Contains("as mapped under /v1, by the MapGet call at")
+        );
+        Assert.Single(
+            found,
+            item => item.Actual!.Contains("as mapped under /v2, by the MapGet call at")
+        );
+    }
+
+    // A lambda's IEndpointRouteBuilder is the app (UseEndpoints); a lambda's RouteGroupBuilder
+    // may be any group.
+    [Theory]
+    [InlineData(
+        "",
+        "public static void Configure(IApplicationBuilder builder) => "
+            + "builder.UseEndpoints(e => e.MapGet(\"/v2/items\", Handler));",
+        null
+    )]
+    [InlineData(
+        "System.Action<RouteGroupBuilder> map = g => g.MapGet(\"/items\", Handler); map(app.MapGroup(\"/v2\"));",
+        "",
+        "unresolved route"
+    )]
+    public void Builder_from_a_lambda_parameter(string body, string members, string? actual)
+    {
+        var warnings = CompilationHelper.CheckCoverage(
+            CompilationHelper.CreateFrameworkCompilation(
+                Microsoft.CodeAnalysis.OutputKind.DynamicallyLinkedLibrary,
+                GroupedTasksContract,
+                GroupedEndpoints(body, members)
+            )
+        );
+
+        var found = warnings
+            .Where(item =>
+                item.FieldName == "ListItems" && item.Kind == CoverageWarningKind.RouteMismatch
+            )
+            .ToList();
+        if (actual is null)
+        {
+            Assert.Empty(found);
+        }
+        else
+        {
+            Assert.Contains(actual, Assert.Single(found).Actual);
+        }
     }
 
     [Fact]

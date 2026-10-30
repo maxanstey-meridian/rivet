@@ -1,5 +1,10 @@
+using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Rivet.Tests;
 
@@ -54,7 +59,31 @@ public sealed class OpaqueCarrierFidelityTests
                 "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/ClosedPart" } } },
                 "x-rivet-generic": { "name": "Page", "typeParams": ["T"], "args": { "T": "ClosedPart" } }
             },
+            "closed_union": {
+                "oneOf": [
+                    { "$ref": "#/components/schemas/Item" },
+                    { "$ref": "#/components/schemas/ClosedEnvelope" }
+                ],
+                "additionalProperties": false
+            },
+            "Holder": {
+                "type": "object",
+                "properties": {
+                    "choice": {
+                        "anyOf": [{ "type": "string" }, { "type": "integer" }],
+                        "additionalProperties": false
+                    },
+                    "part": {
+                        "allOf": [
+                            { "$ref": "#/components/schemas/Item" },
+                            { "type": "object", "properties": { "c": { "type": "string" } } }
+                        ],
+                        "additionalProperties": false
+                    }
+                }
+            },
             "Shape": {
+                "additionalProperties": false,
                 "oneOf": [
                     { "$ref": "#/components/schemas/Circle" },
                     { "$ref": "#/components/schemas/Square" }
@@ -107,8 +136,12 @@ public sealed class OpaqueCarrierFidelityTests
             [
                 "RIV3033: Closed schema imported open: 'Circle' says additionalProperties: false, but it is a polymorphic variant of 'Shape', and System.Text.Json would refuse its 'kind' discriminator as an unknown member wherever the variant is read on its own. Its record accepts and drops an unknown member instead of refusing it.",
                 "RIV3033: Closed schema imported open: 'ClosedPart' says additionalProperties: false, but 'Composite' composes it in an allOf, adding members its closure refuses. Its record accepts and drops an unknown member instead of refusing it.",
-                "RIV3033: Closed schema imported open: 'Page_Item' says additionalProperties: false, but it is an instance of the generic template 'Page', which serves 'Page_ClosedPart' too, and that doesn't say so. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'Page_Item' says additionalProperties: false, but it is an instance of the generic template 'Page', which serves 'Page_ClosedPart' too, and that one isn't closed. Its record accepts and drops an unknown member instead of refusing it.",
                 "RIV3033: Closed schema imported open: 'Pet' says additionalProperties: false, but 'Cat' extends it, adding members its closure refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'Shape' says additionalProperties: false, but it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: 'closed_union' says additionalProperties: false, but it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: the schema at #/components/schemas/Holder/properties/choice says additionalProperties: false, but it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses. Its record accepts and drops an unknown member instead of refusing it.",
+                "RIV3033: Closed schema imported open: the schema at #/components/schemas/Holder/properties/part says additionalProperties: false, but it is an allOf composition, where a closed part refuses the members the other parts add. Its record accepts and drops an unknown member instead of refusing it.",
             ],
             CompilationHelper
                 .Import(CompilationHelper.BuildSpec(schemas: schemas))
@@ -127,7 +160,17 @@ public sealed class OpaqueCarrierFidelityTests
             RuntimeRoundTrip(Generated("Pet"), """{"kind":"Cat","lives":9,"invalid":1}""")
                 .TryGetProperty("invalid", out _)
         );
-        foreach (var closed in new[] { "Pet", "ClosedPart", "Page_Item", "Circle" })
+        foreach (
+            var closed in new[]
+            {
+                "Pet",
+                "ClosedPart",
+                "Page_Item",
+                "Circle",
+                "Shape",
+                "closed_union",
+            }
+        )
         {
             Assert.False(
                 emitted.GetProperty(closed).GetProperty("additionalProperties").GetBoolean()
@@ -160,6 +203,104 @@ public sealed class OpaqueCarrierFidelityTests
             )
         );
     }
+
+    /// <summary>
+    /// A closed record a form body binds is written closed, like any other, but the form
+    /// binders never read <c>[JsonUnmappedMemberHandling]</c>: a real minimal-API host drops an
+    /// unknown part instead of refusing it, while the emitted spec still says
+    /// <c>additionalProperties: false</c>.
+    /// </summary>
+    [Fact]
+    public async Task Closed_form_body_record_drops_an_unknown_part_while_its_spec_stays_closed()
+    {
+        var spec = CompilationHelper.BuildSpec(
+            paths: """
+            "/items": {
+                "post": {
+                    "operationId": "items_create",
+                    "requestBody": {
+                        "required": true,
+                        "content": {
+                            "application/x-www-form-urlencoded": {
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": { "name": { "type": "string" } },
+                                    "required": ["name"]
+                                }
+                            }
+                        }
+                    },
+                    "responses": { "204": { "description": "Created" } }
+                }
+            }
+            """
+        );
+        var imported = CompilationHelper.Import(spec);
+        var recordFile = Assert.Single(
+            imported.Files,
+            file => file.FileName.StartsWith("Types/", StringComparison.Ordinal)
+        );
+        var recordName = Path.GetFileNameWithoutExtension(recordFile.FileName);
+        using var assemblyStream = new MemoryStream();
+        var emit = CompilationHelper.CompileImportResult(imported).Emit(assemblyStream);
+        Assert.True(emit.Success, string.Join(Environment.NewLine, emit.Diagnostics));
+        var recordType = Assert.IsAssignableFrom<Type>(
+            Assembly.Load(assemblyStream.ToArray()).GetType($"Test.{recordName}")
+        );
+        Assert.Equal(
+            JsonUnmappedMemberHandling.Disallow,
+            recordType
+                .GetCustomAttribute<JsonUnmappedMemberHandlingAttribute>()
+                ?.UnmappedMemberHandling
+        );
+
+        const string path = "/closed-form";
+        await using var host = await BindingHost.StartAsync(
+            mvc: false,
+            app =>
+                app.MapPost(
+                        path,
+                        typeof(OpaqueCarrierFidelityTests)
+                            .GetMethod(
+                                nameof(EchoForm),
+                                BindingFlags.NonPublic | BindingFlags.Static
+                            )!
+                            .MakeGenericMethod(recordType)
+                            .CreateDelegate(
+                                typeof(Func<,>).MakeGenericType(recordType, typeof(IResult))
+                            )
+                    )
+                    .DisableAntiforgery()
+        );
+        var (status, body) = await host.PostAsync(
+            path,
+            new FormUrlEncodedContent(
+                new Dictionary<string, string> { ["name"] = "kept", ["invalid"] = "dropped" }
+            )
+        );
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        using var bound = JsonDocument.Parse(body);
+        Assert.Equal("kept", bound.RootElement.GetProperty("name").GetString());
+        Assert.False(bound.RootElement.TryGetProperty("invalid", out _));
+
+        using var emitted = CompilationHelper.EmitImported(imported);
+        Assert.False(
+            emitted
+                .RootElement.GetProperty("paths")
+                .GetProperty("/items")
+                .GetProperty("post")
+                .GetProperty("requestBody")
+                .GetProperty("content")
+                .GetProperty("application/x-www-form-urlencoded")
+                .GetProperty("schema")
+                .GetProperty("additionalProperties")
+                .GetBoolean()
+        );
+    }
+
+    private static IResult EchoForm<T>([FromForm] T input) => Results.Json(input);
 
     [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
     [JsonDerivedType(typeof(DisallowCircle), "circle")]

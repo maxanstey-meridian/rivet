@@ -83,6 +83,9 @@ RECORD_IMPLICIT_OPEN_PROOF = (
 RECORD_CLOSED_PROOF = (
     "OpaqueCarrierFidelityTests.Closed_object_refuses_unknown_members_unless_its_schema_contradicts_itself"
 )
+FORM_RECORD_CLOSED_PROOF = (
+    "OpaqueCarrierFidelityTests.Closed_form_body_record_drops_an_unknown_part_while_its_spec_stays_closed"
+)
 RECORD_SCHEMA_OPEN_PROOF = (
     "OpaqueCarrierFidelityTests.Open_record_preserves_typed_named_and_schema_valued_additional_properties"
 )
@@ -262,6 +265,24 @@ def all_of_targets(document):
             if len(refs) == 1:
                 targets |= refs
     return targets
+
+
+FORM_MEDIA_TYPES = {"application/x-www-form-urlencoded", "multipart/form-data"}
+
+
+def is_form_request_schema(pointer):
+    """Whether ``pointer`` lies under a form request body's content, where the form binders,
+    not System.Text.Json, read the record and never refuse an unknown part."""
+    tokens = [token.replace("~1", "/").replace("~0", "~") for token in pointer.split("/")]
+    return any(
+        tokens[index] == "content"
+        and tokens[index + 1].split(";")[0].strip().lower() in FORM_MEDIA_TYPES
+        and (
+            tokens[index - 1] == "requestBody"
+            or tokens[index - 3 : index - 1] == ["components", "requestBodies"]
+        )
+        for index in range(1, len(tokens) - 1)
+    )
 
 
 def is_component_schema_root(pointer):
@@ -471,7 +492,11 @@ class CarrierWalker:
             elif status == "omitted":
                 proof = RECORD_IMPLICIT_OPEN_PROOF
             elif status == "false":
-                proof = RECORD_CLOSED_PROOF
+                proof = (
+                    FORM_RECORD_CLOSED_PROOF
+                    if is_form_request_schema(pointer)
+                    else RECORD_CLOSED_PROOF
+                )
             elif status == "schema":
                 proof = RECORD_SCHEMA_OPEN_PROOF
             else:

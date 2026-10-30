@@ -15,7 +15,7 @@ internal static class CompilationLoader
         {
             throw Diagnostics.Error(
                 Diagnostics.InputPathNotFound,
-                $"--project: no project file at {fullPath}"
+                $"--project: no file at {fullPath}"
             );
         }
 
@@ -33,7 +33,21 @@ internal static class CompilationLoader
 
         Console.Error.WriteLine($"Loading {fullPath}...");
 
-        var project = await workspace.OpenProjectAsync(fullPath);
+        Project project;
+        try
+        {
+            project = await workspace.OpenProjectAsync(fullPath);
+        }
+        catch (InvalidOperationException exception)
+        {
+            // MSBuildWorkspace opens only a project file of a language it has loaded: a
+            // solution, another language's project, or a stray file is refused here.
+            throw Diagnostics.Error(
+                Diagnostics.CompilationFailed,
+                $"--project: MSBuild can't open {fullPath} as a C# project: {exception.Message}"
+            );
+        }
+
         var compilation =
             await project.GetCompilationAsync()
             ?? throw Diagnostics.Error(
@@ -272,7 +286,7 @@ internal static class CompilationLoader
             {
                 throw Diagnostics.Error(
                     Diagnostics.InputPathNotFound,
-                    $"source file not found: {path}"
+                    $"source file: no file at {path}"
                 );
             }
 

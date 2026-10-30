@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Json.Schema;
 using Rivet.Tool;
 using Rivet.Tool.Emit;
 using Rivet.Tool.Model;
@@ -1303,49 +1302,25 @@ public sealed class JsonContractReaderTests
         Assert.Contains("a literal brace", message);
     }
 
-    private static readonly JsonSchema _contractSchema = JsonSchema.FromText(
-        File.ReadAllText(
-            Path.Combine(AppContext.BaseDirectory, "../../../../rivet-contract-schema.json")
-        )
-    );
-
-    private static bool ContractSchemaAdmits(string json) =>
-        _contractSchema.Evaluate(JsonDocument.Parse(json).RootElement).IsValid;
-
-    [Theory]
-    [InlineData("matrix", false)]
-    [InlineData("label", false)]
-    [InlineData("simple", false)]
-    [InlineData("form", true)]
-    [InlineData("spaceDelimited", true)]
-    [InlineData("pipeDelimited", true)]
-    [InlineData("deepObject", true)]
-    public void A_Form_Field_Takes_Only_The_Styles_An_Encoding_Holds(string style, bool valid)
+    [Fact]
+    public void A_Form_Field_Style_Refusal_Names_The_Styles_An_Encoding_Holds()
     {
-        // Decision 7: a form field's style goes in the form body's encoding, which holds
-        // these four; the reader and the schema refuse the rest.
-        var json = $$"""
+        // Decision 7: a form field's style goes in the form body's encoding. Which styles the
+        // reader and the schema take is ContractSchemaTests' Schema_And_Reader_Agree_On_A_Form_Field_Style.
+        var json = """
             { "types": [], "enums": [], "endpoints": [{
               "name": "search", "httpMethod": "POST", "routeTemplate": "/search", "controllerName": "things",
               "params": [{ "name": "tags", "type": { "kind": "array", "element": { "kind": "primitive", "type": "string" } },
-                           "source": "formField", "style": "{{style}}" }],
+                           "source": "formField", "style": "matrix" }],
               "responses": [{ "statusCode": 204 }] }] }
             """;
 
-        Assert.Equal(valid, ContractSchemaAdmits(json));
-        if (valid)
-        {
-            Assert.Equal(
-                style,
-                Assert.Single(Assert.Single(JsonContractReader.Read(json).Endpoints).Params).Style
-            );
-            return;
-        }
-
         // The CLI words it as RIV2017 (Cli_Refuses_Malformed_Contract_Json).
         var message = Assert.Throws<JsonException>(() => JsonContractReader.Read(json)).Message;
-        Assert.Contains(
-            $"form field 'tags' on endpoint 'things.search' has the style '{style}'",
+        Assert.Equal(
+            "form field 'tags' on endpoint 'things.search' has the style 'matrix', which a form part "
+                + "can't take. Its style goes in the form body's encoding, which holds 'form', "
+                + "'spaceDelimited', 'pipeDelimited', or 'deepObject'.",
             message
         );
     }

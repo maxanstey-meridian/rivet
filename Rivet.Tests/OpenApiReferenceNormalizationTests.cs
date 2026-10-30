@@ -134,6 +134,45 @@ public sealed class OpenApiReferenceNormalizationTests
     }
 
     [Fact]
+    public void Referenced_Path_Item_Operations_Keep_Their_Provenance()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Reference API", "version": "1.0.0" },
+              "components": {
+                "parameters": {
+                  "Limit": { "name": "limit", "in": "query", "schema": { "type": "integer", "format": "int32" } }
+                },
+                "pathItems": {
+                  "Accounts": {
+                    "get": {
+                      "operationId": "accounts_list",
+                      "tags": ["Accounts"],
+                      "parameters": [{ "$ref": "#/components/parameters/Limit" }],
+                      "responses": { "204": { "description": "No Content" } }
+                    }
+                  }
+                }
+              },
+              "paths": {
+                "/accounts": { "$ref": "#/components/pathItems/Accounts" }
+              }
+            }
+            """;
+
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        var parameter = Assert.Single(
+            emitted["paths"]!["/accounts"]!["get"]!["parameters"]!.AsArray()
+        );
+
+        Assert.Equal("#/components/parameters/Limit", (string?)parameter!["$ref"]);
+    }
+
+    [Fact]
     public void Missing_Local_Parameter_Target_Fails_Loudly()
     {
         const string spec = """

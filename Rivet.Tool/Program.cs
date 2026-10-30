@@ -168,10 +168,10 @@ static async Task<int> RunFromContract(RivetOptions options)
     var contractPath = options.FromContractPath!;
     if (!File.Exists(contractPath))
     {
-        Console.Error.WriteLine(
-            Diagnostics.Format(Diagnostics.InputPathNotFound, $"file not found: {contractPath}")
+        throw Diagnostics.Error(
+            Diagnostics.InputPathNotFound,
+            $"--from: no file at {contractPath}"
         );
-        return 1;
     }
 
     var json = await File.ReadAllTextAsync(contractPath);
@@ -203,13 +203,10 @@ static int RunImport(RivetOptions options)
 {
     if (!File.Exists(options.FromOpenApiPath!))
     {
-        Console.Error.WriteLine(
-            Diagnostics.Format(
-                Diagnostics.InputPathNotFound,
-                $"file not found: {options.FromOpenApiPath}"
-            )
+        throw Diagnostics.Error(
+            Diagnostics.InputPathNotFound,
+            $"--from-openapi: no file at {options.FromOpenApiPath}"
         );
-        return 1;
     }
 
     var json = File.ReadAllText(options.FromOpenApiPath!);

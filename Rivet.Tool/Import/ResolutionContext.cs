@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.OpenApi;
 
 namespace Rivet.Tool.Import;
 
@@ -152,25 +153,64 @@ internal sealed class ResolutionContext(List<string> warnings)
     /// </summary>
     public Dictionary<string, string> AllOfBranches { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>Why an allOf composition can't be closed (RIV3033).</summary>
+    public const string ClosedAllOfReason =
+        "it is an allOf composition, where a closed part refuses the members the other parts add";
+
+    /// <summary>Why a oneOf or anyOf union can't be closed (RIV3033).</summary>
+    public const string ClosedUnionReason =
+        "it is a oneOf/anyOf union, imported as a wrapper that takes its variants' members, which its own additionalProperties: false refuses";
+
+    /// <summary>
+    /// Where each schema object sits in the document, for naming an inline one
+    /// (<see cref="SchemaLocations.Read"/>).
+    /// </summary>
+    public IReadOnlyDictionary<IOpenApiSchema, string> SchemaPointers { get; set; } =
+        new Dictionary<IOpenApiSchema, string>();
+
     private readonly HashSet<string> _closedSchemasLeftOpen = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Warns, once per schema, that <paramref name="name"/> says additionalProperties: false
-    /// but its record stays open, because of <paramref name="why"/> (RIV3033).
+    /// Warns, once per schema, that the component <paramref name="componentKey"/> says
+    /// additionalProperties: false but its record stays open, because of
+    /// <paramref name="why"/> (RIV3033).
     /// </summary>
-    public void WarnClosedSchemaLeftOpen(string name, string why)
+    public void WarnClosedSchemaLeftOpen(string componentKey, string why) =>
+        WarnClosedLeftOpen($"'{componentKey}'", why);
+
+    /// <summary>
+    /// <see cref="WarnClosedSchemaLeftOpen(string, string)"/> for <paramref name="schema"/>,
+    /// named by its component key, or by its pointer when it's inline. One the document
+    /// doesn't hold is named by <paramref name="recordName"/>, the record it imports as.
+    /// </summary>
+    public void WarnClosedSchemaLeftOpen(IOpenApiSchema schema, string recordName, string why) =>
+        WarnClosedLeftOpen(
+            schema is OpenApiSchemaReference reference
+                    ? $"'{SchemaMapper.DecodeComponentId(reference.Reference.Id)}'"
+                : SchemaPointers.TryGetValue(schema, out var pointer)
+                    ? SchemaLocations.ComponentKey(pointer) is { } key ? $"'{key}'"
+                        : $"the schema at {pointer}"
+                : $"the schema imported as '{recordName}'",
+            why
+        );
+
+    private void WarnClosedLeftOpen(string schema, string why)
     {
-        if (_closedSchemasLeftOpen.Add(name))
+        if (_closedSchemasLeftOpen.Add(schema))
         {
             Warnings.Add(
                 Diagnostics.Prefix(
                     Diagnostics.ImportClosedSchemaLeftOpen,
-                    $"Closed schema imported open: '{name}' says additionalProperties: false, but {why}. "
+                    $"Closed schema imported open: {schema} says additionalProperties: false, but {why}. "
                         + "Its record accepts and drops an unknown member instead of refusing it."
                 )
             );
         }
     }
+
+    /// <summary>The component key a component record's C# name was mapped from.</summary>
+    public string? ComponentKey(string typeName) =>
+        SchemaNameMap.FirstOrDefault(entry => entry.Value == typeName).Key;
 
     public List<string> Warnings { get; } = warnings;
     public HashSet<string> Resolving { get; } = [];
@@ -186,4 +226,32 @@ internal sealed class ResolutionContext(List<string> warnings)
         SchemaNameMap.TryGetValue(componentId, out var mapped)
             ? mapped
             : Naming.ToPascalCaseFromSegments(componentId);
+}
+
+/// <summary>Where each schema object sits in a document, as a JSON pointer.</summary>
+internal static class SchemaLocations
+{
+    private const string ComponentPrefix = "#/components/schemas/";
+
+    public static IReadOnlyDictionary<IOpenApiSchema, string> Read(OpenApiDocument document)
+    {
+        var visitor = new Visitor();
+        new OpenApiWalker(visitor).Walk(document);
+        return visitor.Pointers;
+    }
+
+    /// <summary>The component key <paramref name="pointer"/> names a schema component by, if it does.</summary>
+    public static string? ComponentKey(string pointer) =>
+        pointer.StartsWith(ComponentPrefix, StringComparison.Ordinal)
+        && pointer.IndexOf('/', ComponentPrefix.Length) < 0
+            ? JsonPointer.Unescape(pointer[ComponentPrefix.Length..])
+            : null;
+
+    private sealed class Visitor : OpenApiVisitorBase
+    {
+        public Dictionary<IOpenApiSchema, string> Pointers { get; } =
+            new(ReferenceEqualityComparer.Instance);
+
+        public override void Visit(IOpenApiSchema schema) => Pointers.TryAdd(schema, PathString);
+    }
 }

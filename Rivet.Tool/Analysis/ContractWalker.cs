@@ -1005,9 +1005,9 @@ public static class ContractWalker
             tInput is null || isFormFileInput
                 ? []
                 : FormBinding.FormBoundProperties(compilation, tInput);
-        var hasFormFileProperty = formBound.Any(property =>
-            FormBinding.CarriesFiles(wkt, typeWalker, property.Type)
-        );
+        var inputCarriesFiles =
+            tInput is not null && FormBinding.CarriesFormFiles(wkt, typeWalker, tInput);
+        var hasFormFileProperty = inputCarriesFiles && !isFormFileInput;
         // The runtime binds TInput by the same rule. With no body, or a raw binary one
         // (.AcceptsBinary(): host code reads the stream), TInput's properties become route/query
         // params exactly like a GET/DELETE input.
@@ -1023,7 +1023,7 @@ public static class ContractWalker
                     .ToList(),
                 binaryContentDeclared: requestContents.Any(content => content.IsBinary),
                 formDeclared: isFormEncoded || acceptsFile,
-                formFileInput: isFormFileInput || hasFormFileProperty
+                formFileInput: inputCarriesFiles
             ) != InputBinding.RouteAndQuery;
         string? inputTypeName = null;
         IReadOnlyList<string>? bodyFieldNames = null;
@@ -1063,12 +1063,11 @@ public static class ContractWalker
         if (lowersBody)
         {
             var requestBodyType = GetRequestBodyType(
-                compilation,
                 wkt,
                 field,
                 declaredRequestBody,
                 tInput,
-                isFormFileInput || hasFormFileProperty,
+                inputCarriesFiles,
                 routeParamNames,
                 typeWalker
             );
@@ -1623,11 +1622,11 @@ public static class ContractWalker
     /// The body a <c>[RivetRequestBody(typeof(X))]</c> declares, or null with none. <c>X</c> must
     /// be what the input carries: the type of one of its non-route members, or a type whose
     /// every member the input declares under the same JSON name, type, and optionality. It
-    /// can't carry files the input doesn't, since the input alone makes a body multipart
-    /// (<see cref="RequestInputLowering"/>, as the runtime decides it). Either is <c>RIV1022</c>.
+    /// can't carry files the input doesn't (<see cref="FormBinding.CarriesFormFiles"/>), since
+    /// the input alone makes a body multipart (<see cref="RequestInputLowering"/>, as the
+    /// runtime decides it). Either is <c>RIV1022</c>.
     /// </summary>
     private static TsType? GetRequestBodyType(
-        Compilation compilation,
         WellKnownTypes wkt,
         IFieldSymbol field,
         DeclaredRequestBody? declaredRequestBody,
@@ -1658,21 +1657,15 @@ public static class ContractWalker
             );
         }
 
-        if (
-            !inputCarriesFiles
-            && (
-                FormBinding.CarriesFiles(wkt, typeWalker, bodyType)
-                || FormBinding
-                    .FormBoundProperties(compilation, bodyType)
-                    .Any(property => FormBinding.CarriesFiles(wkt, typeWalker, property.Type))
-            )
-        )
+        if (!inputCarriesFiles && FormBinding.CarriesFormFiles(wkt, typeWalker, bodyType))
         {
             throw Diagnostics.Error(
                 Diagnostics.InvalidRequestBodyProvenance,
-                $"{declares}, which carries files, but its input type '{inputType.Name}' carries none. "
-                    + "The input type alone makes a body multipart, as the runtime decides it, so a "
-                    + "declared body type can't add a file to it. Put the file on the input type."
+                $"{declares}, which carries files, but its input type '{inputType.Name}' carries "
+                    + "none of its own: a file nested in one of its members doesn't make the body "
+                    + "multipart. The input type alone makes a body multipart, as the runtime decides "
+                    + "it, so a declared body type can't add a file to it. Put the file directly on "
+                    + "the input type, as one of its own members."
             );
         }
 

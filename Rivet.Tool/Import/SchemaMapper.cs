@@ -83,9 +83,17 @@ internal sealed class SchemaMapper
         IReadOnlyDictionary<string, RecordProperty> Effective
     );
 
-    public SchemaMapper(List<string> warnings)
+    /// <summary>
+    /// A mapper for <paramref name="document"/>'s schemas, which it reads to name an inline
+    /// schema by where it sits (RIV3033).
+    /// </summary>
+    public SchemaMapper(List<string> warnings, OpenApiDocument? document = null)
     {
         _ctx = new ResolutionContext(warnings);
+        if (document is not null)
+        {
+            _ctx.SchemaPointers = SchemaLocations.Read(document);
+        }
         _synth = new RecordSynthesizer(_ctx, this);
     }
 
@@ -283,7 +291,7 @@ internal sealed class SchemaMapper
                 {
                     return record;
                 }
-                _ctx.WarnClosedSchemaLeftOpen(record.Name, why);
+                _ctx.WarnClosedSchemaLeftOpen(_ctx.ComponentKey(record.Name) ?? record.Name, why);
                 return record with { IsClosed = false };
             })
             .ToList();
@@ -574,6 +582,10 @@ internal sealed class SchemaMapper
                 // registration per mapping entry.
                 if (_polymorphicBases.TryGetValue(key, out var poly))
                 {
+                    if (!schema.AdditionalPropertiesAllowed)
+                    {
+                        _ctx.WarnClosedSchemaLeftOpen(key, ResolutionContext.ClosedUnionReason);
+                    }
                     var variantRefs = poly
                         .Variants.Select(v => new PolymorphicVariantRef(
                             _ctx.SchemaNameMap[v.VariantKey],
@@ -608,7 +620,7 @@ internal sealed class SchemaMapper
                     );
                 }
 
-                var unionRecord = _synth.ResolveUnionRecord(name, schema.OneOf);
+                var unionRecord = _synth.ResolveUnionRecord(name, schema, schema.OneOf);
                 if (schemaDescription is not null)
                 {
                     unionRecord = unionRecord with { Description = schemaDescription };
@@ -620,7 +632,7 @@ internal sealed class SchemaMapper
 
             if (schema.AnyOf is { Count: > 1 })
             {
-                var anyOfRecord = _synth.ResolveUnionRecord(name, schema.AnyOf);
+                var anyOfRecord = _synth.ResolveUnionRecord(name, schema, schema.AnyOf);
                 if (schemaDescription is not null)
                 {
                     anyOfRecord = anyOfRecord with { Description = schemaDescription };
@@ -2029,10 +2041,7 @@ internal sealed class SchemaMapper
         var parts = OwnParts(schema);
         if (parts.Any(part => !part.AdditionalPropertiesAllowed))
         {
-            _ctx.WarnClosedSchemaLeftOpen(
-                name,
-                "it is an allOf composition, where a closed part refuses the members the other parts add"
-            );
+            _ctx.WarnClosedSchemaLeftOpen(key, ResolutionContext.ClosedAllOfReason);
         }
         var required = member.Required.ToHashSet(StringComparer.Ordinal);
         // A restatement that differs from the inherited declaration only in documentation is
@@ -2746,14 +2755,14 @@ internal sealed class SchemaMapper
         // oneOf multi-element (non-nullable) → synthetic union wrapper
         if (schema.OneOf is { Count: > 0 })
         {
-            result = ResolveUnionType(context, schema.OneOf);
+            result = ResolveUnionType(context, schema, schema.OneOf);
             return true;
         }
 
         // anyOf multi-element → same as oneOf
         if (schema.AnyOf is { Count: > 1 })
         {
-            result = ResolveUnionType(context, schema.AnyOf);
+            result = ResolveUnionType(context, schema, schema.AnyOf);
             return true;
         }
 
@@ -2788,10 +2797,14 @@ internal sealed class SchemaMapper
         && schema.OneOf is not { Count: > 0 }
         && schema.AnyOf is not { Count: > 0 };
 
-    private string ResolveUnionType(string? context, IList<IOpenApiSchema> variants)
+    private string ResolveUnionType(
+        string? context,
+        IOpenApiSchema schema,
+        IList<IOpenApiSchema> variants
+    )
     {
         var name = context ?? _ctx.NextSyntheticName("Composed");
-        var record = _synth.ResolveUnionRecord(name, variants);
+        var record = _synth.ResolveUnionRecord(name, schema, variants);
         return _ctx.AddOrReuseExtraRecord(record);
     }
 

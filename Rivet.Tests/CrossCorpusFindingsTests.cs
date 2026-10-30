@@ -92,8 +92,6 @@ public sealed class CrossCorpusFindingsTests
 
         var stderr = CompilationHelper.CaptureStdErr(() => CompilationHelper.WalkContract(source));
 
-        // endpoint-unique needle: stderr capture is process-global under
-        // parallel test classes (see ParamWireNamePinningTests)
         Assert.DoesNotContain("/record-input-things", stderr);
     }
 

@@ -464,8 +464,9 @@ internal static class ParameterBindingSources
     /// MVC binds only the members its filters let through (<see cref="FormBinding.Skips"/>):
     /// a <c>[Bind]</c> include list on <paramref name="bindingAttributes"/> (the parameter's,
     /// or the outer member's) or on the type, and a Never binding behaviour; the form mapper
-    /// reads none of them. <paramref name="prefix"/> is the model name the members' keys start with (an MVC model
-    /// name on the parameter, or the outer member's key); <paramref name="nested"/> marks
+    /// reads none of them. <paramref name="prefix"/> is the model name the members' keys
+    /// start with (an MVC model name on the parameter, or the outer member's key);
+    /// <paramref name="nested"/> marks
     /// members of a complex member. A type the binder can't create comes first as an
     /// <see cref="InputSource.Uncreatable"/> input, and its members still follow, unless
     /// <paramref name="filledInPlace"/>: MVC binds into a member's existing object

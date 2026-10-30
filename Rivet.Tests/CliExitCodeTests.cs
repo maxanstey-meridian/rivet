@@ -222,7 +222,10 @@ public sealed class CliExitCodeTests
     [InlineData("--from-openapi", "openapi.json")]
     [InlineData("", "Api.cs")]
     [InlineData("--project", "Api.csproj")]
-    public void Missing_Input_Path_Exits_1_Naming_It(string flag, string fileName)
+    public void Missing_Input_Path_Exits_1_Naming_The_Flag_And_The_Path(
+        string flag,
+        string fileName
+    )
     {
         using var work = new TempDir();
         var missingPath = Path.Combine(work.FullName, fileName);
@@ -234,8 +237,36 @@ public sealed class CliExitCodeTests
         );
 
         Assert.Equal(1, result.ExitCode);
-        Assert.Contains("error RIV2021: ", result.StdErr);
-        Assert.Contains(missingPath, result.StdErr);
+        Assert.Contains(
+            $"error RIV2021: {(flag == "" ? "source file" : flag)}: no file at {missingPath}",
+            result.StdErr
+        );
+        Assert.DoesNotContain("   at ", result.StdErr);
+        Assert.False(Directory.Exists(outputDir), "nothing should be written");
+    }
+
+    // MSBuildWorkspace opens only a project file of a language it has loaded, so a solution,
+    // another language's project, or a stray file is C# that can't be loaded.
+    [Theory]
+    [InlineData("Api.sln")]
+    [InlineData("Api.fsproj")]
+    [InlineData("notes.txt")]
+    public async Task Project_MSBuild_Cannot_Open_Exits_1_Without_Stack_Trace(string fileName)
+    {
+        using var work = new TempDir();
+        var projectPath = await WriteSourceAsync(work, fileName, "<Project />");
+        var outputDir = Path.Combine(work.FullName, "output");
+
+        var result = CliRunner.RunCli(
+            work.FullName,
+            ["--project", projectPath, "--output", outputDir]
+        );
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(
+            $"error RIV1126: --project: MSBuild can't open {projectPath}",
+            result.StdErr
+        );
         Assert.DoesNotContain("   at ", result.StdErr);
         Assert.False(Directory.Exists(outputDir), "nothing should be written");
     }
@@ -401,6 +432,32 @@ public sealed class CliExitCodeTests
         Assert.Equal(1, result.ExitCode);
         Assert.Contains(expectedError, result.StdErr);
         Assert.DoesNotContain("   at ", result.StdErr);
+    }
+
+    // The import-side refusal is the emit-side one (RIV2018), not a usage error: it prints
+    // its one line, without the usage text after it.
+    [Fact]
+    public async Task Invalid_Import_Security_Exits_1_Without_Usage()
+    {
+        using var work = new TempDir();
+        var specPath = await WriteSourceAsync(
+            work,
+            "openapi.json",
+            """{ "openapi": "3.1.0", "info": { "title": "t", "version": "1" }, "paths": {} }"""
+        );
+        var outputDir = Path.Combine(work.FullName, "output");
+
+        var result = CliRunner.RunCli(
+            work.FullName,
+            ["--from-openapi", specPath, "--security", "admin=bearer", "--output", outputDir]
+        );
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("error RIV2018: ", result.StdErr);
+        Assert.DoesNotContain("Usage", result.StdErr);
+        Assert.DoesNotContain("Usage", result.StdOut);
+        Assert.DoesNotContain("   at ", result.StdErr);
+        Assert.False(Directory.Exists(outputDir), "nothing should be written");
     }
 
     [Fact]

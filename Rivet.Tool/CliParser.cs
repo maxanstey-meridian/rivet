@@ -184,8 +184,7 @@ internal static class CliParser
                     && !SecurityParser.IsValidSchemeName(importSecurity)
             )
             {
-                // Not a usage error: the value is read, and refused as emit-side --security
-                // values are, with the same ID.
+                // An invalid --security value is RIV2018 in both modes, so the import-side one is too.
                 throw Diagnostics.Error(
                     Diagnostics.InvalidSecurityOption,
                     "--security with --from-openapi accepts one security scheme name, not an emit-time scheme definition"

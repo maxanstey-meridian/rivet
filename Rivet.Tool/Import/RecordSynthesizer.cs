@@ -89,8 +89,22 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
         );
     }
 
-    public GeneratedRecord ResolveUnionRecord(string name, IList<IOpenApiSchema> variants)
+    /// <summary>
+    /// The <c>[RivetUnion]</c> wrapper for <paramref name="schema"/>'s oneOf or anyOf
+    /// <paramref name="variants"/>. It is never closed: its members come from the variants
+    /// (RIV3033).
+    /// </summary>
+    public GeneratedRecord ResolveUnionRecord(
+        string name,
+        IOpenApiSchema schema,
+        IList<IOpenApiSchema> variants
+    )
     {
+        if (!schema.AdditionalPropertiesAllowed)
+        {
+            ctx.WarnClosedSchemaLeftOpen(schema, name, ResolutionContext.ClosedUnionReason);
+        }
+
         var properties = new List<RecordProperty>();
         var optionIndex = 0;
 
@@ -302,10 +316,7 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
             ) == true
         )
         {
-            ctx.WarnClosedSchemaLeftOpen(
-                name,
-                "it is an allOf composition, where a closed part refuses the members the other parts add"
-            );
+            ctx.WarnClosedSchemaLeftOpen(schema, name, ResolutionContext.ClosedAllOfReason);
         }
 
         if (schema.Properties is not { Count: > 0 })
@@ -406,8 +417,8 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                     key,
                     $"it is an instance of the generic template '{templateName}', which serves "
                         + $"{string.Join(", ", openInstances)} too, and "
-                        + (openInstances.Count == 1 ? "that doesn't" : "those don't")
-                        + " say so"
+                        + (openInstances.Count == 1 ? "that one isn't" : "those aren't")
+                        + " closed"
                 );
             }
         }

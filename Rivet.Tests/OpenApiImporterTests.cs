@@ -6951,6 +6951,170 @@ public sealed class OpenApiImporterTests
         Assert.DoesNotContain("A path item whose only operation goes", emitted.ToJsonString());
     }
 
+    /// <summary>
+    /// A reference into <c>paths</c> reads the path it names as written, whichever order the
+    /// drop visits paths in: <c>/b/{id}</c> references <c>/a/{id}</c> whole, and <c>/c</c>
+    /// references a parameter of <c>/a/{id}</c>'s dropped GET.
+    /// </summary>
+    [Theory]
+    [InlineData("sibling", true)]
+    [InlineData("sibling", false)]
+    [InlineData("only", true)]
+    [InlineData("only", false)]
+    [InlineData("parameter", true)]
+    [InlineData("parameter", false)]
+    public void Dropping_An_Operation_Keeps_References_Into_Paths_Whatever_The_Visit_Order(
+        string shape,
+        bool targetFirst
+    )
+    {
+        const string content = """
+            { "name": "id", "in": "path", "required": true, "content": { "text/plain": { "schema": { "type": "string" } } } }
+            """;
+        var target = shape switch
+        {
+            "sibling" => $$"""
+                "/a/{id}": {
+                  "get": { "operationId": "getA", "parameters": [{{content}}], "responses": { "204": { "description": "No Content" } } },
+                  "delete": {
+                    "operationId": "deleteA",
+                    "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                }
+                """,
+            _ => $$"""
+                "/a/{id}": {
+                  "get": {
+                    "operationId": "getA",
+                    "parameters": [{{content}}, { "name": "limit", "in": "query", "schema": { "type": "integer", "format": "int32" } }],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                }
+                """,
+        };
+        var source = shape switch
+        {
+            "parameter" => """
+                "/c": {
+                  "get": {
+                    "operationId": "getC",
+                    "parameters": [{ "$ref": "#/paths/~1a~1{id}/get/parameters/1" }],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                }
+                """,
+            _ => """
+                "/b/{id}": {
+                  "$ref": "#/paths/~1a~1{id}",
+                  "put": {
+                    "operationId": "putB",
+                    "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+                    "responses": { "204": { "description": "No Content" } }
+                  }
+                }
+                """,
+        };
+        var spec = CompilationHelper.BuildSpec(
+            paths: targetFirst ? $"{target},\n{source}" : $"{source},\n{target}"
+        );
+
+        var result = CompilationHelper.Import(spec);
+
+        string Dropped(string route) =>
+            $"RIV3025: Operation dropped: GET {route} — path parameter 'id' declares content (text/plain) instead of a schema, and a path parameter's schema is what types its route token. Give it a schema (a JSON-serialised value is a string parameter).";
+        Assert.Equal(
+            (shape == "parameter" ? ["/a/{id}"] : new[] { "/a/{id}", "/b/{id}" })
+                .Select(Dropped)
+                .Order(StringComparer.Ordinal),
+            result
+                .Warnings.Where(warning => warning.StartsWith("RIV3025", StringComparison.Ordinal))
+                .Order(StringComparer.Ordinal)
+        );
+        var emitted = CompilationHelper.EmitImported(result);
+        var operations = emitted
+            .RootElement.GetProperty("paths")
+            .EnumerateObject()
+            .SelectMany(path =>
+                path.Value.EnumerateObject()
+                    .Where(entry => entry.Name != "parameters")
+                    .Select(entry => $"{entry.Name.ToUpperInvariant()} {path.Name}")
+            )
+            .Order(StringComparer.Ordinal);
+        Assert.Equal(
+            shape switch
+            {
+                "sibling" => ["DELETE /a/{id}", "DELETE /b/{id}", "PUT /b/{id}"],
+                "only" => ["PUT /b/{id}"],
+                _ => new[] { "GET /c" },
+            },
+            operations
+        );
+        if (shape == "parameter")
+        {
+            var parameter = Assert.Single(
+                emitted
+                    .RootElement.GetProperty("paths")
+                    .GetProperty("/c")
+                    .GetProperty("get")
+                    .GetProperty("parameters")
+                    .EnumerateArray()
+            );
+            Assert.Equal("limit", parameter.GetProperty("name").GetString());
+        }
+    }
+
+    /// <summary>
+    /// A <c>$ref</c>'d path item's operations are held to the security rule (RIV3030) as an
+    /// inline one's are: one naming only an undefined scheme goes, and its sibling stays.
+    /// </summary>
+    [Fact]
+    public void Referenced_Path_Item_Drops_An_Operation_No_Caller_Can_Satisfy()
+    {
+        const string spec = """
+            {
+              "openapi": "3.1.0",
+              "info": { "title": "Pets", "version": "1.0.0" },
+              "components": {
+                "securitySchemes": { "bearer": { "type": "http", "scheme": "bearer" } },
+                "pathItems": {
+                  "P": {
+                    "get": {
+                      "operationId": "getX",
+                      "security": [{ "missing": [] }],
+                      "responses": { "204": { "description": "No Content" } }
+                    },
+                    "put": {
+                      "operationId": "putX",
+                      "security": [{ "bearer": [] }],
+                      "responses": { "204": { "description": "No Content" } }
+                    }
+                  }
+                }
+              },
+              "paths": {
+                "/x": { "$ref": "#/components/pathItems/P" }
+              }
+            }
+            """;
+
+        var result = CompilationHelper.Import(spec);
+
+        Assert.Contains(
+            "RIV3030: Operation dropped: GET /x — every security alternative it declares names a scheme the document never defines, so no caller can satisfy it.",
+            result.Warnings
+        );
+        var emitted = CompilationHelper.EmitImported(result);
+        Assert.Equal(
+            ["put"],
+            emitted
+                .RootElement.GetProperty("paths")
+                .GetProperty("/x")
+                .EnumerateObject()
+                .Select(entry => entry.Name)
+        );
+    }
+
     [Fact]
     public void Empty_And_Case_Duplicate_Response_Headers_Are_Marked()
     {

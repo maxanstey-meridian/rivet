@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
+using static Rivet.Tool.RoslynExtensions;
 
 namespace Rivet.Tool.Analysis;
 
@@ -195,7 +196,7 @@ internal sealed class HandlerAuthorization
             var builder = Unwrap(receiver).Type.DerivesFrom(_wkt.RouteGroupBuilder)
                 ? "the route group"
                 : "the builder";
-            var stops = BuilderOrigins.SameCall(receiver, chain.End)
+            var stops = IsSameSyntax(receiver.Syntax, chain.End.Syntax)
                 ? ""
                 : $" (it stops at '{chain.End.Syntax}' at {chain.End.Syntax.SourcePosition()})";
             facts.Add(
@@ -299,29 +300,66 @@ internal sealed class HandlerAuthorization
             decided = requires;
         }
 
-        var answer = decided ?? false;
-        var authorizes = facts
-            .Where(fact =>
-                fact.Kind != FactKind.AllowAnonymous
-                && fact.Present.Value == true
-                && fact.Requires.Value == true
-            )
-            .Select(fact => fact.Source)
-            .ToList();
-        IReadOnlyList<string> because = answer
-            ? authorizes
-                .Concat(
-                    fallback.Value == true
-                    && !facts.Any(fact =>
-                        fact.Kind == FactKind.Authorize && fact.Present.Value == true
-                    )
-                        ? [fallback.Source!]
-                        : []
+        var requirers = facts.Where(fact => fact.Kind != FactKind.AllowAnonymous).ToList();
+        var fallbackApplies = !facts.Any(fact =>
+            fact.Kind == FactKind.Authorize && fact.Present.Value == true
+        );
+        if (decided != true)
+        {
+            // Nothing requires a user. When a requirement is certainly there, the policy it
+            // names is what lets anyone in.
+            var admitting = requirers
+                .Where(fact => fact.Present.Value == true && fact.Requires.Value == false)
+                .Select(fact =>
+                    fact.Requires.Source is { } policy ? $"{fact.Source}: {policy}" : fact.Source
                 )
                 .Distinct()
-                .ToList()
-            : [];
-        return new Verdict(answer, because);
+                .ToList();
+            return new Verdict(false, admitting, PolicyAdmits: admitting.Count > 0);
+        }
+
+        var authorizes = requirers
+            .Where(fact => fact.Present.Value == true && fact.Requires.Value == true)
+            .Select(fact => fact.Source)
+            .Concat(fallback.Value == true && fallbackApplies ? [fallback.Source!] : [])
+            .Distinct()
+            .ToList();
+        if (authorizes.Count > 0)
+        {
+            return new Verdict(true, authorizes);
+        }
+
+        // No one site certainly requires a user, yet every way one condition falls, one of
+        // them does (decision 2): name each under its condition.
+        var correlated = requirers
+            .Where(fact =>
+                fact.Present.Value != false
+                && fact.Requires.Value != false
+                && (fact.Present.Value is not null || fact.Present.Key is not null)
+                && (fact.Requires.Value is not null || fact.Requires.Key is not null)
+            )
+            .Select(fact =>
+                fact.Present.Value is null ? fact.Present.Why ?? fact.Source
+                : fact.Requires.Why is { } why ? $"{fact.Source}: {why}"
+                : fact.Source
+            )
+            .Concat(
+                fallbackApplies && fallback is { Value: null, Key: not null, Why: { } fallbackWhy }
+                    ? [fallbackWhy]
+                    : []
+            )
+            .Distinct()
+            .ToList();
+        return new Verdict(
+            true,
+            correlated.Count > 0
+                ?
+                [
+                    "one of these applies whichever way its conditions fall: "
+                        + string.Join("; ", correlated),
+                ]
+                : []
+        );
 
         // A known value, or the next variable. An unknown without a reason of its own (the
         // requirement of a fact whose presence is the unknown) adds a case, never a reason.
@@ -443,20 +481,17 @@ internal sealed class HandlerAuthorization
 
     /// <summary>
     /// What an <c>IAuthorizeData</c> asks for, as ASP.NET's <c>AuthorizationPolicy.CombineAsync</c>
-    /// reads it: roles require a user in one of them; a policy name means that policy;
-    /// neither means the default policy.
+    /// reads it: any role list requires a user in one of them (a blank one, no role at all,
+    /// lets nobody in); a policy name means that policy, and a blank one is no name; neither
+    /// means the default policy.
     /// </summary>
     private Tri AuthorizeData(string? roles, string? policy) =>
-        IsNamed(roles) ? Tri.True
-        : IsNamed(policy) ? NamedPolicy(policy!)
+        roles is not null ? Tri.True
+        : !string.IsNullOrWhiteSpace(policy) ? NamedPolicy(policy)
         : _defaultPolicy;
 
     private bool IsAuthorizeData(ITypeSymbol? type) =>
         type.Implements(_wkt.IAuthorizeData) || type.DerivesFrom(_wkt.Authorize);
-
-    // A policy name or a role list: ASP.NET reads an empty or blank one as not given.
-    private static bool IsNamed(object? value) =>
-        value is string name && !string.IsNullOrWhiteSpace(name);
 
     // ---------------------------------------------------------------
     // Conventions: RequireAuthorization and AllowAnonymous
@@ -492,7 +527,17 @@ internal sealed class HandlerAuthorization
                 continue;
             }
 
-            var origin = trace.Origin;
+            // A call without source that isn't a Map* call made the builder. One that maps
+            // endpoints of its own (MapHealthChecks, MapHub) hands back their builder, which
+            // holds no contract endpoint; one that may hand back a builder the project made
+            // (a delegate, or a call given one as a convention builder) is a builder --check
+            // can't trace.
+            if (trace.Origin is { } made && !_origins.IsMapCall(made) && !MayHandBack(made))
+            {
+                continue;
+            }
+
+            var origin = trace.Origin is { } mapped && _origins.IsMapCall(mapped) ? mapped : null;
             var on = origin switch
             {
                 null => "a builder",
@@ -517,6 +562,9 @@ internal sealed class HandlerAuthorization
             {
                 // It may reach any endpoint whose builder has this type.
                 var builder = Unwrap(receiver.Value).Type;
+                var stops = IsSameSyntax(receiver.Value.Syntax, trace.At.Syntax)
+                    ? ""
+                    : $" (it stops at '{trace.At.Syntax}' at {trace.At.Syntax.SourcePosition()})";
                 var mvc =
                     !builder.DerivesFrom(_wkt.RouteHandlerBuilder)
                     && !builder.DerivesFrom(_wkt.RouteGroupBuilder);
@@ -527,7 +575,7 @@ internal sealed class HandlerAuthorization
                             kind,
                             Tri.Unknown(
                                 $"{source} is applied to a builder --check can't trace to the Map* "
-                                    + "call that made it, so it can't tell which endpoints it covers"
+                                    + $"call that made it{stops}, so it can't tell which endpoints it covers"
                             ),
                             requires,
                             source
@@ -571,6 +619,15 @@ internal sealed class HandlerAuthorization
             }
         }
     }
+
+    // Whether a call without source may hand back a builder the project made: a delegate,
+    // which may return one it captured, or a method given one as a convention builder.
+    private bool MayHandBack(IInvocationOperation call) =>
+        call.TargetMethod.MethodKind == MethodKind.DelegateInvoke
+        || call.Instance?.Type.Implements(_wkt.EndpointConventionBuilder) == true
+        || (call.TargetMethod.ReducedFrom ?? call.TargetMethod).Parameters.Any(parameter =>
+            parameter.Type.Implements(_wkt.EndpointConventionBuilder)
+        );
 
     // ---------------------------------------------------------------
     // MVC filters
@@ -855,9 +912,14 @@ internal sealed class HandlerAuthorization
             sites,
             unset: Tri.Unknown($"no registration --check can read for policy '{name}'")
         );
-        return policy.Value is null && sites.Count > 0
-            ? Tri.Unknown($"policy '{name}' {policy.Why}")
-            : policy;
+        return policy.Value is null
+            ? sites.Count > 0
+                ? Tri.Unknown($"policy '{name}' {policy.Why}")
+                : policy
+            : policy with
+            {
+                Source = $"policy '{name}' {policy.Source}",
+            };
     }
 
     /// <summary>
@@ -2104,7 +2166,14 @@ internal sealed class HandlerAuthorization
         var unknowns = list.Where(value => value.Value is null).ToList();
         if (unknowns.Count == 0)
         {
-            return Tri.False;
+            // Every policy lets anyone in: the ones that say where they're registered do.
+            var sources = list.Select(value => value.Source).OfType<string>().Distinct().ToList();
+            return sources.Count > 0
+                ? Tri.False with
+                {
+                    Source = string.Join(", ", sources),
+                }
+                : Tri.False;
         }
 
         // The first unknown that says why, so the verdict can; any unknown stays unknown.
@@ -2134,13 +2203,6 @@ internal sealed class HandlerAuthorization
 
         return current;
     }
-
-    private static IOperation Unwrap(IOperation operation) =>
-        operation is IConversionOperation conversion ? Unwrap(conversion.Operand) : operation;
-
-    private static bool IsType(INamedTypeSymbol? actual, INamedTypeSymbol? expected) =>
-        expected is not null
-        && SymbolEqualityComparer.Default.Equals(actual?.OriginalDefinition, expected);
 
     private enum FactKind
     {
@@ -2187,7 +2249,13 @@ internal sealed class HandlerAuthorization
 /// <summary>
 /// Whether a handler requires an authenticated caller: true, false, or null when
 /// <see cref="Because"/> lists what --check couldn't read. A decided verdict's
-/// <see cref="Because"/> names the setup that decided it (empty when nothing requires
-/// authentication).
+/// <see cref="Because"/> names the setup that decided it: what requires a user (each under
+/// its condition, when no one site does on its own), or what lets anyone in, which is
+/// <see cref="PolicyAdmits"/> when that's a requirement whose policy admits anyone (empty
+/// when nothing is there at all).
 /// </summary>
-internal sealed record Verdict(bool? RequiresAuthentication, IReadOnlyList<string> Because);
+internal sealed record Verdict(
+    bool? RequiresAuthentication,
+    IReadOnlyList<string> Because,
+    bool PolicyAdmits = false
+);

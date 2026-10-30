@@ -121,8 +121,8 @@ internal static class MvcRouteValues
     /// <summary>
     /// The route values one level (the action, or the controller) supplies. Its attributes
     /// are what reflection's <c>GetCustomAttributes(inherit: true)</c> hands MVC
-    /// (<see cref="RoslynExtensions.InheritedAttributes"/>). MVC adds each provider's value to one dictionary, so two with one key throw at
-    /// startup.
+    /// (<see cref="RoslynExtensions.InheritedAttributes"/>). MVC adds each provider's value
+    /// to one dictionary, so two with one key throw at startup.
     /// </summary>
     private static (
         IReadOnlyList<(string Key, string? Value)> Values,

@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
+using static Rivet.Tool.RoslynExtensions;
 
 namespace Rivet.Tool.Analysis;
 
@@ -22,9 +23,6 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
         IMethodSymbol,
         (List<IInvocationOperation>, List<ExpressionSyntax>)
     > _calls = new(SymbolEqualityComparer.Default);
-
-    private IMethodSymbol? _entryPoint;
-    private bool _entryPointRead;
 
     // ---------------------------------------------------------------
     // The trace
@@ -55,15 +53,18 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
             case IInvocationOperation call when IsMapCall(call):
                 return [Ends(TraceEnd.Made)];
             case IInvocationOperation call when call.TargetMethod.SourceBody() is { } body:
+                // A helper reached again inside its own answer nests by recursion, to a depth
+                // --check can't fix: the trace ends there.
                 return Along(
                     call.Syntax,
                     () =>
                         [
                             .. CoverageChecker
-                                .ReturnedValues(body)
+                                .ReturnedLeaves(body)
                                 .SelectMany(returned => Trace(returned, descended.Add(call), path))
                                 .DefaultIfEmpty(Ends(TraceEnd.Untraced)),
-                        ]
+                        ],
+                    onCycle: [Ends(TraceEnd.Untraced)]
                 );
             case IInvocationOperation call when PassedBuilder(call) is { } passed:
                 return Trace(passed, descended, path);
@@ -148,16 +149,22 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                     }
 
                     return traces;
-                }
+                },
+                // A parameter reached again is the same value: what it leads to is already in
+                // the union.
+                onCycle: []
             );
         }
 
-        // A cycle back into the trace adds nothing: what it leads to is already in the union.
-        List<BuilderTrace> Along(object step, Func<List<BuilderTrace>> trace)
+        List<BuilderTrace> Along(
+            object step,
+            Func<List<BuilderTrace>> trace,
+            List<BuilderTrace> onCycle
+        )
         {
             if (!path.Add(step))
             {
-                return [];
+                return onCycle;
             }
 
             try
@@ -213,9 +220,10 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                 if (trace.Origin is { } origin && IsMapGroup(origin))
                 {
                     var link = new ChainLink(origin, trace.Descended);
-                    if (here.Any(earlier => SameCall(earlier.Call, origin)))
+                    if (here.Contains(link) || here.Add(link).Any(earlier => earlier.Recurses))
                     {
-                        // A helper that nests groups by recursion: no fixed chain.
+                        // A helper that nests groups by recursion: no fixed chain. One helper
+                        // nested in itself, as in api.V2().V2(), makes two instances.
                         Anchor(new BuilderChain(here, Unresolved: true, trace.At));
                         continue;
                     }
@@ -241,7 +249,7 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                 under is [var outermost, ..] ? outermost.Syntax : chain.MapCall.Syntax
             );
             var climbing = calls
-                .Where(call => !under.Any(descended => SameCall(descended, call)))
+                .Where(call => !under.Any(descended => IsSameSyntax(descended.Syntax, call.Syntax)))
                 .ToList();
             if (climbing.Count == 0 || escapes.Count > 0)
             {
@@ -314,9 +322,6 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                 )
             )
             ?.Value;
-
-    internal static bool SameCall(IOperation left, IOperation right) =>
-        left.Syntax.SyntaxTree == right.Syntax.SyntaxTree && left.Syntax.Span == right.Syntax.Span;
 
     // ---------------------------------------------------------------
     // Calls
@@ -503,11 +508,7 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
         Condition? traced
     )
     {
-        if (ConditionWhy(site, origin.Syntax) is { } within)
-        {
-            return [Condition.Both(within, traced)];
-        }
-
+        var within = ConditionWhy(site, origin.Syntax);
         if (
             EnclosingFunction(site) is not LocalFunctionStatementSyntax function
             || Contains(function, origin.Syntax)
@@ -516,7 +517,7 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
             || !Captures(receiver, local)
         )
         {
-            return [traced];
+            return [Condition.Both(within, traced)];
         }
 
         return
@@ -526,7 +527,7 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                     origin.Syntax,
                     new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default)
                 )
-                .Select(condition => Condition.Both(condition, traced)),
+                .Select(call => Condition.Both(Condition.Both(within, call), traced)),
         ];
     }
 
@@ -551,22 +552,22 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
         var (calls, escapes) = CallsTo(function);
         foreach (var call in calls)
         {
-            if (ConditionWhy(call.Syntax, origin) is { } condition)
-            {
-                conditions.Add(condition);
-            }
-            else if (
+            var own = ConditionWhy(call.Syntax, origin);
+            if (
                 EnclosingFunction(call.Syntax) is LocalFunctionStatementSyntax outer
                 && !Contains(outer, origin)
                 && compilation.GetSemanticModel(outer.SyntaxTree).GetDeclaredSymbol(outer)
                     is IMethodSymbol caller
             )
             {
-                conditions.AddRange(CapturedCalls(caller, origin, visiting));
+                conditions.AddRange(
+                    CapturedCalls(caller, origin, visiting)
+                        .Select(outerCall => Condition.Both(own, outerCall))
+                );
             }
             else
             {
-                conditions.Add(null);
+                conditions.Add(own);
             }
         }
 
@@ -590,6 +591,7 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
     private static bool Captures(IOperation receiver, IMethodSymbol function)
     {
         var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+        var entered = new HashSet<SyntaxNode>();
         return Reaches(receiver);
 
         bool Reaches(IOperation value)
@@ -606,19 +608,19 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                         && Reaches(provenance);
                 case IParameterReferenceOperation parameter:
                     return !Within(parameter.Parameter);
-                case IInvocationOperation call
-                    when call.TargetMethod.SourceBody() is { } body
-                        && seen.Add(call.TargetMethod.OriginalDefinition):
-                    return CoverageChecker
-                        .ReturnedValues(body)
-                        .Any(returned =>
-                            Unwrap(returned) is IParameterReferenceOperation returnedParameter
-                            && Declares(call, returnedParameter.Parameter)
-                                ? BoundArgument(call, returnedParameter.Parameter)
-                                    is not { } argument
-                                    || Reaches(argument)
-                                : true
-                        );
+                // Each call once: one met again inside its own answer adds nothing new.
+                case IInvocationOperation call when call.TargetMethod.SourceBody() is { } body:
+                    return entered.Add(call.Syntax)
+                        && CoverageChecker
+                            .ReturnedLeaves(body)
+                            .Any(returned =>
+                                Unwrap(returned) is IParameterReferenceOperation returnedParameter
+                                && Declares(call, returnedParameter.Parameter)
+                                    ? BoundArgument(call, returnedParameter.Parameter)
+                                        is not { } argument
+                                        || Reaches(argument)
+                                    : true
+                            );
                 case IInvocationOperation call when PassedBuilder(call) is { } passed:
                     return Reaches(passed);
                 default:
@@ -837,16 +839,10 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
             return site.Ancestors().Any(node => node is GlobalStatementSyntax);
         }
 
-        if (!_entryPointRead)
-        {
-            _entryPoint = compilation.GetEntryPoint(CancellationToken.None);
-            _entryPointRead = true;
-        }
-
-        return _entryPoint is not null
+        return compilation.GetEntryPoint(CancellationToken.None) is { } entryPoint
             && SymbolEqualityComparer.Default.Equals(
                 compilation.GetSemanticModel(function.SyntaxTree).GetDeclaredSymbol(function),
-                _entryPoint
+                entryPoint
             );
     }
 
@@ -893,13 +889,6 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                 $"after the return at {returned.SourcePosition()}, which may leave first"
             )
             .FirstOrDefault();
-
-    private static IOperation Unwrap(IOperation operation) =>
-        operation is IConversionOperation conversion ? Unwrap(conversion.Operand) : operation;
-
-    private static bool IsType(INamedTypeSymbol? actual, INamedTypeSymbol? expected) =>
-        expected is not null
-        && SymbolEqualityComparer.Default.Equals(actual?.OriginalDefinition, expected);
 }
 
 /// <summary>How a trace ends.</summary>
@@ -956,15 +945,25 @@ internal sealed record ChainLink(
         conventionDescended.Length <= Descended.Length
         && conventionDescended
             .Zip(Descended.Skip(Descended.Length - conventionDescended.Length))
-            .All(pair => BuilderOrigins.SameCall(pair.First, pair.Second));
+            .All(pair => IsSameSyntax(pair.First.Syntax, pair.Second.Syntax));
+
+    /// <summary>A helper call this link is made under twice: a helper reached through itself.</summary>
+    public bool Recurses =>
+        Descended
+            .Select((call, index) => (call, index))
+            .Any(pair =>
+                Descended
+                    .Skip(pair.index + 1)
+                    .Any(later => IsSameSyntax(later.Syntax, pair.call.Syntax))
+            );
 
     public bool Equals(ChainLink? other) =>
         other is not null
-        && BuilderOrigins.SameCall(Call, other.Call)
+        && IsSameSyntax(Call.Syntax, other.Call.Syntax)
         && Descended.Length == other.Descended.Length
         && Descended
             .Zip(other.Descended)
-            .All(pair => BuilderOrigins.SameCall(pair.First, pair.Second));
+            .All(pair => IsSameSyntax(pair.First.Syntax, pair.Second.Syntax));
 
     public override int GetHashCode() => HashCode.Combine(Call.Syntax.Span, Descended.Length);
 }
@@ -1001,20 +1000,27 @@ internal sealed record BuilderChain(
         foreach (var group in Groups.Reverse())
         {
             if (
-                group
-                    .Arguments.FirstOrDefault(argument => argument.Parameter?.Name == "prefix")
-                    ?.Value.ConstantValue
+                Argument(group, "prefix")?.ConstantValue
                 is not { HasValue: true, Value: string part }
             )
             {
                 return null;
             }
 
-            prefix = TransportIdentity.NormalizeRoute($"{prefix}/{part.Trim('/')}");
+            prefix = Join(prefix, part);
         }
 
         return prefix;
     }
+
+    /// <summary>
+    /// The route the Map* call's <paramref name="template"/> gets in this chain: its prefix,
+    /// then the template. Null when the prefix can't be known (<see cref="Prefix"/>).
+    /// </summary>
+    public string? Route(string template) => Prefix() is { } prefix ? Join(prefix, template) : null;
+
+    private static string Join(string prefix, string part) =>
+        TransportIdentity.NormalizeRoute($"{prefix}/{part.Trim('/')}");
 
     public bool Equals(BuilderChain? other) =>
         other is not null && Unresolved == other.Unresolved && Links.SequenceEqual(other.Links);
