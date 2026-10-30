@@ -284,15 +284,22 @@ public sealed class FormPartNameTests
         HttpStatusCode.OK,
         "{\"Title\":\"Title\",\"Plain\":\"Plain\"}"
     )]
-    // A struct or a record struct: MVC needs a public parameterless constructor, which
-    // neither declares (reflection lists no implicit one), and a record struct has no
-    // record constructor for it either; the form mapper binds both.
+    // A struct or a record struct: MVC can't create either, and the form mapper binds both.
     [InlineData(true, "struct", HttpStatusCode.InternalServerError, "")]
     [InlineData(false, "struct", HttpStatusCode.OK, "{\"Title\":\"Title\",\"Plain\":\"Plain\"}")]
     [InlineData(true, "record-struct", HttpStatusCode.InternalServerError, "")]
     [InlineData(
         false,
         "record-struct",
+        HttpStatusCode.OK,
+        "{\"Title\":\"Title\",\"Plain\":\"Plain\"}"
+    )]
+    // Nor one that declares a public parameterless constructor: the creator MVC compiles
+    // returns the struct unboxed, which throws.
+    [InlineData(true, "struct-ctor", HttpStatusCode.InternalServerError, "")]
+    [InlineData(
+        false,
+        "struct-ctor",
         HttpStatusCode.OK,
         "{\"Title\":\"Title\",\"Plain\":\"Plain\"}"
     )]
@@ -331,8 +338,9 @@ public sealed class FormPartNameTests
     [InlineData(typeof(FormCtorOnly), "Any", "MVC's model binder can't create it")]
     [InlineData(typeof(FormCtorOnly), "Mvc", "MVC's model binder can't create it")]
     [InlineData(typeof(FormRecordMismatch), "Any", "exact name and type")]
-    [InlineData(typeof(FormStruct), "Mvc", "public parameterless constructor")]
-    [InlineData(typeof(FormRecordStruct), "Any", "record class's one public constructor")]
+    [InlineData(typeof(FormStruct), "Mvc", "MVC's model binder can't create a struct")]
+    [InlineData(typeof(FormRecordStruct), "Any", "MVC's model binder can't create a struct")]
+    [InlineData(typeof(FormStructCtor), "Mvc", "even one that declares a public parameterless")]
     [InlineData(typeof(FormAbstract), "Mvc", "MVC's model binder can't create an abstract type")]
     [InlineData(
         typeof(FormAbstract),
@@ -475,14 +483,22 @@ public sealed class FormPartNameTests
     }
 
     [Theory]
-    // MVC builds a positional record from its constructor and drops it, but fills an
-    // abstract-typed member in place.
+    // MVC builds a positional record from its constructor and drops it, but fills in place an
+    // abstract-typed member (an abstract record's too, even one declaring a public constructor
+    // its properties match, since MVC uses no record constructor for an abstract type), a
+    // constructor-only one, a settable one, and one with a private setter. A struct
+    // member it hands down without creating one, so none fails the request, but it sets none
+    // of a struct's properties.
     [InlineData(
         true,
         "{\"Home\":\"city:Home.City\",\"Positional\":\"city:\",\"Abstract\":\"city:Abstract.City\","
+            + "\"AbstractRecord\":\"city:AbstractRecord.City\",\"SettableRecord\":\"city:SettableRecord.City\","
+            + "\"PublicRecord\":\"city:PublicRecord.City\",\"Ctor\":\"city:Ctor.City\",\"Settable\":\"city:Settable.City\","
+            + "\"PrivateSet\":\"city:PrivateSet.City\",\"Struct\":\"city:\",\"GetOnlyStruct\":\"city:\","
             + "\"Computed\":\"city:\"}"
     )]
-    // The form mapper sets no member here, so it hands the handler no form at all.
+    // The form mapper binds nothing on a type with a settable abstract member, so it hands the
+    // handler no form at all.
     [InlineData(false, "null")]
     public async Task Only_MVC_binds_into_a_get_only_complex_member(bool mvc, string bound)
     {
@@ -494,6 +510,14 @@ public sealed class FormPartNameTests
                 ("Unset.City", false),
                 ("Positional.City", false),
                 ("Abstract.City", false),
+                ("AbstractRecord.City", false),
+                ("SettableRecord.City", false),
+                ("PublicRecord.City", false),
+                ("Ctor.City", false),
+                ("Settable.City", false),
+                ("PrivateSet.City", false),
+                ("Struct.City", false),
+                ("GetOnlyStruct.City", false),
                 ("Computed.City", false),
             ])
         );
@@ -505,20 +529,31 @@ public sealed class FormPartNameTests
     [Fact]
     public void A_get_only_complex_member_is_a_part_only_MVC_fills()
     {
-        // The initialised member is MVC's part, an abstract-typed one too; one left null,
-        // made on each read, or rebuilt from a record constructor is no one's (the host rows
-        // above).
-        Assert.Equal(
-            "home",
-            Assert
-                .Single(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Home"))
-                .Name
-        );
-        Assert.Equal(
-            "abstract",
-            Assert
-                .Single(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Abstract"))
-                .Name
+        // The initialised member is MVC's part, an abstract-typed or constructor-only one too,
+        // and one with a private setter; one left null, made on each read, rebuilt from a
+        // record constructor, or a get-only struct is no one's (the host rows above).
+        foreach (
+            var (member, part) in new[]
+            {
+                ("Home", "home"),
+                ("Abstract", "abstract"),
+                ("AbstractRecord", "abstractRecord"),
+                ("PublicRecord", "publicRecord"),
+                ("Ctor", "ctor"),
+                ("PrivateSet", "privateSet"),
+            }
+        )
+        {
+            Assert.Equal(
+                part,
+                Assert
+                    .Single(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, member))
+                    .Name
+            );
+        }
+
+        Assert.Empty(
+            GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "GetOnlyStruct")
         );
         Assert.Empty(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Unset"));
         Assert.Empty(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Computed"));
@@ -971,6 +1006,7 @@ public sealed class FormPartNameTests
                 Map<FormRecordMismatch>(app, "record-mismatch");
                 Map<FormStruct>(app, "struct");
                 Map<FormRecordStruct>(app, "record-struct");
+                Map<FormStructCtor>(app, "struct-ctor");
                 Map<FormAbstract>(app, "abstract");
                 Map<FormSkips>(app, "skips");
                 Map<FormImmutableFiles>(app, "immutable-files");
@@ -1147,6 +1183,15 @@ public struct FormStruct
 
 public record struct FormRecordStruct(string? Title, string? Plain);
 
+public struct FormStructCtor
+{
+    public FormStructCtor() { }
+
+    public string? Title { get; set; }
+
+    public string? Plain { get; set; }
+}
+
 public abstract class FormAbstract
 {
     public string? Title { get; set; }
@@ -1212,6 +1257,22 @@ public sealed class FormInPlace
 
     public FormAddressBase Abstract { get; } = new FormUkAddress();
 
+    public FormAddressRecordBase AbstractRecord { get; } = new FormUkAddressRecord(null);
+
+    public FormAddressRecordBase SettableRecord { get; set; } = new FormUkAddressRecord(null);
+
+    public FormAddressPublicRecordBase PublicRecord { get; } = new FormUkAddressPublicRecord();
+
+    public FormAddressCtor Ctor { get; } = new("x");
+
+    public FormAddressBase Settable { get; set; } = new FormUkAddress();
+
+    public FormAddress PrivateSet { get; private set; } = new();
+
+    public FormAddressStruct Struct { get; set; }
+
+    public FormAddressStruct GetOnlyStruct { get; } = new();
+
     public FormAddress Computed => new();
 }
 
@@ -1235,6 +1296,40 @@ public abstract class FormAddressBase
 }
 
 public sealed class FormUkAddress : FormAddressBase;
+
+public abstract record FormAddressRecordBase(string? City)
+{
+    public sealed override string ToString() => $"city:{City}";
+}
+
+public sealed record FormUkAddressRecord(string? City) : FormAddressRecordBase(City);
+
+// An abstract record's primary constructor is protected, so only a declared public one could
+// be a record constructor for MVC, and MVC binds none for an abstract type.
+public abstract record FormAddressPublicRecordBase
+{
+    public FormAddressPublicRecordBase(string? City) => this.City = City;
+
+    public string? City { get; init; }
+
+    public sealed override string ToString() => $"city:{City}";
+}
+
+public sealed record FormUkAddressPublicRecord() : FormAddressPublicRecordBase((string?)null);
+
+public sealed class FormAddressCtor(string city)
+{
+    public string? City { get; set; } = city;
+
+    public override string ToString() => $"city:{City}";
+}
+
+public struct FormAddressStruct
+{
+    public string? City { get; set; }
+
+    public override readonly string ToString() => $"city:{City}";
+}
 
 /// <summary>The MVC handlers for <see cref="FormPartNameTests"/>.</summary>
 [ApiController]
@@ -1275,6 +1370,9 @@ public sealed class FormPartController : ControllerBase
 
     [HttpPost("/form-parts/mvc/record-struct")]
     public string RecordStruct([FromForm] FormRecordStruct form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/struct-ctor")]
+    public string StructCtor([FromForm] FormStructCtor form) => FormEcho.Of(form);
 
     [HttpPost("/form-parts/mvc/abstract")]
     public string Abstract([FromForm] FormAbstract form) => FormEcho.Of(form);

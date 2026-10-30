@@ -209,9 +209,11 @@ internal static class SchemaClassifier
             return AllOfYieldsProperties(schema);
         }
 
-        if (schema.OneOf is { Count: > 0 } && !IsNullableOneOf(schema.OneOf))
+        // MapSchemas writes a oneOf's union record, and nothing for a nullable oneOf, whatever
+        // properties sit beside either.
+        if (schema.OneOf is { Count: > 0 })
         {
-            return true;
+            return !IsNullableOneOf(schema.OneOf);
         }
 
         if (schema.AnyOf is { Count: > 1 })

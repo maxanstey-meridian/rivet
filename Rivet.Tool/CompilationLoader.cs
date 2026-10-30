@@ -300,8 +300,8 @@ internal static class CompilationLoader
         }
 
         // A Main counts only when the compiler takes it as the entry point and the files compile
-        // as that app. Two Mains, or one without an entry-point signature, aren't one app, so the
-        // files stay the library they compiled as.
+        // as that app; files it can't build as one app (two viable Mains, an async void Main, or a
+        // lone Main without an entry-point signature) stay the library they compiled as.
         if (app.GetEntryPoint(CancellationToken.None) is not null && Errors(app).Count == 0)
         {
             return app;

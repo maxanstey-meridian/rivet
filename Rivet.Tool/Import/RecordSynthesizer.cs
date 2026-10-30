@@ -105,9 +105,11 @@ internal sealed class RecordSynthesizer(ResolutionContext ctx, SchemaMapper mapp
                 );
                 properties.Add(new RecordProperty($"As{refName}", $"{refName}?", false));
             }
-            else if (variant.Properties is { Count: > 0 })
+            else if (variant is not OpenApiSchemaReference && variant.Properties is { Count: > 0 })
             {
-                // Inline object → synthesize sub-record (dedup-with-shape-check)
+                // Inline object → synthesize sub-record (dedup-with-shape-check). A $ref
+                // WouldGenerateType rejects reads its target's properties through the proxy,
+                // so it resolves below to the type its component names instead.
                 var subName = $"{name}Option{optionIndex}";
                 var record = MapRecord(subName, variant);
                 var finalSubName = ctx.AddOrReuseExtraRecord(record);

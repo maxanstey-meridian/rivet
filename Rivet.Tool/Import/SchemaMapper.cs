@@ -1425,11 +1425,12 @@ internal sealed class SchemaMapper
             return refResult;
         }
 
-        // A oneOf or anyOf of a value and an explicit null names the value, and narrows any
-        // type array beside it (["object", "null"] says no more than the value's own type).
+        // A oneOf or anyOf of a value and an explicit null names the value, ahead of any type
+        // beside it when the value says what it is (["object", "null"] says no more than a
+        // $ref does). The type beside it still decides whether null is allowed.
         if (
-            TryResolveTwoBranchNullable(schema.OneOf, context, out var result)
-            || TryResolveTwoBranchNullable(schema.AnyOf, context, out result)
+            TryResolveTwoBranchNullable(schema, schema.OneOf, context, out var result)
+            || TryResolveTwoBranchNullable(schema, schema.AnyOf, context, out result)
         )
         {
             return result;
@@ -2597,9 +2598,12 @@ internal sealed class SchemaMapper
     /// Resolves the 3.1 nullable composition: exactly two branches, one of which is the
     /// explicit <c>{"type": "null"}</c> schema. The emitter uses oneOf for $ref inners
     /// and anyOf for typeless composites (where an untyped branch would also match null
-    /// and make oneOf ambiguous).
+    /// and make oneOf ambiguous). A type beside the composition constrains the same instance:
+    /// a value branch that adds no shape of its own (only a format or a bound, not an enum)
+    /// leaves the type to name it, and a type that excludes null makes the value non-nullable.
     /// </summary>
     private bool TryResolveTwoBranchNullable(
+        IOpenApiSchema schema,
         IList<IOpenApiSchema>? branches,
         string? context,
         out string result
@@ -2627,13 +2631,21 @@ internal sealed class SchemaMapper
             }
         }
 
-        if (!hasNull || valuePart is null)
+        var siblingType = schema.Type ?? 0;
+        if (
+            !hasNull
+            || valuePart is null
+            || (siblingType & ~JsonSchemaType.Null) != 0
+                && !ContributesRuntimeShape(valuePart)
+                && valuePart.Enum is not { Count: > 0 }
+        )
         {
             return false;
         }
 
         var resolved = ResolveCSharpType(valuePart, context);
-        result = resolved.EndsWith("?") ? resolved : resolved + "?";
+        var bare = resolved.EndsWith('?') ? resolved[..^1] : resolved;
+        result = siblingType != 0 && !siblingType.HasFlag(JsonSchemaType.Null) ? bare : bare + "?";
         return true;
     }
 

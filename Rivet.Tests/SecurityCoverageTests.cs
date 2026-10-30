@@ -1601,12 +1601,14 @@ public sealed class SecurityCoverageTests
     /// File mode compiles files holding an entry point as the app they come from, so the
     /// fallback policy a <c>Main</c> or top-level statements set is read as run, as it is in
     /// a project. An async <c>Main</c> is the entry point the compiler names, not the wrapper
-    /// it emits around it.
+    /// it emits around it, and a <c>Main</c> without an entry-point signature beside the real
+    /// one is only a warning, so the files are still that app.
     /// </summary>
     [Theory]
     [InlineData("top-level")]
     [InlineData("Main")]
     [InlineData("async Main")]
+    [InlineData("Main beside a Main without an entry-point signature")]
     public async Task Cli_reads_the_setup_the_files_entry_point_runs(string entryPoint)
     {
         const string usings = """
@@ -1644,13 +1646,17 @@ public sealed class SecurityCoverageTests
                 public IActionResult Get() => ItemsContract.Get.Success(new ItemDto("1")).ToActionResult();
             }
             """;
+        const string main =
+            "public static class Program\n{\n    public static void Main(string[] args)\n    {\n"
+            + setup
+            + "\n    }\n}\n";
         var source = entryPoint switch
         {
             "top-level" => usings + setup + types,
-            "Main" => usings
-                + "public static class Program\n{\n    public static void Main(string[] args)\n    {\n"
-                + setup
-                + "\n    }\n}\n"
+            "Main" => usings + main + types,
+            "Main beside a Main without an entry-point signature" => usings
+                + main
+                + "public static class Tool { public static string Main() => \"\"; }\n"
                 + types,
             _ => usings
                 + "public static class Program\n{\n    public static async System.Threading.Tasks.Task Main(string[] args)\n    {\n"
@@ -1669,9 +1675,9 @@ public sealed class SecurityCoverageTests
     }
 
     /// <summary>
-    /// Files whose <c>Main</c>s the compiler won't take as one entry point (two of them, one
-    /// without an entry-point signature, or an async <c>void</c> one, even beside a valid
-    /// <c>Main</c>) aren't one app, so they stay the library they compile as and still generate.
+    /// Files the compiler can't build as one app (two <c>Main</c>s it could take, a lone
+    /// <c>Main</c> without an entry-point signature, or an async <c>void</c> one, even beside a
+    /// valid <c>Main</c>) stay the library they compile as and still generate.
     /// </summary>
     [Theory]
     [InlineData(

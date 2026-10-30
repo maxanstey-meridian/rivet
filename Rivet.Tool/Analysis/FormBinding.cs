@@ -205,23 +205,70 @@ internal static class FormBinding
 
     /// <summary>
     /// Whether MVC binds a complex <paramref name="property"/>'s members into the object it
-    /// already holds: an auto-property whose initializer creates the object, of a type MVC
-    /// has no record constructor for (<see cref="BoundConstructor"/>). ComplexObjectModelBinder
-    /// hands a complex member's current value down as its model and creates one only when
-    /// that's null, so it never asks whether it could create the type (an abstract one, or
-    /// one whose only constructor takes parameters, is filled all the same) and binds only
-    /// the properties it can set or fill. A record constructor is the exception: MVC builds a
-    /// new record from it, ignoring the value it was handed, which a get-only property then
-    /// throws away. Pinned on a real host by
+    /// already holds: a struct (not a <c>Nullable&lt;T&gt;</c>), whose getter never returns
+    /// null, or an auto-property whose initializer creates the object, of a type MVC has no
+    /// record constructor for (<see cref="BoundConstructor"/>). ComplexObjectModelBinder hands
+    /// a complex member's current value down as its model and creates one only when that's
+    /// null, so it never asks whether it could create the type (an abstract one, a struct, or
+    /// one whose only constructor takes parameters is filled all the same) and binds only the
+    /// properties it can set or fill. On a struct it sets none, since its metadata gives a
+    /// value type's properties no setter (<see cref="MvcSetsNoStructProperty"/>). A record
+    /// constructor is the exception: MVC builds a new record from it, ignoring the value it was
+    /// handed, which a get-only property then throws away. Pinned on a real host by
     /// <c>FormPartNameTests.Only_MVC_binds_into_a_get_only_complex_member</c>.
     /// </summary>
     internal static bool FillsInPlace(WellKnownTypes wkt, IPropertySymbol property) =>
-        AutoPropertyInitializer(property) is BaseObjectCreationExpressionSyntax
-        && (
-            property.Type is not INamedTypeSymbol type
-            || BoundConstructor(type, FormBoundProperties(wkt.Compilation, type), Binder.Mvc)
-                is null
-        );
+        property.Type
+            is {
+                IsValueType: true,
+                OriginalDefinition.SpecialType: not SpecialType.System_Nullable_T
+            }
+        || AutoPropertyInitializer(property) is BaseObjectCreationExpressionSyntax
+            && (
+                property.Type is not INamedTypeSymbol type
+                || BoundConstructor(type, FormBoundProperties(wkt.Compilation, type), Binder.Mvc)
+                    is null
+            );
+
+    /// <summary>
+    /// Why MVC binds nothing from the request into a complex struct member (not a
+    /// <c>Nullable&lt;T&gt;</c>), settable or get-only. A settable one it hands down
+    /// (<see cref="FillsInPlace"/>) and then sets none of its properties, since its metadata
+    /// gives a value type's properties no setter; a get-only one it skips
+    /// (ComplexObjectModelBinder.CanUpdateReadOnlyProperty refuses a value type). Either way the
+    /// request succeeds with the struct's members unset. Pinned on a real host by
+    /// <c>FormPartNameTests.Only_MVC_binds_into_a_get_only_complex_member</c>.
+    /// </summary>
+    internal const string MvcSetsNoStructProperty =
+        "MVC's model binder sets no property of a struct, so the handler never sees what the "
+        + "request sends for it";
+
+    /// <summary>
+    /// The get-only complex struct properties of <paramref name="type"/> that MVC skips
+    /// (<see cref="MvcSetsNoStructProperty"/>), less those <paramref name="bound"/> already
+    /// lists or <c>[BindNever]</c> takes out. They bind no more than a settable struct member
+    /// does, so <c>--check</c> reads them the same way.
+    /// </summary>
+    internal static IEnumerable<BoundMember> MvcGetOnlyStructs(
+        WellKnownTypes wkt,
+        INamedTypeSymbol type,
+        IReadOnlyList<BoundMember> bound
+    ) =>
+        FormBoundProperties(wkt.Compilation, type)
+            .Where(property =>
+                property.Type
+                    is {
+                        IsValueType: true,
+                        OriginalDefinition.SpecialType: not SpecialType.System_Nullable_T
+                    }
+                && ParameterBindingSources.IsComplex(wkt, property.Type, ParameterBindingHost.Mvc)
+                && !Sets(wkt, Binder.Mvc, property)
+                && Skips(wkt, Binder.Mvc, property) is null
+                && !bound.Any(member =>
+                    string.Equals(member.Name, property.Name, StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            .Select(property => new BoundMember(property.Name, property.Type, property, null));
 
     /// <summary>
     /// A type MVC binds through the getter of a get-only property and then fills in place
@@ -299,14 +346,16 @@ internal static class FormBinding
     /// <list type="bullet">
     /// <item>MVC (DefaultBindingMetadataProvider.GetRecordTypeConstructor) calls a record
     /// class's one public constructor when every parameter matches a visible property by its
-    /// exact name and type; otherwise it needs a public parameterless constructor.</item>
+    /// exact name and type, unless the record is abstract; otherwise it needs a public
+    /// parameterless constructor.</item>
     /// <item>The form mapper (FormDataMetadataFactory) and <c>[AsParameters]</c>
     /// (ParameterBindingMethodCache.FindConstructor) call a type's one public constructor,
     /// matching parameters to properties ignoring case. With several, the form mapper binds
     /// nothing and <c>[AsParameters]</c> calls the parameterless one.</item>
     /// </list>
-    /// Pinned on real hosts by <c>FormPartNameTests.The_hosts_construct_these_types_differently</c>
-    /// and <c>MinimalApiBindingHostTests.AsParameters_binds_what_its_constructor_allows</c>.
+    /// Pinned on real hosts by <c>FormPartNameTests.The_hosts_construct_these_types_differently</c>,
+    /// <c>Only_MVC_binds_into_a_get_only_complex_member</c> (an abstract record), and
+    /// <c>MinimalApiBindingHostTests.AsParameters_binds_what_its_constructor_allows</c>.
     /// </summary>
     internal static IMethodSymbol? BoundConstructor(
         INamedTypeSymbol type,
@@ -322,7 +371,7 @@ internal static class FormBinding
 
         return
             binder != Binder.Mvc
-            || type is { IsRecord: true, IsValueType: false }
+            || type is { IsRecord: true, IsValueType: false, IsAbstract: false }
                 && constructor.Parameters.All(parameter =>
                     properties.Any(property =>
                         property.Name == parameter.Name
@@ -338,9 +387,10 @@ internal static class FormBinding
     /// when it can create it.
     /// <list type="bullet">
     /// <item>MVC (ComplexObjectModelBinder.CreateModel) fails the request for an abstract type,
-    /// and for one with neither its record constructor (<see cref="BoundConstructor"/>) nor a
-    /// public parameterless constructor, which covers a struct or record struct that declares
-    /// none: reflection lists no implicit one.</item>
+    /// for a struct or record struct (the creator it compiles returns the value unboxed, which
+    /// throws, even when the struct declares a public parameterless constructor), and for a
+    /// class with neither its record constructor (<see cref="BoundConstructor"/>) nor a public
+    /// parameterless constructor.</item>
     /// <item>The form mapper binds nothing on an abstract type or one with more than one public
     /// constructor.</item>
     /// <item><c>[AsParameters]</c> (ParameterBindingMethodCache.FindConstructor) refuses the
@@ -362,6 +412,9 @@ internal static class FormBinding
         return binder switch
         {
             Binder.Mvc when type.IsAbstract => "MVC's model binder can't create an abstract type",
+            Binder.Mvc when type.IsValueType =>
+                "MVC's model binder can't create a struct, even one that declares a public "
+                    + "parameterless constructor",
             Binder.Mvc
                 when BoundConstructor(type, properties, Binder.Mvc) is null && !parameterless =>
                 "MVC's model binder can't create it: it needs a public parameterless constructor, or a "

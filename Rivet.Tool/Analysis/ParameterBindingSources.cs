@@ -60,7 +60,8 @@ internal enum InputSource
     /// <summary>
     /// A complex parameter or member whose binder can't create its type
     /// (<see cref="FormBinding.CantCreate"/>): <c>[AsParameters]</c> refuses the endpoint at
-    /// startup, MVC fails the request, and the form mapper binds none of its fields.
+    /// startup, MVC fails the request, and the form mapper binds none of its fields. Also a
+    /// struct member MVC binds nothing into (<see cref="FormBinding.MvcSetsNoStructProperty"/>).
     /// <see cref="BoundInput.CantCreate"/> says why. The members the binder would bind if it
     /// could create the type follow it, so the rest of the comparison still reads them.
     /// </summary>
@@ -460,7 +461,10 @@ internal static class ParameterBindingSources
     /// <see cref="InputSource.Uncreatable"/> input, and its members still follow, unless
     /// <paramref name="filledInPlace"/>: MVC binds into a member's existing object
     /// (<see cref="FormBinding.FillsInPlace"/>) without creating one, and, since that type has
-    /// no record constructor, binds its properties alone. Real-host pins:
+    /// no record constructor, binds its properties alone. A struct it sets no property of,
+    /// settable or get-only, is an <see cref="InputSource.Uncreatable"/> input saying so
+    /// (<see cref="FormBinding.MvcSetsNoStructProperty"/>), and its members follow too, so the
+    /// comparison reports it once. Real-host pins:
     /// <c>MvcBindingHostTests</c>, <c>MinimalApiBindingHostTests</c>, and
     /// <c>FormPartNameTests</c>.
     /// </summary>
@@ -493,8 +497,25 @@ internal static class ParameterBindingSources
                 yield return input;
             }
         }
+        else if (mvc && type.IsValueType)
+        {
+            yield return UncreatableInput(
+                parameter,
+                path,
+                prefix ?? path,
+                type,
+                nested,
+                FormBinding.MvcSetsNoStructProperty
+            );
+        }
 
-        foreach (var member in FormBinding.BoundMembers(wkt, type, binder))
+        var members = FormBinding.BoundMembers(wkt, type, binder);
+        if (mvc)
+        {
+            members = [.. members, .. FormBinding.MvcGetOnlyStructs(wkt, type, members)];
+        }
+
+        foreach (var member in members)
         {
             var (name, memberType) = (member.Name, member.Type);
             var attributes = mvc ? member.MvcAttributes : member.FormMapperAttributes;
@@ -577,18 +598,30 @@ internal static class ParameterBindingSources
             { } why
         )
         {
-            yield return new BoundInput(
+            yield return UncreatableInput(
+                parameter,
                 path,
                 wireName,
-                InputSource.Uncreatable,
                 type,
-                parameter,
-                EnumParser.None,
                 nested,
                 $"{why}, {FormBinding.WhenItCantCreate(binder)}"
             );
         }
     }
+
+    /// <summary>
+    /// An <see cref="InputSource.Uncreatable"/> input for <paramref name="type"/>, saying
+    /// <paramref name="why"/> the handler never sees what the request sends for it.
+    /// </summary>
+    private static BoundInput UncreatableInput(
+        IParameterSymbol parameter,
+        string path,
+        string wireName,
+        INamedTypeSymbol type,
+        bool nested,
+        string why
+    ) =>
+        new(path, wireName, InputSource.Uncreatable, type, parameter, EnumParser.None, nested, why);
 
     /// <summary>
     /// The key a member of a complex type is read under. MVC's ComplexObjectModelBinder

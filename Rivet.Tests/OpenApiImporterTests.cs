@@ -5954,11 +5954,18 @@ public sealed class OpenApiImporterTests
                 "type": ["object", "null"],
                 "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/Named" } ]
             },
+            "MaybeShaped": {
+                "type": ["object", "null"],
+                "properties": { "id": { "type": "string" } },
+                "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/Other" } ]
+            },
             "Dto": {
                 "type": "object",
                 "properties": {
                     "maybe": { "$ref": "#/components/schemas/Maybe" },
-                    "value": { "oneOf": [ { "$ref": "#/components/schemas/Maybe" }, { "$ref": "#/components/schemas/Other" } ] }
+                    "maybeShaped": { "$ref": "#/components/schemas/MaybeShaped" },
+                    "value": { "oneOf": [ { "$ref": "#/components/schemas/Maybe" }, { "$ref": "#/components/schemas/Other" } ] },
+                    "either": { "oneOf": [ { "$ref": "#/components/schemas/MaybeShaped" }, { "$ref": "#/components/schemas/Named" } ] }
                 }
             }
             """,
@@ -5969,10 +5976,17 @@ public sealed class OpenApiImporterTests
 
         var result = CompilationHelper.Import(spec);
         Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Maybe.cs"));
-        Assert.Contains("public Named? Maybe", CompilationHelper.FindFile(result, "Dto.cs"));
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("MaybeShaped.cs"));
+        var dto = CompilationHelper.FindFile(result, "Dto.cs");
+        Assert.Contains("public Named? Maybe", dto);
+        Assert.Contains("public Other? MaybeShaped", dto);
         var wrapper = CompilationHelper.FindFile(result, "DtoValue.cs");
         Assert.Contains("Named? AsNamed", wrapper);
         Assert.Contains("Other? AsOther", wrapper);
+        var either = CompilationHelper.FindFile(result, "DtoEither.cs");
+        Assert.Contains("Other? AsOther", either);
+        Assert.Contains("Named? AsNamed", either);
+        Assert.DoesNotContain("Option0", either);
         CompilationHelper.CompileImportResult(result);
     }
 
@@ -6057,6 +6071,88 @@ public sealed class OpenApiImporterTests
         Assert.Contains("public Extended Extended", CompilationHelper.FindFile(result, "Dto.cs"));
         var wrapper = CompilationHelper.FindFile(result, "DtoValue.cs");
         Assert.Contains("Extended? AsExtended", wrapper);
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void A_Ref_To_A_Property_Less_AllOf_Of_Several_Objects_Is_A_Dictionary()
+    {
+        // MapSchemas writes no record for an allOf whose merged record would hold nothing, so
+        // a $ref to one, as a property or a oneOf variant, is the open object its type says.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "EmptyA": { "type": "object" },
+            "EmptyB": { "type": "object" },
+            "Merged": {
+                "type": "object",
+                "allOf": [ { "$ref": "#/components/schemas/EmptyA" }, { "$ref": "#/components/schemas/EmptyB" } ]
+            },
+            "Other": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "merged": { "$ref": "#/components/schemas/Merged" },
+                    "value": { "oneOf": [ { "$ref": "#/components/schemas/Merged" }, { "$ref": "#/components/schemas/Other" } ] }
+                }
+            }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Merged.cs"));
+        Assert.Contains(
+            "public Dictionary<string, System.Text.Json.JsonElement> Merged",
+            CompilationHelper.FindFile(result, "Dto.cs")
+        );
+        var wrapper = CompilationHelper.FindFile(result, "DtoValue.cs");
+        Assert.Contains("Dictionary<string, System.Text.Json.JsonElement>? AsDictionary", wrapper);
+        Assert.Contains("Other? AsOther", wrapper);
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Theory]
+    // A type that excludes null keeps the value non-nullable.
+    [InlineData(
+        """{ "type": "object", "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/Named" } ] }""",
+        "Named Value"
+    )]
+    // A type that admits null says no more than the $ref beside it.
+    [InlineData(
+        """{ "type": ["object", "null"], "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/Named" } ] }""",
+        "Named? Value"
+    )]
+    // A branch that adds only a format leaves the type to name the value.
+    [InlineData(
+        """{ "type": ["string", "null"], "anyOf": [ { "type": "null" }, { "format": "uuid" } ] }""",
+        "string? Value"
+    )]
+    // A typeless enum branch says what the value is, so its enum stays, nullable.
+    [InlineData(
+        """{ "type": ["string", "null"], "anyOf": [ { "type": "null" }, { "enum": ["a", "b"] } ] }""",
+        "DtoValue? Value"
+    )]
+    public void A_Type_Beside_A_Nullable_Composition_Constrains_The_Value(
+        string valueSchema,
+        string declaration
+    )
+    {
+        // An instance satisfies the type and the composition at once: the value branch names
+        // it when it says what it is, and the type decides whether null is allowed.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: $$"""
+            "Named": { "type": "object", "properties": { "name": { "type": "string" } } },
+            "Dto": { "type": "object", "properties": { "value": {{valueSchema}} } }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains(declaration, CompilationHelper.FindFile(result, "Dto.cs"));
         CompilationHelper.CompileImportResult(result);
     }
 

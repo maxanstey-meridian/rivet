@@ -3910,14 +3910,14 @@ public sealed class CoverageCheckerTests
         "mvc",
         "Search",
         "NoteSearchStruct input",
-        "MVC's model binder can't create it: it needs a public parameterless constructor"
+        "MVC's model binder can't create a struct"
     )]
     [InlineData(
         "mvc",
         "Submit",
         "[FromForm] NoteFormStruct form",
-        "public parameterless constructor, or a record class's one public constructor whose every "
-            + "parameter matches a property by its exact name and type, so MVC fails the request"
+        "MVC's model binder can't create a struct, even one that declares a public parameterless "
+            + "constructor, so MVC fails the request"
     )]
     [InlineData(
         "minimal",
@@ -4469,20 +4469,28 @@ public sealed class CoverageCheckerTests
 
     [Theory]
     // MVC binds into the object a complex member's getter returns, creating none, so neither a
-    // get-only member nor an abstract or constructor-only type stops it, and a non-public
-    // setter is get-only (FormPartNameTests pins it on a real host).
-    [InlineData("public HomeAddress Home { get; } = new();", false)]
-    [InlineData("public HomeAddress Home { get; private set; } = new();", false)]
-    [InlineData("public HomeAddressBase Home { get; } = new UkHomeAddress();", false)]
-    [InlineData("public HomeAddressBase Home { get; set; } = new UkHomeAddress();", false)]
-    [InlineData("public HomeAddressCtor Home { get; } = new(\"x\");", false)]
+    // get-only member nor an abstract (an abstract record's too) or constructor-only type
+    // stops it, and a non-public setter is get-only. FormPartNameTests.Only_MVC_binds_into_a_get_only_complex_member
+    // pins each row on a real MVC host.
+    [InlineData("public HomeAddress Home { get; } = new();", null)]
+    [InlineData("public HomeAddress Home { get; private set; } = new();", null)]
+    [InlineData("public HomeAddressBase Home { get; } = new UkHomeAddress();", null)]
+    [InlineData("public HomeAddressBase Home { get; set; } = new UkHomeAddress();", null)]
+    [InlineData("public HomeRecordBase Home { get; } = new UkHomeRecord(null);", null)]
+    [InlineData("public HomeRecordBase Home { get; set; } = new UkHomeRecord(null);", null)]
+    [InlineData("public HomePublicRecordBase Home { get; } = new UkHomePublicRecord();", null)]
+    [InlineData("public HomeAddressCtor Home { get; } = new(\"x\");", null)]
     // Null, made on each read, or a positional record MVC rebuilds and drops: nothing binds.
-    [InlineData("public HomeAddress? Home { get; }", true)]
-    [InlineData("public HomeAddress Home => new();", true)]
-    [InlineData("public HomeAddressRecord Home { get; } = new(null);", true)]
+    [InlineData("public HomeAddress? Home { get; }", "(not bound)")]
+    [InlineData("public HomeAddress Home => new();", "(not bound)")]
+    [InlineData("public HomeAddressRecord Home { get; } = new(null);", "(not bound)")]
+    // A struct member, settable or get-only: the request succeeds, but MVC sets none of the
+    // struct's properties, so it's reported once, as a type to make a class.
+    [InlineData("public HomeStruct Home { get; set; }", "Test.HomeStruct")]
+    [InlineData("public HomeStruct Home { get; } = new();", "Test.HomeStruct")]
     public void An_MVC_get_only_complex_member_binds_only_when_its_initializer_creates_it(
         string member,
-        bool reported
+        string? reported
     )
     {
         var contract = """
@@ -4525,6 +4533,24 @@ public sealed class CoverageCheckerTests
 
                 public sealed record HomeAddressRecord(string? City);
 
+                public abstract record HomeRecordBase(string? City);
+
+                public sealed record UkHomeRecord(string? City) : HomeRecordBase(City);
+
+                public abstract record HomePublicRecordBase
+                {
+                    public HomePublicRecordBase(string? City) => this.City = City;
+
+                    public string? City { get; init; }
+                }
+
+                public sealed record UkHomePublicRecord() : HomePublicRecordBase((string?)null);
+
+                public struct HomeStruct
+                {
+                    public string? City { get; set; }
+                }
+
                 public sealed class Box
                 {
                     {{member}}
@@ -4540,16 +4566,28 @@ public sealed class CoverageCheckerTests
 
         var mismatches = InputMismatches(RunCheck(InputContract, contract, types, handler), "Move");
 
-        if (reported)
+        switch (reported)
         {
-            Assert.Contains(
-                mismatches,
-                warning => warning is { Expected: "form field 'home'", Actual: "(not bound)" }
-            );
-        }
-        else
-        {
-            Assert.Empty(mismatches);
+            case null:
+                Assert.Empty(mismatches);
+                break;
+            case "(not bound)":
+                Assert.Contains(
+                    mismatches,
+                    warning => warning is { Expected: "form field 'home'", Actual: "(not bound)" }
+                );
+                break;
+            default:
+                var mismatch = Assert.Single(mismatches);
+                Assert.Equal("a type the host can create", mismatch.Expected);
+                Assert.Equal(reported, mismatch.Actual);
+                Assert.Contains(
+                    "handler parameter 'box.Home' (Test.HomeStruct) can't be bound: MVC's model "
+                        + "binder sets no property of a struct, so the handler never sees what the "
+                        + "request sends for it.",
+                    mismatch.Message
+                );
+                break;
         }
     }
 
