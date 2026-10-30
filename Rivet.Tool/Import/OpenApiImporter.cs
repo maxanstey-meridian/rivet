@@ -915,11 +915,14 @@ public static partial class OpenApiImporter
         );
 
     /// <summary>
-    /// A oneOf or anyOf whose every branch adds nothing to the object schema around it (a
-    /// branch that is empty or says only <c>type: object</c>) matches every instance the
-    /// schema already does, so the schema is read without it, as the object it is (Vercel's
-    /// <c>connectConfigurations</c> item). Read as a union, its wrapper would drop the
-    /// object's own members and closure.
+    /// A oneOf or anyOf whose branches add nothing to the object schema around it (each is
+    /// empty, or says only <c>type: object</c>) is read away, so the schema is the object it is
+    /// (Vercel's <c>connectConfigurations</c> item). Read as a union, its wrapper would drop the
+    /// object's own members and closure. A oneOf qualifies with one such branch only: every
+    /// object matches each of two, so a oneOf of two satisfies none. When every branch says
+    /// <c>type: object</c>, the composition refuses null, so a null the schema admits
+    /// (<c>nullable</c>, or <c>"null"</c> in its type) is taken away with it. The raw schema
+    /// provenance is read before this, so the emitted spec keeps the schema as written.
     /// </summary>
     private static void DropCompositionsThatAddNothing(JsonObject root) =>
         OpenApiStructure.VisitObjects(
@@ -927,27 +930,47 @@ public static partial class OpenApiImporter
             IsSwagger2(root),
             (obj, _) =>
             {
-                if (StringValue(obj["type"]) != "object" && obj["properties"] is not JsonObject)
+                var types = obj["type"] switch
+                {
+                    JsonArray array => array.Select(StringValue).ToList(),
+                    var single when StringValue(single) is { } type => [type],
+                    _ => [],
+                };
+                var isObject =
+                    types.Count == 0
+                        ? obj["properties"] is JsonObject
+                        : types.Contains("object") && types.All(type => type is "object" or "null");
+                if (!isObject)
                 {
                     return;
                 }
                 foreach (var composition in new[] { "oneOf", "anyOf" })
                 {
                     if (
-                        obj[composition] is JsonArray { Count: > 0 } branches
-                        && branches.All(branch =>
-                            branch is JsonObject parts
-                            && parts.All(part =>
-                                part.Key == "type" && StringValue(part.Value) == "object"
-                            )
+                        obj[composition] is not JsonArray { Count: > 0 } branches
+                        || composition == "oneOf" && branches.Count != 1
+                        || !branches.All(branch =>
+                            branch is JsonObject { Count: 0 } || IsObjectOnly(branch)
                         )
                     )
                     {
-                        obj.Remove(composition);
+                        continue;
+                    }
+                    obj.Remove(composition);
+                    if (branches.All(IsObjectOnly))
+                    {
+                        obj.Remove("nullable");
+                        if (obj["type"] is JsonArray)
+                        {
+                            obj["type"] = "object";
+                        }
                     }
                 }
             }
         );
+
+    private static bool IsObjectOnly(JsonNode? branch) =>
+        branch is JsonObject { Count: 1 } only && StringValue(only["type"]) == "object";
 
     private static void MarkEnumNullMembers(JsonObject root) =>
         OpenApiStructure.VisitObjects(

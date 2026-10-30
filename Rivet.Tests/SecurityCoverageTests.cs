@@ -1338,6 +1338,24 @@ public sealed class SecurityCoverageTests
     }
 
     [Fact]
+    public void A_convention_on_what_an_overridden_method_returns_is_unreadable()
+    {
+        // The call runs Real's override, whose group opens to anyone; the base body's /a
+        // group isn't the one AllowAnonymous reaches.
+        var warnings = Check(
+            Contract(assembly: SecuredDefault),
+            App(
+                "ModuleBase m = new Real(); m.Map(app).AllowAnonymous();",
+                "public class ModuleBase { public virtual RouteGroupBuilder Map(WebApplication app) => app.MapGroup(\"/a\"); }\n"
+                    + "public sealed class Real : ModuleBase { public override RouteGroupBuilder Map(WebApplication app) "
+                    + $"{{ var g = app.MapGroup(\"/api\").RequireAuthorization(); g.MapGet(\"/items\", {Handler}); return g; }} }}"
+            )
+        );
+
+        AssertVerdict(warnings, "RIV4009");
+    }
+
+    [Fact]
     public void A_convention_on_what_an_interface_method_returns_is_unreadable()
     {
         // IApi.Map has no body to follow, and its implementation makes the endpoint's group.
@@ -1354,69 +1372,90 @@ public sealed class SecurityCoverageTests
         AssertVerdict(warnings, "RIV4009");
     }
 
-    [Fact]
-    public void A_convention_on_what_a_library_call_returns_for_a_builder_is_unreadable()
+    private const string LibraryGroup =
+        $"var api = app.MapGroup(\"/api\"); api.MapGet(\"/items\", {Handler});";
+
+    private const string LibraryModule =
+        $"{{ var g = app.MapGroup(\"/api\"); g.MapGet(\"/items\", {Handler}); return g; }} }}";
+
+    [Theory]
+    // Wrap is handed the group as a route builder and returns one: it may hand it back.
+    [InlineData(
+        "public static class Routes { public static RouteGroupBuilder Wrap(IEndpointRouteBuilder builder) => (RouteGroupBuilder)builder; }",
+        LibraryGroup + " Lib.Routes.Wrap(api).RequireAuthorization();",
+        "",
+        ".Anonymous()",
+        "RIV4009"
+    )]
+    // Tag is handed the group as a convention builder: it may hand that back.
+    [InlineData(
+        "public static class Routes { public static IEndpointConventionBuilder Tag(RouteGroupBuilder group) => group; }",
+        LibraryGroup + " Lib.Routes.Tag(api).RequireAuthorization();",
+        "",
+        ".Anonymous()",
+        "RIV4009"
+    )]
+    // The library's interface is implemented by the project, whose Map makes the group.
+    [InlineData(
+        "public interface IModule { RouteGroupBuilder Map(); }",
+        "Lib.IModule module = new Module(app); module.Map().RequireAuthorization();",
+        "public sealed class Module(WebApplication app) : Lib.IModule { public RouteGroupBuilder Map() "
+            + LibraryModule,
+        ".Anonymous()",
+        "RIV4009"
+    )]
+    // So is a virtual method the project overrides.
+    [InlineData(
+        "public abstract class ModuleBase { public virtual RouteGroupBuilder Map() => throw new System.NotSupportedException(); }",
+        "Lib.ModuleBase module = new Module(app); module.Map().RequireAuthorization();",
+        "public sealed class Module(WebApplication app) : Lib.ModuleBase { public override RouteGroupBuilder Map() "
+            + LibraryModule,
+        ".Anonymous()",
+        "RIV4009"
+    )]
+    // So is an override the project overrides again.
+    [InlineData(
+        "public abstract class ModuleBase { public virtual RouteGroupBuilder Map() => throw new System.NotSupportedException(); }"
+            + " public class Module2 : ModuleBase { public override RouteGroupBuilder Map() => throw new System.NotSupportedException(); }",
+        "Lib.Module2 module = new Module(app); module.Map().RequireAuthorization();",
+        "public sealed class Module(WebApplication app) : Lib.Module2 { public override RouteGroupBuilder Map() "
+            + LibraryModule,
+        ".Anonymous()",
+        "RIV4009"
+    )]
+    // Health maps an endpoint of its own and returns only its convention builder, as
+    // MapHealthChecks does: the requirement covers none of the contract's.
+    [InlineData(
+        "public static class Routes { public static IEndpointConventionBuilder Health(IEndpointRouteBuilder endpoints) => endpoints.MapGet(\"/health\", () => \"ok\"); }",
+        $"app.MapGet(\"/api/items\", {Handler}); Lib.Routes.Health(app).RequireAuthorization();",
+        "",
+        "",
+        Case1
+    )]
+    public void A_convention_on_what_a_library_call_returns(
+        string library,
+        string body,
+        string members,
+        string security,
+        string expected
+    )
     {
-        // Wrap takes the group as an IEndpointRouteBuilder and may hand it back.
-        var library = CompilationHelper
-            .CreateFrameworkCompilation(
-                OutputKind.DynamicallyLinkedLibrary,
-                """
-                using Microsoft.AspNetCore.Routing;
-
-                namespace Lib;
-
-                public static class Routes
-                {
-                    public static RouteGroupBuilder Wrap(IEndpointRouteBuilder builder) =>
-                        (RouteGroupBuilder)builder;
-                }
-                """
-            )
-            .WithAssemblyName("Lib");
-        using var image = new MemoryStream();
-        Assert.True(library.Emit(image).Success);
-        var mapping = $$"""
-            using Microsoft.AspNetCore.Builder;
-            using Microsoft.AspNetCore.Http;
-            using Rivet;
-
-            namespace Test;
-
-            public static class Mapping
-            {
-                public static void Map(WebApplication app)
-                {
-                    var api = app.MapGroup("/api");
-                    api.MapGet("/items", {{Handler}});
-                    Lib.Routes.Wrap(api).RequireAuthorization();
-                }
-            }
-            """;
-        var app = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
-            "App",
-            new[]
-            {
-                Program("var app = builder.Build(); Mapping.Map(app); app.Run();"),
-                Contract(".Anonymous()", SecuredDefault),
-                mapping,
-            }.Select(source =>
-                Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(
-                    source,
-                    new Microsoft.CodeAnalysis.CSharp.CSharpParseOptions(
-                        Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest
-                    )
-                )
-            ),
-            [.. library.References, MetadataReference.CreateFromImage(image.ToArray())],
-            new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
+        var warnings = CompilationHelper.CheckCoverage(
+            CompilationHelper.CreateFrameworkCompilation(
                 OutputKind.ConsoleApplication,
-                nullableContextOptions: NullableContextOptions.Enable
+                [
+                    CompilationHelper.FrameworkLibrary(
+                        "using Microsoft.AspNetCore.Builder;\nusing Microsoft.AspNetCore.Routing;\n"
+                            + "namespace Lib;\n"
+                            + library
+                    ),
+                ],
+                Contract(security, SecuredDefault),
+                App(body, members)
             )
         );
-        Assert.Empty(app.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error));
 
-        AssertVerdict(CompilationHelper.CheckCoverage(app), "RIV4009");
+        AssertVerdict(warnings, expected);
     }
 
     [Fact]

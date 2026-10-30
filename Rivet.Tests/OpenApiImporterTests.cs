@@ -7065,39 +7065,86 @@ public sealed class OpenApiImporterTests
     }
 
     /// <summary>
-    /// A oneOf whose every branch adds nothing to the object around it (Vercel's
-    /// <c>connectConfigurations</c> item) is that object: a closed record with its members.
-    /// A branch that adds anything keeps the union.
+    /// A oneOf or anyOf whose every branch adds nothing to the object around it (Vercel's
+    /// <c>connectConfigurations</c> item) is that object: a closed record with its members, and
+    /// the emitted spec keeps the composition as written. A <c>type: object</c> branch refuses
+    /// null, so on a schema that admits null it takes the null away rather than widening the
+    /// member; an empty branch leaves it. A branch that adds anything keeps the union; so do a
+    /// schema that isn't itself an object, where the composition is what says "object", and a
+    /// oneOf of two branches every object matches, which no object satisfies.
     /// </summary>
     [Theory]
-    [InlineData("""{ "type": "object" }""", false)]
-    [InlineData("{}", false)]
-    [InlineData("""{ "type": "object", "properties": { "x": { "type": "string" } } }""", true)]
-    public void Composition_That_Adds_Nothing_Is_The_Object_It_Composes(string branch, bool union)
+    [InlineData("3.1.0", "", "oneOf", """{ "type": "object" }""", "record")]
+    [InlineData("3.1.0", "", "oneOf", "{}", "record")]
+    [InlineData("3.1.0", "", "anyOf", "{}", "record")]
+    [InlineData("3.1.0", "", "anyOf", """{ "type": "object" }, {}""", "record")]
+    [InlineData("3.1.0", "", "oneOf", """{ "type": "object" }, {}""", "union")]
+    [InlineData(
+        "3.1.0",
+        "",
+        "oneOf",
+        """{ "type": "object", "properties": { "x": { "type": "string" } } }""",
+        "union"
+    )]
+    [InlineData("3.1.0", "bare", "oneOf", """{ "type": "object" }""", "union")]
+    [InlineData(
+        "3.0.3",
+        "\"nullable\": true, \"type\": \"object\",",
+        "oneOf",
+        """{ "type": "object" }""",
+        "record"
+    )]
+    [InlineData(
+        "3.1.0",
+        "\"type\": [\"object\", \"null\"],",
+        "anyOf",
+        """{ "type": "object" }""",
+        "record"
+    )]
+    [InlineData("3.0.3", "\"nullable\": true, \"type\": \"object\",", "oneOf", "{}", "nullable")]
+    public void Composition_That_Adds_Nothing_Is_The_Object_It_Composes(
+        string openApi,
+        string around,
+        string composition,
+        string branches,
+        string expect
+    )
     {
-        var spec = CompilationHelper.BuildSpec(
-            schemas: $$"""
-            "Project": {
-                "type": "object",
-                "properties": {
-                    "connectConfigurations": {
-                        "type": "array",
-                        "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                                "envId": { "type": "string" },
-                                "connectConfigurationId": { "type": "string" },
-                                "passive": { "type": "boolean" },
-                                "buildsEnabled": { "type": "boolean" }
-                            },
-                            "required": ["envId", "connectConfigurationId", "passive", "buildsEnabled"],
-                            "oneOf": [{{branch}}]
+        var members =
+            around == "bare"
+                ? ""
+                : """
+                    "properties": {
+                        "envId": { "type": "string" },
+                        "connectConfigurationId": { "type": "string" },
+                        "passive": { "type": "boolean" },
+                        "buildsEnabled": { "type": "boolean" }
+                    },
+                    "required": ["envId", "connectConfigurationId", "passive", "buildsEnabled"],
+                    """;
+        var spec = $$"""
+            {
+              "openapi": "{{openApi}}",
+              "info": { "title": "Test", "version": "1.0.0" },
+              "components": { "schemas": {
+                "Project": {
+                    "type": "object",
+                    "properties": {
+                        "connectConfigurations": {
+                            "type": "array",
+                            "items": {
+                                {{(around == "bare" ? "" : around)}}
+                                {{members}}
+                                "additionalProperties": false,
+                                "{{composition}}": [{{branches}}]
+                            }
                         }
                     }
                 }
+              } },
+              "paths": {}
             }
-            """
-        );
+            """;
 
         var result = CompilationHelper.Import(spec);
 
@@ -7107,15 +7154,18 @@ public sealed class OpenApiImporterTests
         var types = result
             .Files.Where(file => file.FileName.StartsWith("Types/", StringComparison.Ordinal))
             .ToList();
-        if (union)
+        var project = Assert.Single(types, file => file.FileName == "Types/Project.cs");
+        if (expect == "union")
         {
             Assert.Single(closed);
             Assert.Contains(types, file => file.Content.Contains("[RivetUnion]"));
             return;
         }
+        // The item admits null only where every branch does.
+        Assert.Equal(expect == "nullable", project.Content.Contains("?>"));
         Assert.Empty(closed);
         Assert.DoesNotContain(types, file => file.Content.Contains("RivetUnion"));
-        var item = Assert.Single(types, file => file.FileName != "Types/Project.cs");
+        var item = Assert.Single(types, file => file != project);
         Assert.Contains(
             "[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]",
             item.Content
@@ -7134,6 +7184,23 @@ public sealed class OpenApiImporterTests
             Assert.Contains(member, item.Content);
         }
         Assert.DoesNotContain("?", item.Content.Split("record", 2)[1]);
+
+        // The spec keeps the schema as written: the composition, and any nullable or "null"
+        // type the import took away with it.
+        using var workDirectory = new TempDir();
+        var sourcePath = Path.Combine(workDirectory.FullName, "source.json");
+        File.WriteAllText(sourcePath, spec);
+        var emitted = RealCliOpenApiPass.ImportAndEmit(workDirectory.FullName, sourcePath, "first");
+        static JsonNode? Item(JsonNode document) =>
+            document["components"]!["schemas"]!["Project"]!["properties"]![
+                "connectConfigurations"
+            ]!["items"];
+        var written = Item(JsonNode.Parse(spec)!);
+        var reemitted = Item(emitted);
+        Assert.True(
+            JsonNode.DeepEquals(written, reemitted),
+            $"written {written?.ToJsonString()}, emitted {reemitted?.ToJsonString()}"
+        );
     }
 
     /// <summary>

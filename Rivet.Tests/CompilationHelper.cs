@@ -25,14 +25,58 @@ public static class CompilationHelper
     /// Rivet.Attributes, nullable enabled, as a library or a console app (for top-level
     /// statements).
     /// </summary>
-    public static Compilation CreateFrameworkCompilation(OutputKind kind, params string[] sources)
+    public static Compilation CreateFrameworkCompilation(
+        OutputKind kind,
+        params string[] sources
+    ) => CreateFrameworkCompilation(kind, [], sources);
+
+    /// <summary>
+    /// <see cref="CreateFrameworkCompilation(OutputKind, string[])"/>, also referencing
+    /// <paramref name="references"/>, such as a <see cref="FrameworkLibrary"/>.
+    /// </summary>
+    public static Compilation CreateFrameworkCompilation(
+        OutputKind kind,
+        IEnumerable<MetadataReference> references,
+        params string[] sources
+    ) => CreateFrameworkCompilation("FrameworkApp", kind, references, sources);
+
+    /// <summary>
+    /// A library compiled from <paramref name="source"/> against the shared frameworks, as a
+    /// reference without source: what an app sees of a NuGet package.
+    /// </summary>
+    public static MetadataReference FrameworkLibrary(string source)
+    {
+        using var image = new MemoryStream();
+        var emitted = CreateFrameworkCompilation(
+                "Lib",
+                OutputKind.DynamicallyLinkedLibrary,
+                [],
+                [source]
+            )
+            .Emit(image);
+        if (!emitted.Success)
+        {
+            throw new InvalidOperationException(
+                $"Test library doesn't emit:\n{string.Join("\n", emitted.Diagnostics)}"
+            );
+        }
+
+        return MetadataReference.CreateFromImage(image.ToArray());
+    }
+
+    private static Compilation CreateFrameworkCompilation(
+        string assemblyName,
+        OutputKind kind,
+        IEnumerable<MetadataReference> references,
+        string[] sources
+    )
     {
         var compilation = CSharpCompilation.Create(
-            "FrameworkApp",
+            assemblyName,
             sources.Select(source =>
                 CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Latest))
             ),
-            _frameworkReferences.Value,
+            [.. _frameworkReferences.Value, .. references],
             new CSharpCompilationOptions(
                 kind,
                 nullableContextOptions: NullableContextOptions.Enable

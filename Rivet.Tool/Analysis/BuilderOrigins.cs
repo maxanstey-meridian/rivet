@@ -24,6 +24,8 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
         (List<IInvocationOperation>, List<ExpressionSyntax>)
     > _calls = new(SymbolEqualityComparer.Default);
 
+    private HashSet<IMethodSymbol>? _overridden;
+
     // ---------------------------------------------------------------
     // The trace
     // ---------------------------------------------------------------
@@ -52,6 +54,8 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                     : [Ends(TraceEnd.Untraced)];
             case IInvocationOperation call when IsMapCall(call):
                 return [Ends(TraceEnd.Made)];
+            case IInvocationOperation call when Dispatches(call):
+                return [Ends(TraceEnd.Untraced)];
             case IInvocationOperation call when call.TargetMethod.SourceBody() is { } body:
                 // A helper reached again inside its own answer nests by recursion, to a depth
                 // --check can't fix: the trace ends there.
@@ -464,13 +468,67 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
             };
 
     /// <summary>
+    /// Whether <paramref name="call"/> is to a method with source that dispatches to another
+    /// implementation the project declares: a virtual, abstract, or interface member, or an
+    /// unsealed override, that some type in the compilation overrides or implements, called
+    /// virtually (<c>base.M()</c> isn't). Its own body is one of several that may run, so it
+    /// can't be followed. A virtual helper nothing overrides is followed like any other.
+    /// Methods without source are <see cref="MayHandBack"/>'s.
+    /// </summary>
+    private bool Dispatches(IInvocationOperation call) =>
+        call.IsVirtual
+        && call.TargetMethod.SourceBody() is not null
+        && Overridden().Contains(call.TargetMethod.OriginalDefinition);
+
+    // Every method a source type overrides or implements, found once.
+    private HashSet<IMethodSymbol> Overridden()
+    {
+        if (_overridden is not null)
+        {
+            return _overridden;
+        }
+
+        _overridden = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+        foreach (var type in GetAllTypes(compilation.Assembly.GlobalNamespace))
+        {
+            foreach (var method in type.GetMembers().OfType<IMethodSymbol>())
+            {
+                for (var overridden = method.OverriddenMethod; overridden is not null; )
+                {
+                    _overridden.Add(overridden.OriginalDefinition);
+                    overridden = overridden.OverriddenMethod;
+                }
+            }
+
+            foreach (
+                var member in type.AllInterfaces.SelectMany(face =>
+                    face.GetMembers().OfType<IMethodSymbol>()
+                )
+            )
+            {
+                if (
+                    type.FindImplementationForInterfaceMember(member)
+                        is IMethodSymbol implementation
+                    && !SymbolEqualityComparer.Default.Equals(implementation, member)
+                )
+                {
+                    _overridden.Add(member.OriginalDefinition);
+                }
+            }
+        }
+
+        return _overridden;
+    }
+
+    /// <summary>
     /// Whether a call --check can't follow (no body, and not <see cref="PassedBuilder"/>'s
     /// pass-through) may hand back a builder the project made, so the trace ends untraced
     /// rather than at a builder the call made of its own:
     /// <list type="bullet">
     /// <item>a delegate, which may return a builder it captured;</item>
-    /// <item>a method the project declares without a body (an interface or abstract method),
-    /// whose implementations may return any builder the project made;</item>
+    /// <item>an interface, abstract, or virtual method, wherever it's declared (any
+    /// implementation may be the project's, returning any builder the project made), or one
+    /// the project declares without a body;</item>
     /// <item>a call on, or given, a convention builder (a group or an endpoint's builder);</item>
     /// <item>a call given a route builder (the app or a group) that returns one, as
     /// <c>Lib.Wrap(IEndpointRouteBuilder)</c> returning a <c>RouteGroupBuilder</c> may hand
@@ -489,6 +547,9 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
             .. method.Parameters.Select(parameter => parameter.Type),
         ];
         return call.TargetMethod.MethodKind == MethodKind.DelegateInvoke
+            || method.IsAbstract
+            || method.IsVirtual
+            || (method.IsOverride && !method.IsSealed)
             || !method.OriginalDefinition.DeclaringSyntaxReferences.IsEmpty
             || given.Any(type => type.Implements(wkt.EndpointConventionBuilder))
             || (
@@ -627,7 +688,7 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
     /// enclosing function declares. A helper it can't follow that way counts as reaching
     /// outside, which can only add the function's call conditions.
     /// </summary>
-    private static bool Captures(IOperation receiver, IMethodSymbol function)
+    private bool Captures(IOperation receiver, IMethodSymbol function)
     {
         var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
         var entered = new HashSet<SyntaxNode>();
@@ -647,6 +708,9 @@ internal sealed class BuilderOrigins(Compilation compilation, WellKnownTypes wkt
                         && Reaches(provenance);
                 case IParameterReferenceOperation parameter:
                     return !Within(parameter.Parameter);
+                // Another implementation may run: it can't be followed.
+                case IInvocationOperation call when Dispatches(call):
+                    return true;
                 // Each call once: one met again inside its own answer adds nothing new.
                 case IInvocationOperation call when call.TargetMethod.SourceBody() is { } body:
                     return entered.Add(call.Syntax)

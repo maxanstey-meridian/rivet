@@ -169,9 +169,10 @@ by its pointer when it's inline) and why:
   would turn the variant's own tag away wherever it's read on its own;
 - a `oneOf` or `anyOf` union with a variant that can be an object, whose members come from its
   variants, which the union's own `false` refuses. A union of scalars loses nothing, since
-  `additionalProperties` constrains only objects. And a `oneOf` or `anyOf` whose every branch is
-  empty or says only `type: object`, beside an object's own properties, adds nothing, so that
-  object imports as its closed record instead;
+  `additionalProperties` constrains only objects. And a one-branch `oneOf`, or an `anyOf`, whose
+  branches are each empty or say only `type: object`, beside an object's own properties, adds
+  nothing, so that object imports as its closed record instead. When every branch says
+  `type: object`, the record refuses null too, as the branches do, even on a `nullable` object;
 - a generic template instance, when the same template also serves instances that aren't closed,
   since one C# type serves them all.
 
