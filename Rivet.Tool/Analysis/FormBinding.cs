@@ -178,13 +178,15 @@ internal static class FormBinding
     /// read, or holding a read-only or immutable collection stays unbound.</item>
     /// <item>The complex binder binds a complex member's own members into the object, and
     /// creates one only when the getter returns null, which a get-only property throws away.
-    /// So a get-only complex member counts only when it's an auto-property whose initializer
-    /// creates the object, as <c>Address Home { get; } = new();</c> does.</item>
+    /// So a get-only complex member counts only when MVC fills it in place
+    /// (<see cref="FillsInPlace"/>), as it does <c>Address Home { get; } = new();</c>.</item>
     /// </list>
-    /// Any other member a binder replaces, and with no setter the new value is thrown away, so
-    /// a get-only <c>IFormFile</c> stays unbound. Pinned on real hosts by
-    /// <c>FormPartNameTests.The_hosts_skip_these_members_differently</c> and
-    /// <c>The_hosts_construct_these_types_differently</c>.
+    /// A property with a non-public setter or init accessor is get-only to both binders. Any
+    /// other member a binder replaces, and with no setter the new value is thrown away, so a
+    /// get-only <c>IFormFile</c> stays unbound. Pinned on real hosts by
+    /// <c>FormPartNameTests.The_hosts_skip_these_members_differently</c>,
+    /// <c>The_hosts_construct_these_types_differently</c>, and
+    /// <c>Only_MVC_binds_into_a_get_only_complex_member</c>.
     /// </summary>
     private static bool Sets(WellKnownTypes wkt, Binder binder, IPropertySymbol property) =>
         property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
@@ -198,8 +200,28 @@ internal static class FormBinding
                             property.Type,
                             ParameterBindingHost.Mvc
                         )
-                        && AutoPropertyInitializer(property) is BaseObjectCreationExpressionSyntax
+                        && FillsInPlace(wkt, property)
             );
+
+    /// <summary>
+    /// Whether MVC binds a complex <paramref name="property"/>'s members into the object it
+    /// already holds: an auto-property whose initializer creates the object, of a type MVC
+    /// has no record constructor for (<see cref="BoundConstructor"/>). ComplexObjectModelBinder
+    /// hands a complex member's current value down as its model and creates one only when
+    /// that's null, so it never asks whether it could create the type (an abstract one, or
+    /// one whose only constructor takes parameters, is filled all the same) and binds only
+    /// the properties it can set or fill. A record constructor is the exception: MVC builds a
+    /// new record from it, ignoring the value it was handed, which a get-only property then
+    /// throws away. Pinned on a real host by
+    /// <c>FormPartNameTests.Only_MVC_binds_into_a_get_only_complex_member</c>.
+    /// </summary>
+    internal static bool FillsInPlace(WellKnownTypes wkt, IPropertySymbol property) =>
+        AutoPropertyInitializer(property) is BaseObjectCreationExpressionSyntax
+        && (
+            property.Type is not INamedTypeSymbol type
+            || BoundConstructor(type, FormBoundProperties(wkt.Compilation, type), Binder.Mvc)
+                is null
+        );
 
     /// <summary>
     /// A type MVC binds through the getter of a get-only property and then fills in place
@@ -254,9 +276,9 @@ internal static class FormBinding
     }
 
     /// <summary>
-    /// The initializer of <paramref name="property"/> when it's an auto-property (a
-    /// <c>get;</c> with no body) declared in source, so the value its getter returns is the
-    /// one the initializer made; null otherwise.
+    /// The initializer of <paramref name="property"/> when it's an auto-property (accessors
+    /// with no body, as in <c>{ get; }</c> or <c>{ get; private set; }</c>) declared in source,
+    /// so the value its getter returns is the one the initializer made; null otherwise.
     /// </summary>
     private static ExpressionSyntax? AutoPropertyInitializer(IPropertySymbol property) =>
         property.DeclaringSyntaxReferences is [var reference]
@@ -264,8 +286,9 @@ internal static class FormBinding
             is PropertyDeclarationSyntax
             {
                 Initializer.Value: var value,
-                AccessorList.Accessors: [{ Body: null, ExpressionBody: null }],
+                AccessorList.Accessors: var accessors,
             }
+        && accessors.All(accessor => accessor is { Body: null, ExpressionBody: null })
             ? value
             : null;
 
@@ -516,19 +539,20 @@ internal static class FormBinding
                     dropped == Binder.Mvc
                         ? ("MVC's model binder", "the minimal-API form mapper")
                         : ("the minimal-API form mapper", "MVC's model binder");
+                // A skip first: a setter wouldn't settle a member the dropping host skips.
                 var (why, remedy) =
-                    !Sets(wkt, dropped, property) && Sets(wkt, kept, property)
+                    Skips(wkt, dropped, property) is { } skippedBy
+                        ? (
+                            $"skipped by {droppedBy} ({skippedBy}) but bound by {keptBy}",
+                            "Skip it for both ([BindNever] and [IgnoreDataMember]) or neither."
+                        )
+                    : !Sets(wkt, dropped, property) && Sets(wkt, kept, property)
                         ? (
                             $"bound by {keptBy}, which fills the "
                                 + (IsCollection(property.Type) ? "collection" : "object")
                                 + $" its getter returns, but left unset by {droppedBy}, which needs "
                                 + "a public setter or init accessor",
                             "Give it a public setter or init accessor."
-                        )
-                    : Skips(wkt, dropped, property) is { } skippedBy
-                        ? (
-                            $"skipped by {droppedBy} ({skippedBy}) but bound by {keptBy}",
-                            "Skip it for both ([BindNever] and [IgnoreDataMember]) or neither."
                         )
                     : throw new UnreachableException(
                         $"'{property.Name}' is dropped by {droppedBy} for a reason Parts can't explain"

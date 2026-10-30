@@ -1434,9 +1434,10 @@ public static class ContractWalker
     /// <summary>
     /// A route, query, header or form-field param lowered from an input member, carrying what
     /// the member's schema would if it were a body property (<see cref="TypeWalker.AnnotatedParam"/>:
-    /// annotations, schema refs and generated item metadata included). The leaf already holds
-    /// [RivetSchemaType] and the format, so the param doesn't pin SchemaType: the emitter's
-    /// pinned-leaf path would drop the inferred format the body keeps.
+    /// annotations, schema refs, and the generated metadata at its own schema and its items
+    /// included). The leaf already holds [RivetSchemaType] and the format, so the param
+    /// doesn't pin SchemaType: the emitter's pinned-leaf path would drop the inferred format
+    /// the body keeps.
     /// </summary>
     private static TsEndpointParam LoweredParam(
         TypeWalker typeWalker,

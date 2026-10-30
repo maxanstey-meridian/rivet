@@ -403,14 +403,25 @@ internal static class SchemaClassifier
 
     /// <summary>
     /// Whether a property-less object component imports as an empty record rather than a
-    /// dictionary: it says nothing about extra keys, or it carries Rivet's empty-record marker
-    /// beside the <c>additionalProperties</c> its <c>[JsonExtensionData]</c> bag writes.
-    /// MapSchemas writes the record and every <c>$ref</c> resolves to it by this one rule.
+    /// dictionary: it composes nothing, and it says nothing about extra keys or carries Rivet's
+    /// empty-record marker beside the <c>additionalProperties</c> its <c>[JsonExtensionData]</c>
+    /// bag writes. MapSchemas writes the record and every <c>$ref</c> resolves to it by this one
+    /// rule.
     /// </summary>
     internal static bool IsEmptyRecordComponent(IOpenApiSchema schema) =>
         IsObject(schema)
+        && !IsComposition(schema)
         && schema.Properties is not { Count: > 0 }
         && (schema.AdditionalProperties is null || HasExtension(schema, "x-rivet-empty-record"));
+
+    /// <summary>
+    /// Whether MapSchemas maps a component by one of its composition branches (an allOf, a
+    /// oneOf, or an anyOf of more than one), which it takes before the plain-object branch.
+    /// </summary>
+    internal static bool IsComposition(IOpenApiSchema schema) =>
+        schema.AllOf is { Count: > 0 }
+        || schema.OneOf is { Count: > 0 }
+        || schema.AnyOf is { Count: > 1 };
 
     internal static bool HasExtension(IOpenApiSchema schema, string key)
     {

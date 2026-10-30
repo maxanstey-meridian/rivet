@@ -5941,6 +5941,126 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void A_Ref_To_A_Nullable_OneOf_Object_Component_Names_The_Type_Its_OneOf_Holds()
+    {
+        // MapSchemas writes no record for a nullable oneOf component, so a $ref to one, as a
+        // property or a oneOf variant, is the nullable type it holds, never a record named
+        // after the component.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Named": { "type": "object", "properties": { "name": { "type": "string" } } },
+            "Other": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "Maybe": {
+                "type": ["object", "null"],
+                "oneOf": [ { "type": "null" }, { "$ref": "#/components/schemas/Named" } ]
+            },
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "maybe": { "$ref": "#/components/schemas/Maybe" },
+                    "value": { "oneOf": [ { "$ref": "#/components/schemas/Maybe" }, { "$ref": "#/components/schemas/Other" } ] }
+                }
+            }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.DoesNotContain(result.Files, f => f.FileName.EndsWith("Maybe.cs"));
+        Assert.Contains("public Named? Maybe", CompilationHelper.FindFile(result, "Dto.cs"));
+        var wrapper = CompilationHelper.FindFile(result, "DtoValue.cs");
+        Assert.Contains("Named? AsNamed", wrapper);
+        Assert.Contains("Other? AsOther", wrapper);
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
+    public void A_Ref_To_A_Nullable_Empty_Object_Component_Is_Its_Record_Nullable()
+    {
+        // A component that admits null makes every bare $ref to it nullable, an empty record's
+        // and a dictionary's as much as any other record's.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Blank": { "type": ["object", "null"] },
+            "Bag": { "type": ["object", "null"], "additionalProperties": { "type": "string" } },
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "blank": { "$ref": "#/components/schemas/Blank" },
+                    "bag": { "$ref": "#/components/schemas/Bag" }
+                },
+                "required": ["blank", "bag"]
+            }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains("record Blank", CompilationHelper.FindFile(result, "Blank.cs"));
+        var dto = CompilationHelper.FindFile(result, "Dto.cs");
+        Assert.Contains("public required Blank? Blank", dto);
+        Assert.Contains("public required Dictionary<string, string>? Bag", dto);
+        using var emitted = CompilationHelper.EmitImported(result);
+        var schemas = emitted.RootElement.GetProperty("components").GetProperty("schemas");
+        var dtoProperties = schemas.GetProperty("Dto").GetProperty("properties");
+        Assert.Equal(
+            "#/components/schemas/Blank",
+            dtoProperties.GetProperty("blank").GetProperty("$ref").GetString()
+        );
+        Assert.Equal(
+            """["object","null"]""",
+            JsonNode
+                .Parse(schemas.GetProperty("Blank").GetProperty("type").GetRawText())!
+                .ToJsonString()
+        );
+        Assert.Equal(
+            """["object","null"]""",
+            JsonNode
+                .Parse(dtoProperties.GetProperty("bag").GetProperty("type").GetRawText())!
+                .ToJsonString()
+        );
+    }
+
+    [Fact]
+    public void A_Ref_To_A_Property_Less_AllOf_Object_With_Additional_Properties_Names_Its_Record()
+    {
+        // MapSchemas writes an allOf component as its merged record whatever it says about
+        // extra keys, so a $ref to one is that record, not a dictionary.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Base": { "type": "object", "properties": { "name": { "type": "string" } } },
+            "Extended": {
+                "type": "object",
+                "allOf": [ { "$ref": "#/components/schemas/Base" } ],
+                "additionalProperties": {}
+            },
+            "Other": { "type": "object", "properties": { "id": { "type": "string" } } },
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "extended": { "$ref": "#/components/schemas/Extended" },
+                    "value": { "oneOf": [ { "$ref": "#/components/schemas/Extended" }, { "$ref": "#/components/schemas/Other" } ] }
+                }
+            }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains("record Extended", CompilationHelper.FindFile(result, "Extended.cs"));
+        Assert.Contains("public Extended Extended", CompilationHelper.FindFile(result, "Dto.cs"));
+        var wrapper = CompilationHelper.FindFile(result, "DtoValue.cs");
+        Assert.Contains("Extended? AsExtended", wrapper);
+        CompilationHelper.CompileImportResult(result);
+    }
+
+    [Fact]
     public void Undiscriminated_OneOf_Survives_Import_Emit_RoundTrip()
     {
         var spec = CompilationHelper.BuildSpec(

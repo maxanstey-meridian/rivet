@@ -4467,6 +4467,92 @@ public sealed class CoverageCheckerTests
         }
     }
 
+    [Theory]
+    // MVC binds into the object a complex member's getter returns, creating none, so neither a
+    // get-only member nor an abstract or constructor-only type stops it, and a non-public
+    // setter is get-only (FormPartNameTests pins it on a real host).
+    [InlineData("public HomeAddress Home { get; } = new();", false)]
+    [InlineData("public HomeAddress Home { get; private set; } = new();", false)]
+    [InlineData("public HomeAddressBase Home { get; } = new UkHomeAddress();", false)]
+    [InlineData("public HomeAddressBase Home { get; set; } = new UkHomeAddress();", false)]
+    [InlineData("public HomeAddressCtor Home { get; } = new(\"x\");", false)]
+    // Null, made on each read, or a positional record MVC rebuilds and drops: nothing binds.
+    [InlineData("public HomeAddress? Home { get; }", true)]
+    [InlineData("public HomeAddress Home => new();", true)]
+    [InlineData("public HomeAddressRecord Home { get; } = new(null);", true)]
+    public void An_MVC_get_only_complex_member_binds_only_when_its_initializer_creates_it(
+        string member,
+        bool reported
+    )
+    {
+        var contract = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record HomeFields(string? City);
+
+            [RivetType]
+            public sealed record MoveForm(HomeFields Home);
+
+            [RivetContract]
+            public static class HomesContract
+            {
+                public static readonly RouteDefinition<MoveForm, NoteDto> Move =
+                    Define.Post<MoveForm, NoteDto>("/api/notes/move").FormEncoded();
+            }
+            """;
+        var types = $$"""
+            namespace Test
+            {
+                public sealed class HomeAddress
+                {
+                    public string? City { get; set; }
+                }
+
+                public abstract class HomeAddressBase
+                {
+                    public string? City { get; set; }
+                }
+
+                public sealed class UkHomeAddress : HomeAddressBase;
+
+                public sealed class HomeAddressCtor(string city)
+                {
+                    public string? City { get; set; } = city;
+                }
+
+                public sealed record HomeAddressRecord(string? City);
+
+                public sealed class Box
+                {
+                    {{member}}
+                }
+            }
+            """;
+        var handler = MvcNotes(
+            "Post",
+            "move",
+            "[FromForm] Box box",
+            "HomesContract.Move.Bind(new MoveForm(new HomeFields(null))).Success(new NoteDto(\"1\"))"
+        );
+
+        var mismatches = InputMismatches(RunCheck(InputContract, contract, types, handler), "Move");
+
+        if (reported)
+        {
+            Assert.Contains(
+                mismatches,
+                warning => warning is { Expected: "form field 'home'", Actual: "(not bound)" }
+            );
+        }
+        else
+        {
+            Assert.Empty(mismatches);
+        }
+    }
+
     private const string SubmitTerminal =
         "NotesContract.Submit.Bind(new NoteForm(\"t\", null)).Success(new NoteDto(\"1\"))";
 

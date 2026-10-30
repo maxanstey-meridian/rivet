@@ -1600,12 +1600,14 @@ public sealed class SecurityCoverageTests
     /// <summary>
     /// File mode compiles files holding an entry point as the app they come from, so the
     /// fallback policy a <c>Main</c> or top-level statements set is read as run, as it is in
-    /// a project.
+    /// a project. An async <c>Main</c> is the entry point the compiler names, not the wrapper
+    /// it emits around it.
     /// </summary>
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Cli_reads_the_setup_a_files_entry_point_runs(bool topLevel)
+    [InlineData("top-level")]
+    [InlineData("Main")]
+    [InlineData("async Main")]
+    public async Task Cli_reads_the_setup_the_files_entry_point_runs(string entryPoint)
     {
         const string usings = """
             using Microsoft.AspNetCore.Authorization;
@@ -1642,13 +1644,20 @@ public sealed class SecurityCoverageTests
                 public IActionResult Get() => ItemsContract.Get.Success(new ItemDto("1")).ToActionResult();
             }
             """;
-        var source = topLevel
-            ? usings + setup + types
-            : usings
+        var source = entryPoint switch
+        {
+            "top-level" => usings + setup + types,
+            "Main" => usings
                 + "public static class Program\n{\n    public static void Main(string[] args)\n    {\n"
                 + setup
                 + "\n    }\n}\n"
-                + types;
+                + types,
+            _ => usings
+                + "public static class Program\n{\n    public static async System.Threading.Tasks.Task Main(string[] args)\n    {\n"
+                + setup.Replace("builder.Build().Run();", "await builder.Build().RunAsync();")
+                + "\n    }\n}\n"
+                + types,
+        };
         using var work = new TempDir();
         var sourcePath = Path.Combine(work.FullName, "Program.cs");
         await File.WriteAllTextAsync(sourcePath, source);
@@ -1657,5 +1666,51 @@ public sealed class SecurityCoverageTests
 
         Assert.True(result.ExitCode == 0, result.StdErr);
         Assert.DoesNotContain("RIV4008", result.StdErr);
+    }
+
+    /// <summary>
+    /// Files whose <c>Main</c>s the compiler won't take as one entry point (two of them, one
+    /// without an entry-point signature, or an async <c>void</c> one, even beside a valid
+    /// <c>Main</c>) aren't one app, so they stay the library they compile as and still generate.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "public static class Api { public static void Main(string[] args) { } }\npublic static class Worker { public static void Main(string[] args) { } }"
+    )]
+    [InlineData("public static class Tool { public static void Main(int x) { } }")]
+    [InlineData(
+        "public static class Tool { public static async void Main() => await System.Threading.Tasks.Task.Yield(); }"
+    )]
+    [InlineData(
+        "public static class Api { public static void Main(string[] args) { } }\npublic static class Tool { public static async void Main() => await System.Threading.Tasks.Task.Yield(); }"
+    )]
+    public async Task Cli_generates_files_whose_Mains_are_not_one_entry_point(string programs)
+    {
+        var source = $$"""
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ItemDto(string Id);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<ItemDto> Get = Define.Get<ItemDto>("/api/items");
+            }
+
+            {{programs}}
+            """;
+        using var work = new TempDir();
+        var sourcePath = Path.Combine(work.FullName, "Api.cs");
+        await File.WriteAllTextAsync(sourcePath, source);
+        var outputDir = Path.Combine(work.FullName, "output");
+
+        var result = CliRunner.RunCli(work.FullName, [sourcePath, "--output", outputDir]);
+
+        Assert.True(result.ExitCode == 0, result.StdErr);
+        Assert.DoesNotContain("Aborting", result.StdErr);
+        Assert.True(File.Exists(Path.Combine(outputDir, "openapi.json")), result.StdErr);
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rivet.Tool;
 
 namespace Rivet.Tests;
 
@@ -341,6 +342,67 @@ public sealed class LoweredParamMetadataTests
             [25],
             schema.GetProperty("examples").EnumerateArray().Select(value => value.GetInt32())
         );
+    }
+
+    /// <summary>
+    /// A route input whose member holds bounds in both its attributes and its generated
+    /// metadata, as import writes them, under the route token <paramref name="token"/>.
+    /// </summary>
+    private static string BoundedRoute(string token, string bounds) =>
+        $$"""
+            using System.ComponentModel.DataAnnotations;
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            [RivetType]
+            public sealed record PageInput
+            {
+                {{bounds}}
+                public int N { get; init; }
+            }
+
+            [RivetContract]
+            public static class ThingsContract
+            {
+                public static readonly RouteDefinition<PageInput, ThingDto> Get =
+                    Define.Get<PageInput, ThingDto>("/bounded-things/{{token}}");
+            }
+            """;
+
+    [Fact]
+    public void A_Route_Constraint_Narrows_The_Bounds_In_The_Generated_Metadata()
+    {
+        var source = BoundedRoute(
+            "{n:min(5)}",
+            """
+            [Range(1, 100)]
+                [RivetGeneratedSchemaMetadata("", null, null, null, null, null, -1, -1, null, 1, 100, double.NaN, double.NaN, double.NaN, -1, -1, false, null, null, null, false, false, null, false, false, false, false, false, null)]
+            """
+        );
+
+        var schema = Param(source, "path", "n").GetProperty("schema");
+        Assert.Equal(5, schema.GetProperty("minimum").GetDouble());
+        Assert.Equal(100, schema.GetProperty("maximum").GetDouble());
+    }
+
+    [Fact]
+    public void A_Route_Constraint_Contradicting_The_Generated_Metadata_Is_RIV1125()
+    {
+        var source = BoundedRoute(
+            "{n:min(5)}",
+            """[RivetGeneratedSchemaMetadata("", null, null, null, null, null, -1, -1, null, double.NaN, 3, double.NaN, double.NaN, double.NaN, -1, -1, false, null, null, null, false, false, null, false, false, false, false, false, null)]"""
+        );
+
+        var exception = Assert.Throws<RivetUserException>(() =>
+            CompilationHelper.WalkContract(source)
+        );
+
+        Assert.Contains(Diagnostics.RouteConstraintContradictsType, exception.Message);
+        Assert.Contains("admit no value", exception.Message);
     }
 
     /// <summary>

@@ -36,10 +36,7 @@ internal static class CompilationLoader
     /// <summary>The compilation, or null after printing its first errors to stderr.</summary>
     private static Compilation? WithoutErrors(Compilation compilation)
     {
-        var errors = compilation
-            .GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
+        var errors = Errors(compilation);
 
         if (errors.Count == 0)
         {
@@ -54,6 +51,9 @@ internal static class CompilationLoader
 
         return null;
     }
+
+    private static List<Diagnostic> Errors(Compilation compilation) =>
+        compilation.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToList();
 
     private static void EnsureMSBuildRegistered()
     {
@@ -273,33 +273,40 @@ internal static class CompilationLoader
 
         var references = CollectFrameworkReferences();
 
-        var compilation = CSharpCompilation.Create(
+        var library = CSharpCompilation.Create(
             "RivetInput",
             syntaxTrees,
             references,
             new CSharpCompilationOptions(
-                syntaxTrees.Any(HasEntryPoint)
-                    ? OutputKind.ConsoleApplication
-                    : OutputKind.DynamicallyLinkedLibrary,
+                OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable
             )
         );
+        var app = library.WithOptions(
+            library.Options.WithOutputKind(OutputKind.ConsoleApplication)
+        );
 
-        return WithoutErrors(compilation);
+        // Files holding a program's entry point compile as the app they come from, so --check
+        // sees the setup that runs at startup (Compilation.GetEntryPoint), as it does for a
+        // project. Top-level statements compile only as an app (a library refuses them, CS8805),
+        // and the parser puts them only directly under the compilation unit.
+        if (
+            syntaxTrees.Any(tree =>
+                tree.GetCompilationUnitRoot().Members.Any(member => member is GlobalStatementSyntax)
+            )
+        )
+        {
+            return WithoutErrors(app);
+        }
+
+        // A Main counts only when the compiler takes it as the entry point and the files compile
+        // as that app. Two Mains, or one without an entry-point signature, aren't one app, so the
+        // files stay the library they compiled as.
+        if (app.GetEntryPoint(CancellationToken.None) is not null && Errors(app).Count == 0)
+        {
+            return app;
+        }
+
+        return WithoutErrors(library);
     }
-
-    /// <summary>
-    /// Whether <paramref name="tree"/> holds a program's entry point: top-level statements or a
-    /// static <c>Main</c>. The files then compile as the app they come from, so <c>--check</c>
-    /// sees the setup that runs at startup (<c>Compilation.GetEntryPoint</c>), as it does for a
-    /// project; a library has no entry point, and refuses top-level statements outright.
-    /// </summary>
-    private static bool HasEntryPoint(SyntaxTree tree) =>
-        tree.GetCompilationUnitRoot()
-            .DescendantNodes(node => node is not BlockSyntax)
-            .Any(node =>
-                node is GlobalStatementSyntax
-                || node is MethodDeclarationSyntax { Identifier.Text: "Main" } main
-                    && main.Modifiers.Any(SyntaxKind.StaticKeyword)
-            );
 }

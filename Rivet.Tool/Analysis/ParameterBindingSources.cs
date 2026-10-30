@@ -457,8 +457,11 @@ internal static class ParameterBindingSources
     /// <paramref name="prefix"/> is the model name the members' keys start with (an MVC model
     /// name on the parameter, or the outer member's key); <paramref name="nested"/> marks
     /// members of a complex member. A type the binder can't create comes first as an
-    /// <see cref="InputSource.Uncreatable"/> input, and its members still follow. Real-host
-    /// pins: <c>MvcBindingHostTests</c>, <c>MinimalApiBindingHostTests</c>, and
+    /// <see cref="InputSource.Uncreatable"/> input, and its members still follow, unless
+    /// <paramref name="filledInPlace"/>: MVC binds into a member's existing object
+    /// (<see cref="FormBinding.FillsInPlace"/>) without creating one, and, since that type has
+    /// no record constructor, binds its properties alone. Real-host pins:
+    /// <c>MvcBindingHostTests</c>, <c>MinimalApiBindingHostTests</c>, and
     /// <c>FormPartNameTests</c>.
     /// </summary>
     private static IEnumerable<BoundInput> ComplexMembers(
@@ -470,7 +473,8 @@ internal static class ParameterBindingSources
         InputSource source,
         ParameterBindingHost host,
         bool nested,
-        HashSet<INamedTypeSymbol> expanding
+        HashSet<INamedTypeSymbol> expanding,
+        bool filledInPlace = false
     )
     {
         if (!expanding.Add(type))
@@ -480,11 +484,14 @@ internal static class ParameterBindingSources
 
         var mvc = host == ParameterBindingHost.Mvc;
         var binder = mvc ? FormBinding.Binder.Mvc : FormBinding.Binder.FormMapper;
-        foreach (
-            var input in Uncreatable(wkt, parameter, path, prefix ?? path, type, binder, nested)
-        )
+        if (!filledInPlace)
         {
-            yield return input;
+            foreach (
+                var input in Uncreatable(wkt, parameter, path, prefix ?? path, type, binder, nested)
+            )
+            {
+                yield return input;
+            }
         }
 
         foreach (var member in FormBinding.BoundMembers(wkt, type, binder))
@@ -531,7 +538,10 @@ internal static class ParameterBindingSources
                         own?.Inherited ?? source,
                         host,
                         nested: true,
-                        expanding
+                        expanding,
+                        filledInPlace: mvc
+                            && member is { ConstructorParameter: null, Property: { } property }
+                            && FormBinding.FillsInPlace(wkt, property)
                     )
                 )
                 {

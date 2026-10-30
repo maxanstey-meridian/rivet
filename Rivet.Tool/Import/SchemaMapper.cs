@@ -1425,7 +1425,17 @@ internal sealed class SchemaMapper
             return refResult;
         }
 
-        if (TryResolveNullableType(schema, context, out var result))
+        // A oneOf or anyOf of a value and an explicit null names the value, and narrows any
+        // type array beside it (["object", "null"] says no more than the value's own type).
+        if (
+            TryResolveTwoBranchNullable(schema.OneOf, context, out var result)
+            || TryResolveTwoBranchNullable(schema.AnyOf, context, out result)
+        )
+        {
+            return result;
+        }
+
+        if (TryResolveNullableType(schema, context, out result))
         {
             return result;
         }
@@ -1435,9 +1445,10 @@ internal sealed class SchemaMapper
             return ResolveSingleType(type, schema, context);
         }
 
-        if (TryResolveNullableOneOf(schema, context, out result))
+        // anyOf with single element (OpenAPI 3.0 nullable pattern)
+        if (schema.AnyOf is { Count: 1 })
         {
-            return result;
+            return ResolveCSharpType(schema.AnyOf[0], context);
         }
 
         if (TryResolveComposition(schema, context, out result))
@@ -2439,7 +2450,12 @@ internal sealed class SchemaMapper
 
         // A property-less object component resolves to the empty record MapSchemas wrote for
         // it, or to a dictionary when MapSchemas wrote none (one rule: IsEmptyRecordComponent).
-        if (SchemaClassifier.IsObject(effective) && effective.Properties is not { Count: > 0 })
+        // A composed one is MapSchemas' composition branches' to name, below.
+        if (
+            SchemaClassifier.IsObject(effective)
+            && !SchemaClassifier.IsComposition(effective)
+            && effective.Properties is not { Count: > 0 }
+        )
         {
             if (
                 effectiveId is not null
@@ -2448,10 +2464,17 @@ internal sealed class SchemaMapper
             )
             {
                 result = emptyRecordName;
-                return true;
+            }
+            else
+            {
+                result = ResolveObjectType(effective, context);
             }
 
-            result = ResolveObjectType(effective, context);
+            if (AdmitsNull(effective))
+            {
+                result += "?";
+            }
+
             return true;
         }
 
@@ -2564,29 +2587,6 @@ internal sealed class SchemaMapper
             }
 
             result = QualifyFrameworkScalarIfShadowed("System.Text.Json.JsonElement");
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryResolveNullableOneOf(IOpenApiSchema schema, string? context, out string result)
-    {
-        result = "";
-
-        // oneOf/anyOf with an explicit null branch (nullable ref/composite in 3.1)
-        if (
-            TryResolveTwoBranchNullable(schema.OneOf, context, out result)
-            || TryResolveTwoBranchNullable(schema.AnyOf, context, out result)
-        )
-        {
-            return true;
-        }
-
-        // anyOf with single element (OpenAPI 3.0 nullable pattern)
-        if (schema.AnyOf is { Count: 1 })
-        {
-            result = ResolveCSharpType(schema.AnyOf[0], context);
             return true;
         }
 

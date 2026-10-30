@@ -1108,14 +1108,50 @@ public sealed class TypeWalker
             Description = annotations.Description,
             IsDeprecated = annotations.IsDeprecated,
             DefaultValue = annotations.DefaultValue ?? param.DefaultValue,
-            Constraints = annotations.Constraints,
+            Constraints = Overlay(annotations.Constraints, rootMetadata?.Constraints),
             SchemaExamples = SchemaExamples(annotations.Example, site),
             Format = annotations is { IsFormatSpecified: true, Format: not "" }
                 ? annotations.Format
                 : null,
             IsFormatSpecified = annotations.IsFormatSpecified,
-            ScalarMetadata = rootMetadata,
+            ScalarMetadata = rootMetadata is null ? null : rootMetadata with { Constraints = null },
         };
+    }
+
+    /// <summary>
+    /// <paramref name="own"/> with <paramref name="metadata"/>'s keywords written over it, as
+    /// the emitter writes a body property's metadata over its attributes. A param keeps the
+    /// result as its one constraint set, so a route constraint narrows, and is checked
+    /// against, every bound the member states.
+    /// </summary>
+    private static TsPropertyConstraints? Overlay(
+        TsPropertyConstraints? own,
+        TsPropertyConstraints? metadata
+    )
+    {
+        if (own is null || metadata is null)
+        {
+            return metadata ?? own;
+        }
+
+        return new TsPropertyConstraints(
+            metadata.MinLength ?? own.MinLength,
+            metadata.MaxLength ?? own.MaxLength,
+            metadata.Pattern ?? own.Pattern,
+            metadata.Minimum ?? own.Minimum,
+            metadata.Maximum ?? own.Maximum,
+            metadata.ExclusiveMinimum ?? own.ExclusiveMinimum,
+            metadata.ExclusiveMaximum ?? own.ExclusiveMaximum,
+            metadata.MultipleOf ?? own.MultipleOf,
+            metadata.MinItems ?? own.MinItems,
+            metadata.MaxItems ?? own.MaxItems,
+            // uniqueItems: false is the JSON Schema default, which the emitter never writes.
+            metadata.UniqueItems == true
+                ? true
+                : own.UniqueItems ?? metadata.UniqueItems,
+            metadata.MinProperties ?? own.MinProperties,
+            metadata.MaxProperties ?? own.MaxProperties
+        );
     }
 
     /// <summary>

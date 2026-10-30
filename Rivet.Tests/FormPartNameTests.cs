@@ -386,7 +386,8 @@ public sealed class FormPartNameTests
     // Neither binds a file nothing can set.
     [InlineData(
         true,
-        "{\"Skipped\":\"Skipped\",\"Plain\":\"Plain\",\"Files\":\"file:Files\",\"NewFiles\":\"file:NewFiles\"}"
+        "{\"Skipped\":\"Skipped\",\"Plain\":\"Plain\",\"Files\":\"file:Files\",\"NewFiles\":\"file:NewFiles\","
+            + "\"PrivateSetFiles\":\"file:PrivateSetFiles\",\"IgnoredFiles\":\"file:IgnoredFiles\"}"
     )]
     [InlineData(false, "{\"Never\":\"Never\",\"Plain\":\"Plain\"}")]
     public async Task The_hosts_skip_these_members_differently(bool mvc, string bound)
@@ -403,9 +404,11 @@ public sealed class FormPartNameTests
                 ("PrivateSet", true),
                 ("Files", true),
                 ("NewFiles", true),
+                ("PrivateSetFiles", true),
                 ("Unset", true),
                 ("Computed", true),
                 ("ReadOnlyFiles", true),
+                ("IgnoredFiles", true),
             ])
         );
 
@@ -429,6 +432,8 @@ public sealed class FormPartNameTests
     [Theory]
     [InlineData("Skipped", "skipped by the minimal-API form mapper ([IgnoreDataMember])")]
     [InlineData("Never", "skipped by MVC's model binder ([BindNever])")]
+    // The form mapper both skips it and can't set it; a setter wouldn't settle it.
+    [InlineData("IgnoredFiles", "skipped by the minimal-API form mapper ([IgnoreDataMember])")]
     public void Generation_refuses_a_member_one_host_skips(string member, string why)
     {
         var error = Assert.Throws<RivetUserException>(() =>
@@ -438,6 +443,7 @@ public sealed class FormPartNameTests
         Assert.Contains("RIV1100", error.Message);
         Assert.Contains($"'{member}'", error.Message);
         Assert.Contains(why, error.Message);
+        Assert.Contains("Skip it for both", error.Message);
     }
 
     [Theory]
@@ -469,7 +475,13 @@ public sealed class FormPartNameTests
     }
 
     [Theory]
-    [InlineData(true, "{\"Home\":\"city:Home.City\",\"Computed\":\"city:\"}")]
+    // MVC builds a positional record from its constructor and drops it, but fills an
+    // abstract-typed member in place.
+    [InlineData(
+        true,
+        "{\"Home\":\"city:Home.City\",\"Positional\":\"city:\",\"Abstract\":\"city:Abstract.City\","
+            + "\"Computed\":\"city:\"}"
+    )]
     // The form mapper sets no member here, so it hands the handler no form at all.
     [InlineData(false, "null")]
     public async Task Only_MVC_binds_into_a_get_only_complex_member(bool mvc, string bound)
@@ -477,7 +489,13 @@ public sealed class FormPartNameTests
         await using var host = await StartAsync(mvc);
         var (status, body) = await host.PostAsync(
             $"/form-parts/{(mvc ? "mvc" : "minimal")}/in-place",
-            Multipart([("Home.City", false), ("Unset.City", false), ("Computed.City", false)])
+            Multipart([
+                ("Home.City", false),
+                ("Unset.City", false),
+                ("Positional.City", false),
+                ("Abstract.City", false),
+                ("Computed.City", false),
+            ])
         );
 
         Assert.Equal(HttpStatusCode.OK, status);
@@ -487,16 +505,24 @@ public sealed class FormPartNameTests
     [Fact]
     public void A_get_only_complex_member_is_a_part_only_MVC_fills()
     {
-        // The initialised member is MVC's part; one left null or made on each read is no
-        // one's (the host rows above).
+        // The initialised member is MVC's part, an abstract-typed one too; one left null,
+        // made on each read, or rebuilt from a record constructor is no one's (the host rows
+        // above).
         Assert.Equal(
             "home",
             Assert
                 .Single(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Home"))
                 .Name
         );
+        Assert.Equal(
+            "abstract",
+            Assert
+                .Single(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Abstract"))
+                .Name
+        );
         Assert.Empty(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Unset"));
         Assert.Empty(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Computed"));
+        Assert.Empty(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Positional"));
         Assert.Empty(
             GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.MinimalApi, "Home")
         );
@@ -515,6 +541,8 @@ public sealed class FormPartNameTests
     [Theory]
     [InlineData("Files", "files")]
     [InlineData("NewFiles", "newFiles")]
+    // A non-public setter leaves it get-only to both hosts.
+    [InlineData("PrivateSetFiles", "privateSetFiles")]
     public void A_get_only_file_collection_is_a_part_only_MVC_fills(string member, string name)
     {
         // MVC adds the files to the collection the getter returns, when its initializer
@@ -1151,11 +1179,16 @@ public sealed class FormSkips
     // and the new list MVC builds instead has nowhere to go.
     public List<IFormFile> NewFiles { get; } = new();
 
+    public List<IFormFile> PrivateSetFiles { get; private set; } = [];
+
     public List<IFormFile>? Unset { get; }
 
     public List<IFormFile> Computed => [];
 
     public ICollection<IFormFile> ReadOnlyFiles { get; } = new ReadOnlyCollection<IFormFile>([]);
+
+    [IgnoreDataMember]
+    public List<IFormFile> IgnoredFiles { get; } = [];
 }
 
 // MVC can't fill an immutable collection in place, and building one of its own fails every
@@ -1175,6 +1208,10 @@ public sealed class FormInPlace
 
     public FormAddress? Unset { get; }
 
+    public FormAddressRecord Positional { get; } = new(null);
+
+    public FormAddressBase Abstract { get; } = new FormUkAddress();
+
     public FormAddress Computed => new();
 }
 
@@ -1184,6 +1221,20 @@ public sealed class FormAddress
 
     public override string ToString() => $"city:{City}";
 }
+
+public sealed record FormAddressRecord(string? City)
+{
+    public override string ToString() => $"city:{City}";
+}
+
+public abstract class FormAddressBase
+{
+    public string? City { get; set; }
+
+    public override string ToString() => $"city:{City}";
+}
+
+public sealed class FormUkAddress : FormAddressBase;
 
 /// <summary>The MVC handlers for <see cref="FormPartNameTests"/>.</summary>
 [ApiController]

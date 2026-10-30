@@ -236,8 +236,9 @@ public sealed record TsEndpointParam(
         bool AllowEmptyValue = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool AllowReserved = false,
-    // Generated metadata at the member's own schema (title, examples and the like), as a
-    // body property carries it (TsPropertyDefinition.ScalarMetadata).
+    // Generated metadata at the member's own schema (a title, examples, and the like), as a
+    // body property carries it (TsPropertyDefinition.ScalarMetadata). A param lowered from a
+    // member holds the metadata's bounds in Constraints instead (TypeWalker.AnnotatedParam).
     [property: JsonIgnore(
         Condition = JsonIgnoreCondition.WhenWritingNull
     )] TsScalarMetadata? ScalarMetadata = null
