@@ -5913,6 +5913,34 @@ public sealed class OpenApiImporterTests
     }
 
     [Fact]
+    public void A_OneOf_Variant_Referencing_An_Empty_Object_Component_Names_Its_Record()
+    {
+        // MapSchemas writes a property-less object component as an empty record, so a oneOf
+        // variant referencing it is that record, as any other $ref to it is.
+        var spec = CompilationHelper.BuildSpec(
+            schemas: """
+            "Blank": { "type": "object" },
+            "Named": { "type": "object", "properties": { "name": { "type": "string" } } },
+            "Dto": {
+                "type": "object",
+                "properties": {
+                    "value": { "oneOf": [ { "$ref": "#/components/schemas/Blank" }, { "$ref": "#/components/schemas/Named" } ] }
+                }
+            }
+            """,
+            paths: """
+            "/api/x": { "get": { "operationId": "GetX", "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Dto" } } } } } } }
+            """
+        );
+
+        var result = CompilationHelper.Import(spec);
+        Assert.Contains("record Blank", CompilationHelper.FindFile(result, "Blank.cs"));
+        var wrapper = CompilationHelper.FindFile(result, "DtoValue.cs");
+        Assert.Contains("Blank? AsBlank", wrapper);
+        Assert.Contains("Named? AsNamed", wrapper);
+    }
+
+    [Fact]
     public void Undiscriminated_OneOf_Survives_Import_Emit_RoundTrip()
     {
         var spec = CompilationHelper.BuildSpec(

@@ -235,7 +235,12 @@ public sealed record TsEndpointParam(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool AllowEmptyValue = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        bool AllowReserved = false
+        bool AllowReserved = false,
+    // Generated metadata at the member's own schema (title, examples and the like), as a
+    // body property carries it (TsPropertyDefinition.ScalarMetadata).
+    [property: JsonIgnore(
+        Condition = JsonIgnoreCondition.WhenWritingNull
+    )] TsScalarMetadata? ScalarMetadata = null
 );
 
 public enum ParamSource

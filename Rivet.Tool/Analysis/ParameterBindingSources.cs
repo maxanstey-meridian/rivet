@@ -888,7 +888,7 @@ internal static class ParameterBindingSources
     }
 
     /// <summary>A class or struct bound member by member: not simple, not a collection, not special.</summary>
-    private static bool IsComplex(
+    internal static bool IsComplex(
         WellKnownTypes wkt,
         ITypeSymbol type,
         ParameterBindingHost host

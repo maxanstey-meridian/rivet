@@ -345,7 +345,8 @@
         "format": { "type": "string" },
         "isFormatSpecified": { "type": "boolean" },
         "allowEmptyValue": { "type": "boolean" },
-        "allowReserved": { "type": "boolean" }
+        "allowReserved": { "type": "boolean" },
+        "scalarMetadata": { "$ref": "#/$defs/scalarMetadata" }
       },
       "required": ["name", "type", "source"],
       "additionalProperties": false

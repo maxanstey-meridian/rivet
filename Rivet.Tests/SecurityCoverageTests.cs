@@ -1596,4 +1596,66 @@ public sealed class SecurityCoverageTests
         Assert.Contains("error RIV4009: ItemsContract.Other (GET /api/other):", result.StdErr);
         Assert.Contains("2 mismatch(es)", result.StdErr);
     }
+
+    /// <summary>
+    /// File mode compiles files holding an entry point as the app they come from, so the
+    /// fallback policy a <c>Main</c> or top-level statements set is read as run, as it is in
+    /// a project.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Cli_reads_the_setup_a_files_entry_point_runs(bool topLevel)
+    {
+        const string usings = """
+            using Microsoft.AspNetCore.Authorization;
+            using Microsoft.AspNetCore.Builder;
+            using Microsoft.AspNetCore.Mvc;
+            using Microsoft.Extensions.DependencyInjection;
+            using Rivet;
+
+            [assembly: RivetSecurityScheme("bearer", "http", scheme: "bearer")]
+            [assembly: RivetGlobalSecurity(0)]
+            [assembly: RivetGlobalSecurityScheme(0, "bearer", new string[0])]
+
+            """;
+        const string setup = """
+            var builder = WebApplication.CreateBuilder(args);
+            builder.Services.AddAuthorization(o => o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+            builder.Build().Run();
+            """;
+        const string types = """
+
+            [RivetType]
+            public sealed record ItemDto(string Id);
+
+            [RivetContract]
+            public static class ItemsContract
+            {
+                public static readonly RouteDefinition<ItemDto> Get = Define.Get<ItemDto>("/api/items");
+            }
+
+            [Route("api")]
+            public sealed class ItemsController : ControllerBase
+            {
+                [HttpGet("items")]
+                public IActionResult Get() => ItemsContract.Get.Success(new ItemDto("1")).ToActionResult();
+            }
+            """;
+        var source = topLevel
+            ? usings + setup + types
+            : usings
+                + "public static class Program\n{\n    public static void Main(string[] args)\n    {\n"
+                + setup
+                + "\n    }\n}\n"
+                + types;
+        using var work = new TempDir();
+        var sourcePath = Path.Combine(work.FullName, "Program.cs");
+        await File.WriteAllTextAsync(sourcePath, source);
+
+        var result = CliRunner.RunCli(work.FullName, [sourcePath, "--check"]);
+
+        Assert.True(result.ExitCode == 0, result.StdErr);
+        Assert.DoesNotContain("RIV4008", result.StdErr);
+    }
 }

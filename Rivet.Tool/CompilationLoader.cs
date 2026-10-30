@@ -1,6 +1,7 @@
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.MSBuild;
 
 namespace Rivet.Tool;
@@ -277,11 +278,28 @@ internal static class CompilationLoader
             syntaxTrees,
             references,
             new CSharpCompilationOptions(
-                OutputKind.DynamicallyLinkedLibrary,
+                syntaxTrees.Any(HasEntryPoint)
+                    ? OutputKind.ConsoleApplication
+                    : OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable
             )
         );
 
         return WithoutErrors(compilation);
     }
+
+    /// <summary>
+    /// Whether <paramref name="tree"/> holds a program's entry point: top-level statements or a
+    /// static <c>Main</c>. The files then compile as the app they come from, so <c>--check</c>
+    /// sees the setup that runs at startup (<c>Compilation.GetEntryPoint</c>), as it does for a
+    /// project; a library has no entry point, and refuses top-level statements outright.
+    /// </summary>
+    private static bool HasEntryPoint(SyntaxTree tree) =>
+        tree.GetCompilationUnitRoot()
+            .DescendantNodes(node => node is not BlockSyntax)
+            .Any(node =>
+                node is GlobalStatementSyntax
+                || node is MethodDeclarationSyntax { Identifier.Text: "Main" } main
+                    && main.Modifiers.Any(SyntaxKind.StaticKeyword)
+            );
 }

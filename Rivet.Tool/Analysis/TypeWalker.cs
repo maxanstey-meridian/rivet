@@ -1044,8 +1044,9 @@ public sealed class TypeWalker
     /// the annotations beside it: <c>[RivetSchemaType]</c> and the format on its leaf, its
     /// <c>[RivetSchemaRef]</c>s, and the generated metadata on its items and values. The
     /// generated metadata at the member's own schema comes back apart, since a property
-    /// definition holds it beside the type. A record property and a param lowered from a
-    /// member (<see cref="AnnotatedParam"/>) both read it here, so the two can't drift.
+    /// definition and a param both hold it beside the type. A record property and a param
+    /// lowered from a member (<see cref="AnnotatedParam"/>) both read it here, so the two
+    /// can't drift.
     /// </summary>
     private (TsType Type, MemberAnnotations Annotations, TsScalarMetadata? RootMetadata) Annotate(
         ISymbol member,
@@ -1080,7 +1081,8 @@ public sealed class TypeWalker
     /// <summary>
     /// <paramref name="param"/> carrying what <paramref name="member"/> says about its schema,
     /// as the member's schema would if it were a body property (<see cref="Annotate"/>): its
-    /// annotated type, description, constraints, default, deprecated, example and format.
+    /// annotated type, description, constraints, default, deprecated, example, format, and
+    /// the generated metadata at its own schema.
     /// <paramref name="member"/> is the input property or field a route, query, header or
     /// form-field param is lowered from (its positional record parameter's attributes count
     /// too), or the action or handler parameter itself. A <c>[RivetDefault]</c> wins over
@@ -1099,7 +1101,7 @@ public sealed class TypeWalker
                 $"{member.ContainingType.Name}.{member.Name}",
                 $"[RivetExample] on '{member.Name}'"
             );
-        var (type, annotations, _) = Annotate(member, attributes, param.Type, context);
+        var (type, annotations, rootMetadata) = Annotate(member, attributes, param.Type, context);
         return param with
         {
             Type = type,
@@ -1112,6 +1114,7 @@ public sealed class TypeWalker
                 ? annotations.Format
                 : null,
             IsFormatSpecified = annotations.IsFormatSpecified,
+            ScalarMetadata = rootMetadata,
         };
     }
 

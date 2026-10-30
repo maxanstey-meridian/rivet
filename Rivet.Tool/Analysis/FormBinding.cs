@@ -166,25 +166,40 @@ internal static class FormBinding
     /// Whether <paramref name="binder"/> fills <paramref name="property"/> outside a
     /// constructor: through a public setter or init accessor, or, for MVC, in place. MVC binds
     /// a get-only property of a reference type that isn't an array or a string
-    /// (ComplexObjectModelBinder.CanUpdateReadOnlyProperty), and a collection binder then adds
-    /// to the collection the getter returns, but only when that's a live
+    /// (ComplexObjectModelBinder.CanUpdateReadOnlyProperty) into the value its getter returns:
+    /// <list type="bullet">
+    /// <item>A collection binder adds to the collection, but only when that's a live
     /// <c>ICollection&lt;T&gt;</c> that isn't read-only (ModelBindingHelper.GetCompatibleCollection).
     /// Otherwise it builds a collection of its own, which a get-only property throws away, or,
     /// for a type it can't create (an immutable one), fails the request. So a get-only
     /// collection counts only when it's an auto-property whose initializer creates a writable
     /// collection (<see cref="CreatesWritableCollection"/>), as
     /// <c>List&lt;IFormFile&gt; Files { get; } = [];</c> does; one left null, computed on each
-    /// read, or holding a read-only or immutable collection stays unbound. Any other member a
-    /// binder replaces, and with no setter the new value is thrown away, so a get-only
-    /// <c>IFormFile</c> stays unbound. Pinned on real hosts by
+    /// read, or holding a read-only or immutable collection stays unbound.</item>
+    /// <item>The complex binder binds a complex member's own members into the object, and
+    /// creates one only when the getter returns null, which a get-only property throws away.
+    /// So a get-only complex member counts only when it's an auto-property whose initializer
+    /// creates the object, as <c>Address Home { get; } = new();</c> does.</item>
+    /// </list>
+    /// Any other member a binder replaces, and with no setter the new value is thrown away, so
+    /// a get-only <c>IFormFile</c> stays unbound. Pinned on real hosts by
     /// <c>FormPartNameTests.The_hosts_skip_these_members_differently</c> and
     /// <c>The_hosts_construct_these_types_differently</c>.
     /// </summary>
     private static bool Sets(WellKnownTypes wkt, Binder binder, IPropertySymbol property) =>
         property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
         || binder == Binder.Mvc
-            && IsCollection(property.Type)
-            && CreatesWritableCollection(wkt, property);
+            && (
+                IsCollection(property.Type)
+                    ? CreatesWritableCollection(wkt, property)
+                    : property.Type.IsReferenceType
+                        && ParameterBindingSources.IsComplex(
+                            wkt,
+                            property.Type,
+                            ParameterBindingHost.Mvc
+                        )
+                        && AutoPropertyInitializer(property) is BaseObjectCreationExpressionSyntax
+            );
 
     /// <summary>
     /// A type MVC binds through the getter of a get-only property and then fills in place
@@ -218,16 +233,8 @@ internal static class FormBinding
     /// </summary>
     private static bool CreatesWritableCollection(WellKnownTypes wkt, IPropertySymbol property)
     {
-        if (
-            property.DeclaringSyntaxReferences is not [var reference]
-            || reference.GetSyntax()
-                is not PropertyDeclarationSyntax
-                {
-                    Initializer.Value: var value,
-                    AccessorList.Accessors: [{ Body: null, ExpressionBody: null }],
-                }
-            || value is not (CollectionExpressionSyntax or BaseObjectCreationExpressionSyntax)
-        )
+        var value = AutoPropertyInitializer(property);
+        if (value is not (CollectionExpressionSyntax or BaseObjectCreationExpressionSyntax))
         {
             return false;
         }
@@ -245,6 +252,22 @@ internal static class FormBinding
             _ => false,
         };
     }
+
+    /// <summary>
+    /// The initializer of <paramref name="property"/> when it's an auto-property (a
+    /// <c>get;</c> with no body) declared in source, so the value its getter returns is the
+    /// one the initializer made; null otherwise.
+    /// </summary>
+    private static ExpressionSyntax? AutoPropertyInitializer(IPropertySymbol property) =>
+        property.DeclaringSyntaxReferences is [var reference]
+        && reference.GetSyntax()
+            is PropertyDeclarationSyntax
+            {
+                Initializer.Value: var value,
+                AccessorList.Accessors: [{ Body: null, ExpressionBody: null }],
+            }
+            ? value
+            : null;
 
     /// <summary>
     /// The constructor <paramref name="binder"/> creates <paramref name="type"/> with, when its
@@ -496,8 +519,10 @@ internal static class FormBinding
                 var (why, remedy) =
                     !Sets(wkt, dropped, property) && Sets(wkt, kept, property)
                         ? (
-                            $"bound by {keptBy}, which fills the collection its getter returns, but "
-                                + $"left unset by {droppedBy}, which needs a public setter or init accessor",
+                            $"bound by {keptBy}, which fills the "
+                                + (IsCollection(property.Type) ? "collection" : "object")
+                                + $" its getter returns, but left unset by {droppedBy}, which needs "
+                                + "a public setter or init accessor",
                             "Give it a public setter or init accessor."
                         )
                     : Skips(wkt, dropped, property) is { } skippedBy

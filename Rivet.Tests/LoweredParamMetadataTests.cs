@@ -307,6 +307,42 @@ public sealed class LoweredParamMetadataTests
         );
     }
 
+    [Fact]
+    public void Query_Param_Keeps_The_Generated_Metadata_At_Its_Own_Schema()
+    {
+        // The metadata import writes at a member's own schema (pointer ""), which a body
+        // property keeps beside its type: a title and schema examples here.
+        var source = """
+            using Rivet;
+
+            namespace Test;
+
+            [RivetType]
+            public sealed record ThingDto(string Name);
+
+            [RivetType]
+            public sealed record PageInput
+            {
+                [RivetGeneratedSchemaMetadata("", "Page size", null, null, null, "[25]", -1, -1, null, double.NaN, double.NaN, double.NaN, double.NaN, double.NaN, -1, -1, false, null, null, null, false, false, null, false, false, false, false, false, null)]
+                public int? Size { get; init; }
+            }
+
+            [RivetContract]
+            public static class ThingsContract
+            {
+                public static readonly RouteDefinition<PageInput, ThingDto> List =
+                    Define.Get<PageInput, ThingDto>("/paged-things");
+            }
+            """;
+
+        var schema = Param(source, "query", "size").GetProperty("schema");
+        Assert.Equal("Page size", schema.GetProperty("title").GetString());
+        Assert.Equal(
+            [25],
+            schema.GetProperty("examples").EnumerateArray().Select(value => value.GetInt32())
+        );
+    }
+
     /// <summary>
     /// The multipart leg (decision 31): a form field lowered from an input record, or bound
     /// by an action's [FromForm] parameter, carries the member's annotations on the param.

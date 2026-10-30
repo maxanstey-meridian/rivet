@@ -224,7 +224,8 @@ internal static class SchemaClassifier
             return true;
         }
 
-        if (HasExtension(schema, "x-rivet-empty-record"))
+        // A property-less object MapSchemas writes as an empty record (one rule).
+        if (IsEmptyRecordComponent(schema))
         {
             return true;
         }

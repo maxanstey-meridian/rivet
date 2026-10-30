@@ -1334,7 +1334,8 @@ public sealed class OpenApiEmitter
 
     /// <summary>
     /// A param's schema with the annotations that live on the schema: the leaf's pinned
-    /// type and format, the default, the constraints and the schema examples. A route,
+    /// type and format, the default, the constraints, the schema examples, and the generated
+    /// metadata at the param's own schema, as a body property's schema has them. A route,
     /// query or header param wraps it in a Parameter Object; a form field is a property of
     /// the form body's schema (<see cref="FormSchema"/>).
     /// </summary>
@@ -1362,6 +1363,7 @@ public sealed class OpenApiEmitter
                 $"schema examples of {context}"
             );
         }
+        EnrichScalarSchema(schema, parameter.ScalarMetadata);
 
         return schema;
     }

@@ -469,6 +469,50 @@ public sealed class FormPartNameTests
     }
 
     [Theory]
+    [InlineData(true, "{\"Home\":\"city:Home.City\",\"Computed\":\"city:\"}")]
+    // The form mapper sets no member here, so it hands the handler no form at all.
+    [InlineData(false, "null")]
+    public async Task Only_MVC_binds_into_a_get_only_complex_member(bool mvc, string bound)
+    {
+        await using var host = await StartAsync(mvc);
+        var (status, body) = await host.PostAsync(
+            $"/form-parts/{(mvc ? "mvc" : "minimal")}/in-place",
+            Multipart([("Home.City", false), ("Unset.City", false), ("Computed.City", false)])
+        );
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(bound, body);
+    }
+
+    [Fact]
+    public void A_get_only_complex_member_is_a_part_only_MVC_fills()
+    {
+        // The initialised member is MVC's part; one left null or made on each read is no
+        // one's (the host rows above).
+        Assert.Equal(
+            "home",
+            Assert
+                .Single(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Home"))
+                .Name
+        );
+        Assert.Empty(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Unset"));
+        Assert.Empty(GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Mvc, "Computed"));
+        Assert.Empty(
+            GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.MinimalApi, "Home")
+        );
+
+        var error = Assert.Throws<RivetUserException>(() =>
+            GenerationParts(typeof(FormInPlace), FormBinding.FormHosts.Any, "Home")
+        );
+        Assert.Contains("RIV1100", error.Message);
+        Assert.Contains(
+            "bound by MVC's model binder, which fills the object its getter returns, but left "
+                + "unset by the minimal-API form mapper",
+            error.Message
+        );
+    }
+
+    [Theory]
     [InlineData("Files", "files")]
     [InlineData("NewFiles", "newFiles")]
     public void A_get_only_file_collection_is_a_part_only_MVC_fills(string member, string name)
@@ -902,6 +946,7 @@ public sealed class FormPartNameTests
                 Map<FormAbstract>(app, "abstract");
                 Map<FormSkips>(app, "skips");
                 Map<FormImmutableFiles>(app, "immutable-files");
+                Map<FormInPlace>(app, "in-place");
             }
         );
 
@@ -1122,6 +1167,24 @@ public sealed class FormImmutableFiles
     public ImmutableList<IFormFile> Files { get; } = [];
 }
 
+// MVC binds a get-only complex member into the object its getter returns, and creates one
+// only when that's null, which a get-only property throws away; the form mapper needs a setter.
+public sealed class FormInPlace
+{
+    public FormAddress Home { get; } = new();
+
+    public FormAddress? Unset { get; }
+
+    public FormAddress Computed => new();
+}
+
+public sealed class FormAddress
+{
+    public string? City { get; set; }
+
+    public override string ToString() => $"city:{City}";
+}
+
 /// <summary>The MVC handlers for <see cref="FormPartNameTests"/>.</summary>
 [ApiController]
 public sealed class FormPartController : ControllerBase
@@ -1170,4 +1233,7 @@ public sealed class FormPartController : ControllerBase
 
     [HttpPost("/form-parts/mvc/immutable-files")]
     public string ImmutableFiles([FromForm] FormImmutableFiles form) => FormEcho.Of(form);
+
+    [HttpPost("/form-parts/mvc/in-place")]
+    public string InPlace([FromForm] FormInPlace form) => FormEcho.Of(form);
 }

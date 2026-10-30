@@ -147,8 +147,8 @@ object type or an inline object.
 An imported record gets a bag whenever its source admits extra members, so the server keeps
 whatever a client sends. Whether the spec says so is the source's call, as with every other
 keyword an import preserves: a schema that leaves `additionalProperties` out (which JSON Schema
-reads as "anything else goes") comes back without it, and one that writes it comes back as
-`additionalProperties: {}`. The importer records which on the type
+reads as "anything else goes") comes back without it, and one that writes
+`additionalProperties: {}` comes back with it. The importer records which on the type
 (`[RivetGeneratedType(..., DeclaresAdditionalProperties = true)]`).
 
 ## Constraint and metadata flow

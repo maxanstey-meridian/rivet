@@ -1361,7 +1361,8 @@ public sealed class ContractSchemaTests
                     Format: "f",
                     IsFormatSpecified: true,
                     AllowEmptyValue: true,
-                    AllowReserved: true
+                    AllowReserved: true,
+                    ScalarMetadata: scalar
                 ),
             ],
             new TsType.TypeRef("Thing"),
